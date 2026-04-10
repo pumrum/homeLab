@@ -1,0 +1,223 @@
+{
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 100MiB
+			roll_keep 5
+			roll_keep_for 720h
+		}
+		format json
+		level INFO
+	}
+
+	log acme_debug {
+		output file /var/log/caddy/acme-debug.log
+		format json
+		level DEBUG
+		include tls.obtain tls.issuance.acme dns.providers.dynu
+	}
+
+	servers {
+		protocols h1 h2
+		max_header_size 1MB
+	}
+}
+
+(ca_tls) {
+	tls {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /etc/caddy/ca.crt
+		}
+	}
+}
+
+(dynu_tls) {
+	tls {
+		dns dynu {env.DYNU_API_TOKEN} {
+			own_domain {env.OWN_DYNU_DOMAIN}
+		}
+		ca https://acme-v02.api.letsencrypt.org/directory
+		propagation_delay 120s
+	}
+}
+
+(dynu_tls_staging) {
+	tls {
+		dns dynu {env.DYNU_API_TOKEN} {
+			own_domain {env.OWN_DYNU_DOMAIN}
+		}
+		ca https://acme-staging-v02.api.letsencrypt.org/directory
+		propagation_delay 120s
+	}
+}
+
+(lan_only) {
+	@not_lan not remote_ip {env.LAN_SUBNET}
+	abort @not_lan
+}
+
+(security_headers) {
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		X-XSS-Protection "1; mode=block"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
+
+bmox.{env.OWN_DYNU_DOMAIN} {
+	import dynu_tls_staging
+	import security_headers
+	encode zstd gzip
+
+	reverse_proxy {env.IP_B_PROXMOX}:{env.PORT_B_PROXMOX} {
+		transport http {
+			versions 1.1
+			tls
+			tls_insecure_skip_verify
+		}
+		header_up Host {upstream_hostport}
+		header_up X-Real-IP {remote_host}
+		flush_interval -1
+	}
+
+	log {
+		output file /var/log/caddy/hmox.log
+		format json
+	}
+}
+
+hmox.{env.OWN_DYNU_DOMAIN} {
+	import ca_tls
+	import dynu_tls_staging
+	import security_headers
+	encode zstd gzip
+
+	reverse_proxy {env.IP_H_PROXMOX}:{env.PORT_H_PROXMOX} {
+		transport http {
+			versions 1.1
+			tls
+			tls_insecure_skip_verify
+		}
+		header_up Host {upstream_hostport}
+		header_up X-Real-IP {remote_host}
+		flush_interval -1
+	}
+
+	log {
+		output file /var/log/caddy/hmox.log
+		format json
+	}
+}
+
+hydra.{env.OWN_DYNU_DOMAIN} {
+	import ca_tls
+	import dynu_tls_staging
+	import lan_only
+	import security_headers
+	encode zstd gzip
+
+	reverse_proxy {env.IP_HYDRA}:{env.PORT_HYDRA} {
+		transport http {
+			versions 1.1
+		}
+		header_up Host {upstream_hostport}
+		header_up X-Real-IP {remote_host}
+		flush_interval -1
+	}
+
+	log {
+		output file /var/log/caddy/hydra.log
+		format json
+	}
+}
+
+jellycad.{env.OWN_DYNU_DOMAIN} {
+	import dynu_tls_staging
+	import security_headers
+	encode zstd gzip
+
+	reverse_proxy {env.IP_JELLYFIN}:{env.PORT_JELLYFIN} {
+		transport http {
+			tls
+			tls_insecure_skip_verify
+			versions 1.1
+		}
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		flush_interval -1
+	}
+
+	log {
+		output file /var/log/caddy/jellycad.log
+		format json
+	}
+}
+
+neptune.{env.OWN_DYNU_DOMAIN} {
+	import dynu_tls_staging
+	import security_headers
+	encode zstd gzip
+
+	reverse_proxy {env.IP_NEPTUNE}:{env.PORT_HOMEASSISTANT} {
+		transport http {
+			tls
+			tls_insecure_skip_verify
+			versions 1.1
+		}
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		flush_interval -1
+	}
+
+	log {
+		output file /var/log/caddy/neptune.log
+		format json
+	}
+}
+
+poseidon.{env.OWN_DYNU_DOMAIN} {
+	import dynu_tls_staging
+	import security_headers
+	encode zstd gzip
+
+	reverse_proxy {env.IP_POSEIDON}:{env.PORT_HOMEASSISTANT} {
+		transport http {
+			tls
+			tls_insecure_skip_verify
+			versions 1.1
+		}
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		flush_interval -1
+	}
+
+	log {
+		output file /var/log/caddy/poseidon.log
+		format json
+	}
+}
+
+sab.{env.OWN_DYNU_DOMAIN} {
+	import ca_tls
+	import dynu_tls_staging
+	import lan_only
+	import security_headers
+	encode zstd gzip
+
+	reverse_proxy {env.IP_SAB}:{env.PORT_SAB} {
+		transport http {
+			versions 1.1
+		}
+		header_up Host {upstream_hostport}
+		header_up X-Real-IP {remote_host}
+		flush_interval -1
+	}
+
+	log {
+		output file /var/log/caddy/sab.log
+		format json
+	}
+}
