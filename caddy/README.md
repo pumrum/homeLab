@@ -2,7 +2,6 @@
 
 > **TODO:**
 > - Create git pull and compare scripts
-> - Add .bashrc to github
 > - Move hostnames to caddy.env
 
 Caddy 2.10.2 running in a Proxmox LXC container, configured with the Dynu DNS provider for ACME TLS certificates, optional mTLS client authentication, and environment-variable-driven site configuration.
@@ -18,7 +17,7 @@ Caddy 2.10.2 running in a Proxmox LXC container, configured with the Dynu DNS pr
 
 ---
 
-## Install Caddy 2.10.2 to Proxmox 8
+## Install Caddy 2.10.2
 
 1. Connect to `https://server.domain.com:8006` and log in as an administrator.
 2. In the left pane, expand **Datacenter**, click your **\<hostname\>**, then click **Shell** in the middle pane.
@@ -76,26 +75,22 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/Proxmo
 
 Add convenience aliases for common Caddy operations:
 
+
+Git Pull the bashrc file to `~/.bashrc`
+
+Or manually:
 ```bash
 vi ~/.bashrc
 ```
-
-```bash
-alias validate='caddy validate --config /etc/caddy/Caddyfile'
-alias format='caddy fmt --overwrite /etc/caddy/Caddyfile'
-alias reload='caddy reload --config /etc/caddy/Caddyfile'
-```
-
-Save and exit.
 
 ---
 
 ## Install Client CA for mTLS Authentication
 
-```bash
-# Copy your CA certificate into place
-cp ca.crt /etc/caddy/ca.crt
+Git Pull the Root CA certificate to  `/etc/caddy/ca.crt`
 
+Set the Root CA certificate ownership and permissions:
+```bash
 chown root:caddy /etc/caddy/ca.crt
 chmod 640 /etc/caddy/ca.crt
 ```
@@ -123,7 +118,7 @@ caddy list-modules | grep dns
 
 ### 3. Create the systemd override
 
-Pull the Caddy systemd override to `/etc/systemd/system/caddy.service.d/override.conf`
+Git Pull the Caddy systemd override to `/etc/systemd/system/caddy.service.d/override.conf`
 
 Or manually:
 ```bash
@@ -137,7 +132,7 @@ chmod 600 /etc/systemd/system/caddy.service.d/override.conf
 
 ### 4. Create the environment file
 
-Pull the Caddy environment file to `/etc/caddy/caddy.env`
+Git Pull the Caddy environment file to `/etc/caddy/caddy.env`
 
 Or manually:
 ```bash
@@ -152,7 +147,7 @@ chmod 600 /etc/caddy/caddy.env
 
 ### 5. Create the Caddyfile
 
-Pull the Caddy configuration file to `/etc/caddy/Caddyfile`
+Git Pull the Caddy configuration file to `/etc/caddy/Caddyfile`
 
 Or manually:
 ```bash
