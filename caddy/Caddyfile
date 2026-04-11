@@ -1,3 +1,7 @@
+# /etc/caddy/caddy.env
+# Changes to this file may be committed by using a RELOAD as:
+# caddy reload --config /etc/caddy/Caddyfile
+
 {
 	log {
 		output file /var/log/caddy/access.log {
