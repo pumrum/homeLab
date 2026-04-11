@@ -2,7 +2,6 @@
 
 > **TODO:**
 > - Create git pull and compare scripts
-> - Move hostnames to caddy.env
 
 Caddy 2.10.2 running in a Proxmox LXC container, configured with the Dynu DNS provider for ACME TLS certificates, optional mTLS client authentication, and environment-variable-driven site configuration.
 
