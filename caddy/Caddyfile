@@ -67,7 +67,7 @@
 	}
 }
 
-bmox.{env.OWN_DYNU_DOMAIN} {
+{env.HOST_B_PROXMOX}.{env.OWN_DYNU_DOMAIN} {
 	import dynu_tls_staging
 	import security_headers
 	encode zstd gzip
@@ -89,7 +89,7 @@ bmox.{env.OWN_DYNU_DOMAIN} {
 	}
 }
 
-hmox.{env.OWN_DYNU_DOMAIN} {
+{env.HOST_H_PROXMOX}.{env.OWN_DYNU_DOMAIN} {
 	import ca_tls
 	import dynu_tls_staging
 	import security_headers
@@ -112,7 +112,7 @@ hmox.{env.OWN_DYNU_DOMAIN} {
 	}
 }
 
-hydra.{env.OWN_DYNU_DOMAIN} {
+{env.HOST_HYDRA}.{env.OWN_DYNU_DOMAIN} {
 	import ca_tls
 	import dynu_tls_staging
 	import lan_only
@@ -134,7 +134,7 @@ hydra.{env.OWN_DYNU_DOMAIN} {
 	}
 }
 
-jellycad.{env.OWN_DYNU_DOMAIN} {
+{env.HOST_JELLYFIN}.{env.OWN_DYNU_DOMAIN} {
 	import dynu_tls_staging
 	import security_headers
 	encode zstd gzip
@@ -156,7 +156,7 @@ jellycad.{env.OWN_DYNU_DOMAIN} {
 	}
 }
 
-neptune.{env.OWN_DYNU_DOMAIN} {
+{env.HOST_H_HOMEASSISTANT}.{env.OWN_DYNU_DOMAIN} {
 	import dynu_tls_staging
 	import security_headers
 	encode zstd gzip
@@ -178,7 +178,7 @@ neptune.{env.OWN_DYNU_DOMAIN} {
 	}
 }
 
-poseidon.{env.OWN_DYNU_DOMAIN} {
+{env.HOST_B_HOMEASSISTANT}.{env.OWN_DYNU_DOMAIN} {
 	import dynu_tls_staging
 	import security_headers
 	encode zstd gzip
@@ -200,7 +200,7 @@ poseidon.{env.OWN_DYNU_DOMAIN} {
 	}
 }
 
-sab.{env.OWN_DYNU_DOMAIN} {
+{env.SAB}.{env.OWN_DYNU_DOMAIN} {
 	import ca_tls
 	import dynu_tls_staging
 	import lan_only
