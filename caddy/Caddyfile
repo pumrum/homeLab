@@ -200,7 +200,7 @@
 	}
 }
 
-{env.SAB}.{env.OWN_DYNU_DOMAIN} {
+{env.HOST_SAB}.{env.OWN_DYNU_DOMAIN} {
 	import ca_tls
 	import dynu_tls_staging
 	import lan_only
