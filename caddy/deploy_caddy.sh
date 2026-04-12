@@ -76,10 +76,10 @@ echo ""
 
 if $DEPLOY && $CHANGES; then
     if diff -q "$REPO_DIR/caddy/override.conf" "$SYSTEMD_OVERRIDE" > /dev/null 2>&1; then
-        # echo "==> Reloading Caddy..."
+        echo "==> Reloading Caddy..."
         # caddy reload --config "$CADDY_DIR/Caddyfile"
     else
-        # echo "==> override.conf changed, restarting Caddy..."
+        echo "==> override.conf changed, restarting Caddy..."
         # systemctl daemon-reload
         # systemctl restart caddy
     fi
