@@ -1,0 +1,2 @@
+# Caddy environment secrets (use caddy.env.template instead)
+caddy/caddy.env
