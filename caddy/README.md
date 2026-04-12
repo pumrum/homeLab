@@ -13,6 +13,7 @@ Caddy 2.10.2 running in a Proxmox LXC container, configured with the Dynu DNS pr
 - [Configure Shell Aliases](#configure-shell-aliases)
 - [Install Client CA for mTLS Authentication](#install-client-ca-for-mtls-authentication)
 - [Init Caddy Dynu Provider](#init-caddy-dynu-provider)
+- [Promote Staging Certificate to PROD](#promote-staging-certificate-to-prod)
 
 ---
 
@@ -165,5 +166,23 @@ chmod 640 /etc/caddy/Caddyfile
 Reload the daemon and restart the Caddy process:
 ```bash
 systemctl daemon-reload
+systemctl restart caddy
+```
+
+## Promote Staging Certificate to PROD
+
+### 1. Purge existing live certificate store
+
+```bash
+rm -rf /var/lib/caddy/.local/share/caddy/certificates/acme-staging-v02.api.letsencrypt.org-directory/hostname.domain.com
+```
+
+### 2. Promote site in Caddyfile
+
+ - change dynu_tls_staging to dynu_tls
+
+### 3. Restart Caddy
+
+```bash
 systemctl restart caddy
 ```
