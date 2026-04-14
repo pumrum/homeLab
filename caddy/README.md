@@ -1,9 +1,9 @@
 # Caddy Reverse Proxy
 
+Caddy 2.10.2 running in a Proxmox LXC container, configured with the Dynu DNS provider for ACME TLS certificates, optional mTLS client authentication, and environment-variable-driven site configuration.
+
 > **TODO:**
 > - Create git pull and compare scripts
-
-Caddy 2.10.2 running in a Proxmox LXC container, configured with the Dynu DNS provider for ACME TLS certificates, optional mTLS client authentication, and environment-variable-driven site configuration.
 
 ---
 
