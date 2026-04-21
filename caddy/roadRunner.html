@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Roadrunner Run</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: #1a1a2e;
+    color: #eaeaea;
+    font-family: 'Courier New', monospace;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .wrap {
+    text-align: center;
+  }
+  h1 {
+    margin-bottom: 8px;
+    letter-spacing: 2px;
+    font-size: 20px;
+    color: #9ad0ec;
+  }
+  .hint {
+    margin-bottom: 10px;
+    font-size: 13px;
+    color: #888;
+  }
+  #game {
+    display: block;
+    background: linear-gradient(#ffd89b 0%, #ffb56b 70%, #c97b3f 100%);
+    border: 3px solid #333;
+    border-radius: 6px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+    image-rendering: pixelated;
+  }
+  .hud {
+    margin-top: 8px;
+    font-size: 13px;
+    color: #aaa;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ROADRUNNER RUN</h1>
+  <div class="hint">Press <b>↑</b> or <b>SPACE</b> to jump — avoid the cacti!</div>
+  <canvas id="game" width="800" height="300"></canvas>
+  <div class="hud">Click the canvas if keys stop working.</div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+  const GROUND_Y = H - 50;
+
+  // --- Game state ---
+  let state = 'ready'; // 'ready' | 'playing' | 'over'
+  let startTime = 0;
+  let elapsed = 0;
+  let finalTime = 0;
+  let speed = 260;            // pixels per second, world scroll speed
+  let speedIncrease = 8;      // speed gain per second
+  let groundOffset = 0;
+  let lastFrame = 0;
+  let obstacles = [];
+  let spawnTimer = 0;
+  let nextSpawnIn = 1.2;
+
+  // Roadrunner (kept at fixed x, animated in place)
+  const bird = {
+    x: 90,
+    y: GROUND_Y,
+    w: 54,
+    h: 44,
+    vy: 0,
+    onGround: true,
+    legPhase: 0,
+  };
+
+  const GRAVITY = 1800;       // px/s^2
+  const JUMP_VELOCITY = -720; // px/s
+
+  // --- Input ---
+  function jump() {
+    if (state === 'ready') { startGame(); return; }
+    if (state === 'over')  { resetGame(); return; }
+    if (bird.onGround) {
+      bird.vy = JUMP_VELOCITY;
+      bird.onGround = false;
+    }
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'ArrowUp' || e.code === 'Space' || e.code === 'KeyW') {
+      e.preventDefault();
+      jump();
+    }
+  });
+  canvas.addEventListener('mousedown', jump);
+  canvas.addEventListener('touchstart', (e) => { e.preventDefault(); jump(); }, {passive:false});
+  canvas.tabIndex = 0;
+  canvas.addEventListener('click', () => canvas.focus());
+
+  // --- Game flow ---
+  function resetGame() {
+    obstacles = [];
+    speed = 260;
+    spawnTimer = 0;
+    nextSpawnIn = 1.2;
+    bird.y = GROUND_Y;
+    bird.vy = 0;
+    bird.onGround = true;
+    elapsed = 0;
+    state = 'ready';
+  }
+
+  function startGame() {
+    state = 'playing';
+    startTime = performance.now();
+  }
+
+  function endGame() {
+    state = 'over';
+    finalTime = elapsed;
+  }
+
+  // --- Obstacles ---
+  function spawnObstacle() {
+    // Randomize cactus size a bit
+    const variant = Math.random();
+    let w, h;
+    if (variant < 0.5)      { w = 18; h = 36; }
+    else if (variant < 0.85){ w = 26; h = 48; }
+    else                    { w = 40; h = 40; } // wide double
+    obstacles.push({
+      x: W + 10,
+      y: GROUND_Y - h,
+      w, h,
+      wide: variant >= 0.85,
+    });
+    // Next spawn: random gap, but scaled so it stays possible at high speeds
+    const minGap = Math.max(0.55, 260 / speed * 0.9);
+    const maxGap = Math.max(1.4, 260 / speed * 2.0);
+    nextSpawnIn = minGap + Math.random() * (maxGap - minGap);
+  }
+
+  // --- Collision (AABB with small inset so it feels fair) ---
+  function hit(a, b) {
+    const pad = 4;
+    return a.x + pad        < b.x + b.w &&
+           a.x + a.w - pad  > b.x &&
+           a.y + pad        < b.y + b.h &&
+           a.y + a.h - pad  > b.y;
+  }
+
+  // --- Update ---
+  function update(dt) {
+    if (state === 'playing') {
+      elapsed = (performance.now() - startTime) / 1000;
+      speed += speedIncrease * dt;
+
+      // Physics
+      bird.vy += GRAVITY * dt;
+      bird.y  += bird.vy * dt;
+      if (bird.y >= GROUND_Y) {
+        bird.y = GROUND_Y;
+        bird.vy = 0;
+        bird.onGround = true;
+      }
+      bird.legPhase += dt * 18;
+
+      // Spawning
+      spawnTimer += dt;
+      if (spawnTimer >= nextSpawnIn) {
+        spawnTimer = 0;
+        spawnObstacle();
+      }
+
+      // Move obstacles
+      for (const o of obstacles) o.x -= speed * dt;
+      obstacles = obstacles.filter(o => o.x + o.w > -20);
+
+      // Ground scroll
+      groundOffset = (groundOffset + speed * dt) % 40;
+
+      // Collision
+      const birdBox = { x: bird.x, y: bird.y - bird.h, w: bird.w, h: bird.h };
+      for (const o of obstacles) {
+        if (hit(birdBox, o)) { endGame(); break; }
+      }
+    }
+  }
+
+  // --- Draw helpers ---
+  function drawGround() {
+    // Ground line
+    ctx.fillStyle = '#7a4a22';
+    ctx.fillRect(0, GROUND_Y + 2, W, 3);
+    // Dashes to imply motion
+    ctx.fillStyle = '#5a3316';
+    for (let x = -groundOffset; x < W; x += 40) {
+      ctx.fillRect(x, GROUND_Y + 10, 20, 2);
+    }
+    // A few scattered pebbles
+    ctx.fillStyle = '#6b3a18';
+    for (let x = -groundOffset*0.5; x < W; x += 110) {
+      ctx.fillRect(x + 15, GROUND_Y + 22, 4, 2);
+      ctx.fillRect(x + 60, GROUND_Y + 30, 3, 2);
+    }
+  }
+
+  function drawClouds(t) {
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    // Slow parallax clouds based on elapsed time
+    const c = (elapsed * 30) % (W + 200);
+    const positions = [
+      { x: (W + 200) - c,             y: 40, s: 1.0 },
+      { x: (W + 200) - ((c+260)% (W+200)), y: 70, s: 0.7 },
+      { x: (W + 200) - ((c+540)% (W+200)), y: 30, s: 1.2 },
+    ];
+    for (const p of positions) {
+      const s = p.s;
+      ctx.beginPath();
+      ctx.arc(p.x,      p.y,      14*s, 0, Math.PI*2);
+      ctx.arc(p.x + 16*s, p.y - 6*s, 12*s, 0, Math.PI*2);
+      ctx.arc(p.x + 32*s, p.y,      14*s, 0, Math.PI*2);
+      ctx.arc(p.x + 20*s, p.y + 6*s, 12*s, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  function drawCactus(o) {
+    ctx.fillStyle = '#2e6b3a';
+    ctx.fillRect(o.x, o.y, o.w, o.h);
+    // Arms
+    if (!o.wide) {
+      ctx.fillRect(o.x - 5, o.y + o.h * 0.3, 5, o.h * 0.35);
+      ctx.fillRect(o.x + o.w, o.y + o.h * 0.15, 5, o.h * 0.4);
+    } else {
+      // double-cactus clump
+      ctx.fillRect(o.x - 8, o.y + 10, 10, o.h - 10);
+      ctx.fillRect(o.x + o.w - 2, o.y + 6, 10, o.h - 6);
+    }
+    // Darker stripes for texture
+    ctx.fillStyle = '#1f4e28';
+    ctx.fillRect(o.x + 3, o.y + 4, 2, o.h - 8);
+    ctx.fillRect(o.x + o.w - 5, o.y + 4, 2, o.h - 8);
+  }
+
+  function drawRoadrunner() {
+    const bx = bird.x;
+    const by = bird.y - bird.h; // top-left of bounding box
+    ctx.save();
+    ctx.translate(bx, by);
+
+    // Body
+    ctx.fillStyle = '#6aaed6'; // blue-gray
+    ctx.beginPath();
+    ctx.ellipse(28, 26, 22, 12, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // Tail (upward sweep)
+    ctx.fillStyle = '#4d8cb8';
+    ctx.beginPath();
+    ctx.moveTo(4, 24);
+    ctx.lineTo(-12, 8);
+    ctx.lineTo(-10, 14);
+    ctx.lineTo(6, 30);
+    ctx.closePath();
+    ctx.fill();
+
+    // Neck + head
+    ctx.fillStyle = '#6aaed6';
+    ctx.fillRect(40, 10, 8, 16);       // neck
+    ctx.beginPath();
+    ctx.ellipse(52, 12, 10, 8, 0, 0, Math.PI*2); // head
+    ctx.fill();
+
+    // Crest (tuft on head)
+    ctx.fillStyle = '#2c5f8a';
+    ctx.beginPath();
+    ctx.moveTo(50, 4);
+    ctx.lineTo(54, -2);
+    ctx.lineTo(58, 4);
+    ctx.closePath();
+    ctx.fill();
+
+    // Beak
+    ctx.fillStyle = '#f2c14e';
+    ctx.beginPath();
+    ctx.moveTo(60, 10);
+    ctx.lineTo(72, 12);
+    ctx.lineTo(60, 14);
+    ctx.closePath();
+    ctx.fill();
+
+    // Eye
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(54, 10, 2.2, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath(); ctx.arc(54.5, 10, 1.2, 0, Math.PI*2); ctx.fill();
+
+    // Wing (accent)
+    ctx.fillStyle = '#3d739b';
+    ctx.beginPath();
+    ctx.ellipse(26, 24, 10, 5, -0.2, 0, Math.PI*2);
+    ctx.fill();
+
+    // Legs — animate while on ground, tuck when airborne
+    ctx.strokeStyle = '#e8a53a';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    if (bird.onGround && state === 'playing') {
+      const p = bird.legPhase;
+      const l1 = Math.sin(p) * 6;
+      const l2 = Math.sin(p + Math.PI) * 6;
+      // leg 1
+      ctx.beginPath();
+      ctx.moveTo(24, 36);
+      ctx.lineTo(22 + l1, 44);
+      ctx.stroke();
+      // leg 2
+      ctx.beginPath();
+      ctx.moveTo(34, 36);
+      ctx.lineTo(36 + l2, 44);
+      ctx.stroke();
+    } else {
+      // tucked legs while jumping
+      ctx.beginPath();
+      ctx.moveTo(24, 34);
+      ctx.lineTo(30, 38);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(34, 34);
+      ctx.lineTo(38, 38);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawTimer() {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    const txt = `TIME  ${elapsed.toFixed(2)}s`;
+    ctx.font = 'bold 20px "Courier New", monospace';
+    const tw = ctx.measureText(txt).width;
+    ctx.fillRect(W - tw - 20, 10, tw + 14, 28);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(txt, W - tw - 13, 30);
+  }
+
+  function drawOverlay() {
+    if (state === 'ready') {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 32px "Courier New", monospace';
+      ctx.fillText('READY', W/2, H/2 - 20);
+      ctx.font = '16px "Courier New", monospace';
+      ctx.fillText('Press  ↑  or  SPACE  to start', W/2, H/2 + 14);
+      ctx.textAlign = 'left';
+    } else if (state === 'over') {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#ff6b6b';
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 36px "Courier New", monospace';
+      ctx.fillText('GAME OVER', W/2, H/2 - 28);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 22px "Courier New", monospace';
+      ctx.fillText(`You survived ${finalTime.toFixed(2)}s`, W/2, H/2 + 4);
+      ctx.font = '14px "Courier New", monospace';
+      ctx.fillText('Press ↑ or SPACE to play again', W/2, H/2 + 32);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  // --- Render ---
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+    drawClouds();
+    drawGround();
+    for (const o of obstacles) drawCactus(o);
+    drawRoadrunner();
+    drawTimer();
+    drawOverlay();
+  }
+
+  // --- Loop ---
+  function loop(t) {
+    if (!lastFrame) lastFrame = t;
+    const dt = Math.min(0.033, (t - lastFrame) / 1000); // cap dt to avoid big jumps
+    lastFrame = t;
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
