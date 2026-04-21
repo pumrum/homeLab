@@ -139,7 +139,7 @@
 }
 
 {env.HOST_JELLYFIN}.{env.OWN_DYNU_DOMAIN} {
-	import dynu_tls_staging
+	import dynu_tls
 	import security_headers
 	encode zstd gzip
 
