@@ -119,7 +119,6 @@
 {env.HOST_HYDRA}.{env.OWN_DYNU_DOMAIN} {
 	import ca_tls
 	import dynu_tls
-	import lan_only
 	import security_headers
 	encode zstd gzip
 
@@ -207,7 +206,6 @@
 {env.HOST_SAB}.{env.OWN_DYNU_DOMAIN} {
 	import ca_tls
 	import dynu_tls
-	import lan_only
 	import security_headers
 	encode zstd gzip
 
