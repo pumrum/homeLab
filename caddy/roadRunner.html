@@ -48,7 +48,7 @@
 <body>
 <div class="wrap">
   <h1>ROADRUNNER RUN</h1>
-  <div class="hint">Press <b>↑</b> or <b>SPACE</b> to jump — avoid the cacti!</div>
+  <div class="hint">Press <b>↑</b> or <b>SPACE</b> to jump — avoid the cacti! &nbsp;|&nbsp; <b>P</b> to pause</div>
   <canvas id="game" width="800" height="300"></canvas>
   <div class="hud">Click the canvas if keys stop working.</div>
 </div>
@@ -62,7 +62,10 @@
   const GROUND_Y = H - 50;
 
   // --- Game state ---
-  let state = 'ready'; // 'ready' | 'playing' | 'over'
+  let state = 'ready'; // 'ready' | 'playing' | 'paused' | 'over'
+  let paused = false;
+  let pauseStart = 0;   // performance.now() when paused
+  let totalPaused = 0;  // accumulated ms spent paused
   let startTime = 0;
   let elapsed = 0;
   let finalTime = 0;
@@ -98,10 +101,27 @@
     }
   }
 
+  function togglePause() {
+    if (state !== 'playing' && state !== 'paused') return;
+    if (!paused) {
+      paused = true;
+      state = 'paused';
+      pauseStart = performance.now();
+    } else {
+      paused = false;
+      state = 'playing';
+      totalPaused += performance.now() - pauseStart;
+    }
+  }
+
   window.addEventListener('keydown', (e) => {
     if (e.code === 'ArrowUp' || e.code === 'Space' || e.code === 'KeyW') {
       e.preventDefault();
       jump();
+    }
+    if (e.code === 'KeyP') {
+      e.preventDefault();
+      togglePause();
     }
   });
   canvas.addEventListener('mousedown', jump);
@@ -119,11 +139,15 @@
     bird.vy = 0;
     bird.onGround = true;
     elapsed = 0;
+    paused = false;
+    totalPaused = 0;
     state = 'ready';
   }
 
   function startGame() {
     state = 'playing';
+    paused = false;
+    totalPaused = 0;
     startTime = performance.now();
   }
 
@@ -164,7 +188,7 @@
   // --- Update ---
   function update(dt) {
     if (state === 'playing') {
-      elapsed = (performance.now() - startTime) / 1000;
+      elapsed = (performance.now() - startTime - totalPaused) / 1000;
       speed += speedIncrease * dt;
 
       // Physics
@@ -367,6 +391,17 @@
       ctx.fillText('READY', W/2, H/2 - 20);
       ctx.font = '16px "Courier New", monospace';
       ctx.fillText('Press  ↑  or  SPACE  to start', W/2, H/2 + 14);
+      ctx.textAlign = 'left';
+    } else if (state === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#f0e68c';
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 40px "Courier New", monospace';
+      ctx.fillText('PAUSED', W/2, H/2 - 10);
+      ctx.font = '15px "Courier New", monospace';
+      ctx.fillStyle = '#ccc';
+      ctx.fillText('Press P to continue', W/2, H/2 + 22);
       ctx.textAlign = 'left';
     } else if (state === 'over') {
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
