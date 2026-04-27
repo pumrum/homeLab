@@ -206,7 +206,7 @@
 {env.HOST_PIHOLE}.{env.OWN_DYNU_DOMAIN} {
 	import ca_tls
 	import dynu_tls
-	import lan_olny
+	import lan_only
 	import security_headers
 	encode zstd gzip
 
