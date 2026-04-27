@@ -338,26 +338,40 @@
     ctx.ellipse(26, 24, 10, 5, -0.2, 0, Math.PI*2);
     ctx.fill();
 
-    // Legs — animate while on ground, tuck when airborne
-    ctx.strokeStyle = '#e8a53a';
-    ctx.lineWidth = 2.5;
+    // Legs — two-segment (thigh + shin) with foot claw
+    ctx.strokeStyle = '#5c1a00';
+    ctx.lineWidth = 3;
     ctx.lineCap = 'round';
-    if (bird.onGround && state === 'playing') {
-      const p = bird.legPhase;
-      const l1 = Math.sin(p) * 6;
-      const l2 = Math.sin(p + Math.PI) * 6;
-      // leg 1
+    ctx.lineJoin = 'round';
+
+    function drawLeg(hx, hy, phase) {
+      const THIGH = 7, SHIN = 7;
+      // thigh swings forward/back
+      const swing = Math.sin(phase) * 0.55;
+      const kx = hx + Math.sin(swing) * THIGH;
+      const ky = hy + Math.cos(swing) * THIGH;
+      // shin tucks on forward swing, extends on back-kick
+      const shinAngle = swing + Math.max(0.1, Math.sin(phase + 1.1) * 0.6 + 0.35);
+      const fx = kx + Math.sin(shinAngle) * SHIN;
+      const fy = ky + Math.cos(shinAngle) * SHIN;
       ctx.beginPath();
-      ctx.moveTo(24, 36);
-      ctx.lineTo(22 + l1, 44);
+      ctx.moveTo(hx, hy);
+      ctx.lineTo(kx, ky);
+      ctx.lineTo(fx, fy);
       ctx.stroke();
-      // leg 2
+      // foot claw
       ctx.beginPath();
-      ctx.moveTo(34, 36);
-      ctx.lineTo(36 + l2, 44);
+      ctx.moveTo(fx, fy);
+      ctx.lineTo(fx + 6, fy + 1);
       ctx.stroke();
-    } else {
-      // tucked legs while jumping
+    }
+
+    if (bird.onGround && state !== 'over' && state !== 'ready') {
+      // running or paused — legs frozen at last phase when paused
+      drawLeg(22, 34, bird.legPhase);
+      drawLeg(31, 34, bird.legPhase + Math.PI);
+    } else if (!bird.onGround) {
+      // tucked while airborne
       ctx.beginPath();
       ctx.moveTo(24, 34);
       ctx.lineTo(30, 38);
@@ -366,6 +380,10 @@
       ctx.moveTo(34, 34);
       ctx.lineTo(38, 38);
       ctx.stroke();
+    } else {
+      // static stance for ready / game-over screens
+      drawLeg(22, 34, 0);
+      drawLeg(31, 34, 0.3);
     }
 
     ctx.restore();
