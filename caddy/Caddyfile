@@ -203,6 +203,28 @@
 	}
 }
 
+{env.HOST_PIHOLE}.{env.OWN_DYNU_DOMAIN} {
+	import ca_tls
+	import dynu_tls
+	import lan_olny
+	import security_headers
+	encode zstd gzip
+
+	reverse_proxy {env.IP_PIHOLE}:{env.PORT_PIHOLE} {
+		transport http {
+			versions 1.1
+		}
+		header_up Host {upstream_hostport}
+		header_up X-Real-IP {remote_host}
+		flush_interval -1
+	}
+
+	log {
+		output file /var/log/caddy/sab.log
+		format json
+	}
+}
+
 {env.HOST_SAB}.{env.OWN_DYNU_DOMAIN} {
 	import ca_tls
 	import dynu_tls
