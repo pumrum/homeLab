@@ -65,11 +65,13 @@ function lookupItemIds() {
     if (itemId && itemId !== "") continue;
 
     const show    = String(row[COL_SHOW - 1]).trim();
+    const tvdb    = String(row[COL_TVDB - 1]).trim();
     const season  = row[COL_SEASON - 1];
     const episode = row[COL_EPISODE - 1];
     const title   = String(row[COL_TITLE - 1]).trim();
 
-    if (!show) continue; // skip empty rows
+    // Only process rows where all columns except ItemID are populated
+    if (!show || !tvdb || String(season).trim() === "" || String(episode).trim() === "" || !title) continue;
 
     // Build search term — prefer title if available, fall back to show name
     const searchTerm = title || show;
@@ -106,12 +108,12 @@ function pushSegments() {
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const rowNum = DATA_START_ROW + i;
-    const itemId = String(row[COL_ITEMID - 1]).trim();
-
-    if (!itemId || itemId === "") {
-      skipCount++;
-      continue;
-    }
+    const show    = String(row[COL_SHOW - 1]).trim();
+    const tvdb    = String(row[COL_TVDB - 1]).trim();
+    const season  = String(row[COL_SEASON - 1]).trim();
+    const episode = String(row[COL_EPISODE - 1]).trim();
+    const title   = String(row[COL_TITLE - 1]).trim();
+    const itemId  = String(row[COL_ITEMID - 1]).trim();
 
     const introStart   = row[COL_INTRO_START - 1];
     const introEnd     = row[COL_INTRO_END - 1];
@@ -120,11 +122,11 @@ function pushSegments() {
     const creditsStart = row[COL_CREDITS_START - 1];
     const creditsEnd   = row[COL_CREDITS_END - 1];
 
-    // Skip rows with no complete segment pairs
-    const hasIntro   = isPopulated(introStart)   && isPopulated(introEnd);
-    const hasRecap   = isPopulated(recapStart)   && isPopulated(recapEnd);
-    const hasCredits = isPopulated(creditsStart) && (isPopulated(creditsEnd) || String(creditsEnd).trim().toLowerCase() === "end");
-    if (!hasIntro && !hasRecap && !hasCredits) {
+    // Only process rows where all columns are populated
+    if (!show || !tvdb || !season || !episode || !title || !itemId ||
+        !isPopulated(introStart) || !isPopulated(introEnd) ||
+        !isPopulated(recapStart) || !isPopulated(recapEnd) ||
+        !isPopulated(creditsStart) || !isPopulated(creditsEnd)) {
       skipCount++;
       continue;
     }
