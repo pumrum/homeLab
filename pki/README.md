@@ -1,6 +1,6 @@
 # macOS Certificate Authority for Caddy
 
-Manage mutual TLS client certificates using LibreSSL on macOS for use with Caddy. The CA configuration file ([`ca.cnf`](./ca.cnf)) is stored separately in this repository.
+Manage mutual TLS client certificates using LibreSSL on macOS for use with Caddy. The CA configuration template ([`ca.cnf.template`](./ca.cnf.template)) is stored separately in this repository.
 
 ---
 
@@ -31,10 +31,10 @@ Manage mutual TLS client certificates using LibreSSL on macOS for use with Caddy
    chmod 600 ~/myca/serial
    ```
 
-3. Copy [`ca.cnf`](./ca.cnf) from this repository into `~/myca/`:
+3. Copy [`ca.cnf.template`](./ca.cnf.template) from this repository into `~/myca/` as `ca.cnf`:
 
    ```bash
-   cp /path/to/repo/ca.cnf ~/myca/ca.cnf
+   cp /path/to/repo/pki/ca.cnf.template ~/myca/ca.cnf
    ```
 
    > **Note:** Edit `ca.cnf` and replace the `dir` value under `[CA_default]` with your actual home directory path before proceeding.
