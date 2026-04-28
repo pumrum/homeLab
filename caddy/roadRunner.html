@@ -121,6 +121,10 @@
     setTimeout(() => resetGame(), 1200);
   }
 
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && state === 'playing') togglePause();
+  });
+
   window.addEventListener('keydown', (e) => {
     if (e.code === 'ArrowUp' || e.code === 'Space' || e.code === 'KeyW') {
       e.preventDefault();
