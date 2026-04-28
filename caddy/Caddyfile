@@ -251,8 +251,10 @@
 	import security_headers
 	encode zstd gzip
 
-	root * /usr/share/caddy
-	file_server
+	root * {env.PATH_JUMP}
+	file_server {
+		index {env.FILE_JUMP}
+	}
 
 	log {
 		output file /var/log/caddy/jump.log
