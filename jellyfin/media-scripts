@@ -75,12 +75,13 @@ function lookupItemIds() {
 
     // Build search term — prefer title if available, fall back to show name
     const searchTerm = title || show;
-    const foundId = searchJellyfinItem(show, season, episode, searchTerm);
+    const { id: foundId, reason } = searchJellyfinItem(show, season, episode, searchTerm);
 
     if (foundId) {
       sheet.getRange(rowNum, COL_ITEMID).setValue(foundId);
       lookupCount++;
     } else {
+      Logger.log(`Row ${rowNum}: itemId not found — show="${show}" S${season}E${episode} — ${reason}`);
       failCount++;
     }
 
@@ -177,10 +178,10 @@ function searchJellyfinItem(show, season, episode, searchTerm) {
       headers: { "Authorization": `MediaBrowser Token="${JELLYFIN_API_KEY}"` },
       muteHttpExceptions: true
     });
-    if (searchResp.getResponseCode() !== 200) return null;
+    if (searchResp.getResponseCode() !== 200) return { id: null, reason: `series search HTTP ${searchResp.getResponseCode()}` };
 
     const searchData = JSON.parse(searchResp.getContentText());
-    if (!searchData.Items || searchData.Items.length === 0) return null;
+    if (!searchData.Items || searchData.Items.length === 0) return { id: null, reason: `no series found matching "${show}"` };
 
     // Match series name (case-insensitive)
     const series = searchData.Items.find(item =>
@@ -194,21 +195,21 @@ function searchJellyfinItem(show, season, episode, searchTerm) {
       headers: { "Authorization": `MediaBrowser Token="${JELLYFIN_API_KEY}"` },
       muteHttpExceptions: true
     });
-    if (episodesResp.getResponseCode() !== 200) return null;
+    if (episodesResp.getResponseCode() !== 200) return { id: null, reason: `episodes fetch HTTP ${episodesResp.getResponseCode()} for seriesId=${seriesId}` };
 
     const episodesData = JSON.parse(episodesResp.getContentText());
-    if (!episodesData.Items || episodesData.Items.length === 0) return null;
+    if (!episodesData.Items || episodesData.Items.length === 0) return { id: null, reason: `no episodes returned for S${season} of seriesId=${seriesId}` };
 
     const s = parseInt(season);
     const e = parseInt(episode);
     const match = episodesData.Items.find(item =>
       item.ParentIndexNumber === s && item.IndexNumber === e
     );
-    return match ? match.Id : null;
+    if (!match) return { id: null, reason: `S${s}E${e} not found among ${episodesData.Items.length} episode(s) returned for seriesId=${seriesId}` };
+    return { id: match.Id, reason: null };
 
   } catch (e) {
-    Logger.log(`Search error: ${e.message}`);
-    return null;
+    return { id: null, reason: `exception: ${e.message}` };
   }
 }
 
