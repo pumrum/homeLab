@@ -5,9 +5,16 @@ CADDY_DIR=/etc/caddy
 SYSTEMD_OVERRIDE=/etc/systemd/system/caddy.service.d/override.conf
 CADDY_ENV="$CADDY_DIR/caddy.env"
 
-DEPLOY=false
-if [[ "$1" == "deploy" ]]; then
-    DEPLOY=true
+MODE="${1:-dry-run}"  # dry-run (default) | deploy | deploy-reload | deploy-restart
+
+if [[ "$MODE" != "dry-run" && "$MODE" != "deploy" && "$MODE" != "deploy-reload" && "$MODE" != "deploy-restart" ]]; then
+    echo "Usage: $0 [deploy|deploy-reload|deploy-restart]"
+    echo ""
+    echo "  (no argument)   Dry run — show what would change without copying files."
+    echo "  deploy          Copy changed files. Warn if a restart is required."
+    echo "  deploy-reload   Copy changed files and reload Caddy. Warn if a restart is required."
+    echo "  deploy-restart  Copy changed files and restart Caddy (daemon-reload + restart)."
+    exit 1
 fi
 
 # Load secrets from live caddy.env so variables like PATH_WWW are available
@@ -33,6 +40,7 @@ FILES["$REPO_DIR/caddy/ca.crt"]="$CADDY_DIR/ca.crt"
 FILES["$REPO_DIR/caddy/override.conf"]="$SYSTEMD_OVERRIDE"
 
 CHANGES=false
+RESTART_REQUIRED=false
 
 for SRC in "${!FILES[@]}"; do
     DEST="${FILES[$SRC]}"
@@ -45,7 +53,8 @@ for SRC in "${!FILES[@]}"; do
     if [[ ! -f "$DEST" ]]; then
         echo "NEW: $DEST does not exist on server."
         CHANGES=true
-        if $DEPLOY; then
+        [[ "$DEST" == "$SYSTEMD_OVERRIDE" ]] && RESTART_REQUIRED=true
+        if [[ "$MODE" != "dry-run" ]]; then
             echo "==> Copying $SRC -> $DEST"
             cp "$SRC" "$DEST"
         fi
@@ -54,11 +63,12 @@ for SRC in "${!FILES[@]}"; do
 
     if ! diff -q "$SRC" "$DEST" > /dev/null 2>&1; then
         CHANGES=true
+        [[ "$DEST" == "$SYSTEMD_OVERRIDE" ]] && RESTART_REQUIRED=true
         echo "CHANGED: $DEST"
         diff "$SRC" "$DEST"
         echo ""
 
-        if $DEPLOY; then
+        if [[ "$MODE" != "dry-run" ]]; then
             echo "==> Copying $SRC -> $DEST"
             cp "$SRC" "$DEST"
 
@@ -97,7 +107,7 @@ else
         if [[ ! -f "$DEST" ]]; then
             echo "NEW: $DEST does not exist."
             CHANGES=true
-            if $DEPLOY; then
+            if [[ "$MODE" != "dry-run" ]]; then
                 echo "==> Copying $SRC -> $DEST"
                 cp "$SRC" "$DEST"
             fi
@@ -106,7 +116,7 @@ else
             echo "CHANGED: $DEST"
             diff "$SRC" "$DEST"
             echo ""
-            if $DEPLOY; then
+            if [[ "$MODE" != "dry-run" ]]; then
                 echo "==> Copying $SRC -> $DEST"
                 cp "$SRC" "$DEST"
             fi
@@ -118,15 +128,32 @@ fi
 
 echo ""
 
-if $DEPLOY && $CHANGES; then
-    if diff -q "$REPO_DIR/caddy/override.conf" "$SYSTEMD_OVERRIDE" > /dev/null 2>&1; then
-        echo "==> Reloading Caddy..."
-        # caddy reload --config "$CADDY_DIR/Caddyfile"
-    else
-        echo "==> override.conf changed, restarting Caddy..."
-        # systemctl daemon-reload
-        # systemctl restart caddy
-    fi
-elif $DEPLOY && ! $CHANGES; then
-    echo "==> No changes, nothing to deploy."
+if ! $CHANGES; then
+    echo "==> No changes detected."
+    exit 0
 fi
+
+if $RESTART_REQUIRED; then
+    echo "WARNING: override.conf changed — a full restart is required to apply systemd service changes."
+fi
+
+case "$MODE" in
+    dry-run)
+        echo "==> Dry run complete. Run with 'deploy', 'deploy-reload', or 'deploy-restart' to apply changes."
+        ;;
+    deploy)
+        echo "==> Files deployed. Run with 'deploy-reload' or 'deploy-restart' to apply changes."
+        ;;
+    deploy-reload)
+        if $RESTART_REQUIRED; then
+            echo "WARNING: Reload will NOT apply override.conf changes. Run 'deploy-restart' to fully apply."
+        fi
+        echo "==> Reloading Caddy..."
+        caddy reload --config "$CADDY_DIR/Caddyfile"
+        ;;
+    deploy-restart)
+        echo "==> Restarting Caddy..."
+        systemctl daemon-reload
+        systemctl restart caddy
+        ;;
+esac
