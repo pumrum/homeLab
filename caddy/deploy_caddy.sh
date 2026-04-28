@@ -16,8 +16,6 @@ if [[ "$MODE" != "deploy" && "$MODE" != "deploy-reload" && "$MODE" != "deploy-re
     exit 1
 fi
 
-DEPLOY=true
-
 # Load secrets from live caddy.env so variables like PATH_WWW are available
 if [[ -f "$CADDY_ENV" ]]; then
     set -a
