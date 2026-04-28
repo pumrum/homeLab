@@ -245,3 +245,19 @@
 		format json
 	}
 }
+
+{env.HOST_JUMP}.{env.OWN_DYNU_DOMAIN} {
+	import dynu_tls
+	import security_headers
+	encode zstd gzip
+
+	root * {env.PATH_JUMP}
+	file_server {
+		index {env.FILE_JUMP}
+	}
+
+	log {
+		output file /var/log/caddy/jump.log
+		format json
+	}
+}
