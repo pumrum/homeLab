@@ -52,6 +52,12 @@ function lookupItemIds() {
   const lastRow = sheet.getLastRow();
   if (lastRow < DATA_START_ROW) return;
 
+  const allSeries = fetchAllJellyfinSeries();
+  if (!allSeries) {
+    Logger.log("ItemId Lookup aborted — could not fetch series list from Jellyfin");
+    return;
+  }
+
   const lastCol = sheet.getLastColumn();
   const rows = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, lastCol).getValues();
   let lookupCount = 0;
@@ -71,11 +77,8 @@ function lookupItemIds() {
     const show    = String(row[COL_SHOW - 1]).trim();
     const season  = row[COL_SEASON - 1];
     const episode = row[COL_EPISODE - 1];
-    const title   = String(row[COL_TITLE - 1]).trim();
 
-    // Build search term — prefer title if available, fall back to show name
-    const searchTerm = title || show;
-    const { id: foundId, reason } = searchJellyfinItem(show, season, episode, searchTerm);
+    const { id: foundId, reason } = searchJellyfinItem(allSeries, show, season, episode);
 
     if (foundId) {
       sheet.getRange(rowNum, COL_ITEMID).setValue(foundId);
@@ -170,26 +173,36 @@ function pushSegments() {
 // JELLYFIN API HELPERS
 // ============================================================
 
-function searchJellyfinItem(show, season, episode, searchTerm) {
+function fetchAllJellyfinSeries() {
   try {
-    // Step 1 — find the SeriesId by searching for the show name
-    const searchUrl = `${JELLYFIN_URL}/Items?searchTerm=${encodeURIComponent(show)}&IncludeItemTypes=Series&Recursive=true&Limit=10`;
-    const searchResp = UrlFetchApp.fetch(searchUrl, {
+    const url = `${JELLYFIN_URL}/Items?IncludeItemTypes=Series&Recursive=true&Limit=500`;
+    const resp = UrlFetchApp.fetch(url, {
       headers: { "Authorization": `MediaBrowser Token="${JELLYFIN_API_KEY}"` },
       muteHttpExceptions: true
     });
-    if (searchResp.getResponseCode() !== 200) return { id: null, reason: `series search HTTP ${searchResp.getResponseCode()}` };
+    if (resp.getResponseCode() !== 200) {
+      Logger.log(`fetchAllJellyfinSeries HTTP ${resp.getResponseCode()}`);
+      return null;
+    }
+    const data = JSON.parse(resp.getContentText());
+    return data.Items || [];
+  } catch (e) {
+    Logger.log(`fetchAllJellyfinSeries exception: ${e.message}`);
+    return null;
+  }
+}
 
-    const searchData = JSON.parse(searchResp.getContentText());
-    if (!searchData.Items || searchData.Items.length === 0) return { id: null, reason: `no series found matching "${show}"` };
-
-    // Match series name (case-insensitive)
-    const series = searchData.Items.find(item =>
-      item.Name && item.Name.toLowerCase().includes(show.toLowerCase())
-    ) || searchData.Items[0];
+function searchJellyfinItem(allSeries, show, season, episode) {
+  try {
+    const normalize = s => s.toLowerCase().replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
+    const normalizedShow = normalize(show);
+    const series = allSeries.find(item =>
+      item.Name && normalize(item.Name).includes(normalizedShow)
+    );
+    if (!series) return { id: null, reason: `no series found matching "${show}" among ${allSeries.length} series in library` };
     const seriesId = series.Id;
 
-    // Step 2 — fetch only episodes from the target season
+    // Fetch episodes from the target season
     const episodesUrl = `${JELLYFIN_URL}/Shows/${seriesId}/Episodes?SeasonNumber=${parseInt(season)}`;
     const episodesResp = UrlFetchApp.fetch(episodesUrl, {
       headers: { "Authorization": `MediaBrowser Token="${JELLYFIN_API_KEY}"` },
