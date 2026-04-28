@@ -5,11 +5,12 @@ CADDY_DIR=/etc/caddy
 SYSTEMD_OVERRIDE=/etc/systemd/system/caddy.service.d/override.conf
 CADDY_ENV="$CADDY_DIR/caddy.env"
 
-MODE="$1"  # deploy | deploy-reload | deploy-restart
+MODE="${1:-dry-run}"  # dry-run (default) | deploy | deploy-reload | deploy-restart
 
-if [[ "$MODE" != "deploy" && "$MODE" != "deploy-reload" && "$MODE" != "deploy-restart" ]]; then
-    echo "Usage: $0 <deploy|deploy-reload|deploy-restart>"
+if [[ "$MODE" != "dry-run" && "$MODE" != "deploy" && "$MODE" != "deploy-reload" && "$MODE" != "deploy-restart" ]]; then
+    echo "Usage: $0 [deploy|deploy-reload|deploy-restart]"
     echo ""
+    echo "  (no argument)   Dry run — show what would change without copying files."
     echo "  deploy          Copy changed files. Warn if a restart is required."
     echo "  deploy-reload   Copy changed files and reload Caddy. Warn if a restart is required."
     echo "  deploy-restart  Copy changed files and restart Caddy (daemon-reload + restart)."
@@ -53,8 +54,10 @@ for SRC in "${!FILES[@]}"; do
         echo "NEW: $DEST does not exist on server."
         CHANGES=true
         [[ "$DEST" == "$SYSTEMD_OVERRIDE" ]] && RESTART_REQUIRED=true
-        echo "==> Copying $SRC -> $DEST"
-        cp "$SRC" "$DEST"
+        if [[ "$MODE" != "dry-run" ]]; then
+            echo "==> Copying $SRC -> $DEST"
+            cp "$SRC" "$DEST"
+        fi
         continue
     fi
 
@@ -65,24 +68,26 @@ for SRC in "${!FILES[@]}"; do
         diff "$SRC" "$DEST"
         echo ""
 
-        echo "==> Copying $SRC -> $DEST"
-        cp "$SRC" "$DEST"
+        if [[ "$MODE" != "dry-run" ]]; then
+            echo "==> Copying $SRC -> $DEST"
+            cp "$SRC" "$DEST"
 
-        # Set permissions based on destination
-        case "$DEST" in
-            "$CADDY_DIR/Caddyfile")
-                chown root:caddy "$DEST"
-                chmod 640 "$DEST"
-                ;;
-            "$CADDY_DIR/ca.crt")
-                chown root:caddy "$DEST"
-                chmod 640 "$DEST"
-                ;;
-            "$SYSTEMD_OVERRIDE")
-                chown root:root "$DEST"
-                chmod 644 "$DEST"
-                ;;
-        esac
+            # Set permissions based on destination
+            case "$DEST" in
+                "$CADDY_DIR/Caddyfile")
+                    chown root:caddy "$DEST"
+                    chmod 640 "$DEST"
+                    ;;
+                "$CADDY_DIR/ca.crt")
+                    chown root:caddy "$DEST"
+                    chmod 640 "$DEST"
+                    ;;
+                "$SYSTEMD_OVERRIDE")
+                    chown root:root "$DEST"
+                    chmod 644 "$DEST"
+                    ;;
+            esac
+        fi
     else
         echo "OK: $DEST"
     fi
@@ -102,15 +107,19 @@ else
         if [[ ! -f "$DEST" ]]; then
             echo "NEW: $DEST does not exist."
             CHANGES=true
-            echo "==> Copying $SRC -> $DEST"
-            cp "$SRC" "$DEST"
+            if [[ "$MODE" != "dry-run" ]]; then
+                echo "==> Copying $SRC -> $DEST"
+                cp "$SRC" "$DEST"
+            fi
         elif ! diff -q "$SRC" "$DEST" > /dev/null 2>&1; then
             CHANGES=true
             echo "CHANGED: $DEST"
             diff "$SRC" "$DEST"
             echo ""
-            echo "==> Copying $SRC -> $DEST"
-            cp "$SRC" "$DEST"
+            if [[ "$MODE" != "dry-run" ]]; then
+                echo "==> Copying $SRC -> $DEST"
+                cp "$SRC" "$DEST"
+            fi
         else
             echo "OK: $DEST"
         fi
@@ -120,7 +129,7 @@ fi
 echo ""
 
 if ! $CHANGES; then
-    echo "==> No changes, nothing to deploy."
+    echo "==> No changes detected."
     exit 0
 fi
 
@@ -129,6 +138,9 @@ if $RESTART_REQUIRED; then
 fi
 
 case "$MODE" in
+    dry-run)
+        echo "==> Dry run complete. Run with 'deploy', 'deploy-reload', or 'deploy-restart' to apply changes."
+        ;;
     deploy)
         echo "==> Files deployed. Run with 'deploy-reload' or 'deploy-restart' to apply changes."
         ;;
