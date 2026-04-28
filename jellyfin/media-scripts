@@ -52,7 +52,8 @@ function lookupItemIds() {
   const lastRow = sheet.getLastRow();
   if (lastRow < DATA_START_ROW) return;
 
-  const rows = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, COL_ITEMID).getValues();
+  const lastCol = sheet.getLastColumn();
+  const rows = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, lastCol).getValues();
   let lookupCount = 0;
   let failCount = 0;
 
@@ -62,14 +63,15 @@ function lookupItemIds() {
     const itemId = String(row[COL_ITEMID - 1]).trim();
 
     // Skip if ItemId already populated
-    if (itemId && itemId !== "") continue;
+    if (itemId !== "") continue;
+
+    // All columns except ItemID must be populated
+    if (!row.every((cell, idx) => idx === COL_ITEMID - 1 || String(cell).trim() !== "")) continue;
 
     const show    = String(row[COL_SHOW - 1]).trim();
     const season  = row[COL_SEASON - 1];
     const episode = row[COL_EPISODE - 1];
     const title   = String(row[COL_TITLE - 1]).trim();
-
-    if (!show) continue; // skip empty rows
 
     // Build search term — prefer title if available, fall back to show name
     const searchTerm = title || show;
@@ -82,9 +84,10 @@ function lookupItemIds() {
       failCount++;
     }
 
-    Utilities.sleep(100); // be gentle on the API
+    Utilities.sleep(500); // be gentle on the API
   }
 
+  Logger.log(`ItemId Lookup Complete — Found: ${lookupCount} | Not found: ${failCount}`);
   SpreadsheetApp.getActiveSpreadsheet().toast(
     `Found: ${lookupCount} | Not found: ${failCount}`,
     "ItemId Lookup Complete",
@@ -98,7 +101,8 @@ function pushSegments() {
   const lastRow = sheet.getLastRow();
   if (lastRow < DATA_START_ROW) return;
 
-  const rows = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, COL_CREDITS_END).getValues();
+  const lastCol = sheet.getLastColumn();
+  const rows = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, lastCol).getValues();
   let syncCount = 0;
   let skipCount = 0;
   let failCount = 0;
@@ -106,12 +110,7 @@ function pushSegments() {
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const rowNum = DATA_START_ROW + i;
-    const itemId = String(row[COL_ITEMID - 1]).trim();
-
-    if (!itemId || itemId === "") {
-      skipCount++;
-      continue;
-    }
+    const itemId  = String(row[COL_ITEMID - 1]).trim();
 
     const introStart   = row[COL_INTRO_START - 1];
     const introEnd     = row[COL_INTRO_END - 1];
@@ -120,16 +119,33 @@ function pushSegments() {
     const creditsStart = row[COL_CREDITS_START - 1];
     const creditsEnd   = row[COL_CREDITS_END - 1];
 
-    // Skip rows with no complete segment pairs
-    const hasIntro   = isPopulated(introStart)   && isPopulated(introEnd);
-    const hasRecap   = isPopulated(recapStart)   && isPopulated(recapEnd);
-    const hasCredits = isPopulated(creditsStart) && (isPopulated(creditsEnd) || String(creditsEnd).trim().toLowerCase() === "end");
-    if (!hasIntro && !hasRecap && !hasCredits) {
+    // All columns must be populated
+    if (!row.every(cell => String(cell).trim() !== "")) {
       skipCount++;
       continue;
     }
 
-    const body = buildSegmentBody(itemId, introStart, introEnd, recapStart, recapEnd, creditsStart, creditsEnd);
+    // Skip if every segment column is blank or n/a
+    if (![introStart, introEnd, recapStart, recapEnd, creditsStart, creditsEnd].some(v => isPopulated(v))) {
+      skipCount++;
+      continue;
+    }
+
+    // For "end" credits, look up the episode runtime before building the body
+    let runtimeSeconds;
+    if (String(creditsEnd).trim().toLowerCase() === "end") {
+      const ticks = getItemRuntimeTicks(itemId);
+      if (ticks === null) {
+        Logger.log(`Row ${rowNum}: could not fetch runtime for ${itemId}`);
+        failCount++;
+        continue;
+      }
+      runtimeSeconds = ticks / 10000000;
+      Utilities.sleep(500);
+    }
+
+    const body = buildSegmentBody(itemId, introStart, introEnd, recapStart, recapEnd, creditsStart, creditsEnd, runtimeSeconds);
+    if (Object.keys(body).length === 0) { skipCount++; continue; }
     const result = postTimestamps(itemId, body);
 
     if (result.success) {
@@ -138,9 +154,10 @@ function pushSegments() {
       failCount++;
     }
 
-    Utilities.sleep(100);
+    Utilities.sleep(500);
   }
 
+  Logger.log(`Segment Sync Complete — Synced: ${syncCount} | Skipped: ${skipCount} | Failed: ${failCount}`);
   SpreadsheetApp.getActiveSpreadsheet().toast(
     `Synced: ${syncCount} | Skipped: ${skipCount} | Failed: ${failCount}`,
     "Segment Sync Complete",
@@ -171,8 +188,8 @@ function searchJellyfinItem(show, season, episode, searchTerm) {
     ) || searchData.Items[0];
     const seriesId = series.Id;
 
-    // Step 2 — fetch all episodes for this series and match by season + episode number
-    const episodesUrl = `${JELLYFIN_URL}/Shows/${seriesId}/Episodes`;
+    // Step 2 — fetch only episodes from the target season
+    const episodesUrl = `${JELLYFIN_URL}/Shows/${seriesId}/Episodes?SeasonNumber=${parseInt(season)}`;
     const episodesResp = UrlFetchApp.fetch(episodesUrl, {
       headers: { "Authorization": `MediaBrowser Token="${JELLYFIN_API_KEY}"` },
       muteHttpExceptions: true
@@ -195,7 +212,7 @@ function searchJellyfinItem(show, season, episode, searchTerm) {
   }
 }
 
-function buildSegmentBody(itemId, introStart, introEnd, recapStart, recapEnd, creditsStart, creditsEnd) {
+function buildSegmentBody(itemId, introStart, introEnd, recapStart, recapEnd, creditsStart, creditsEnd, runtimeSeconds) {
   const body = {};
 
   if (isPopulated(introStart) && isPopulated(introEnd)) {
@@ -205,21 +222,11 @@ function buildSegmentBody(itemId, introStart, introEnd, recapStart, recapEnd, cr
     body.Recap = { EpisodeId: itemId, Start: toSeconds(recapStart), End: toSeconds(recapEnd), Valid: true };
   }
 
-  const creditsEndIsEof = String(creditsEnd).trim().toLowerCase() === "end";
-  if (isPopulated(creditsStart) && (isPopulated(creditsEnd) || creditsEndIsEof)) {
-    let creditsEndSeconds;
-    if (creditsEndIsEof) {
-      const runtimeTicks = getItemRuntimeTicks(itemId);
-      if (runtimeTicks === null) {
-        Logger.log(`Could not fetch runtime for ${itemId}, skipping credits`);
-      } else {
-        creditsEndSeconds = runtimeTicks / 10000000;
-      }
-    } else {
-      creditsEndSeconds = toSeconds(creditsEnd);
-    }
-    if (creditsEndSeconds !== undefined) {
-      body.Credits = { EpisodeId: itemId, Start: toSeconds(creditsStart), End: creditsEndSeconds, Valid: true };
+  if (isPopulated(creditsStart)) {
+    const creditsEndIsEof = String(creditsEnd).trim().toLowerCase() === "end";
+    const endSeconds = creditsEndIsEof ? runtimeSeconds : toSeconds(creditsEnd);
+    if (endSeconds !== undefined && endSeconds !== null) {
+      body.Credits = { EpisodeId: itemId, Start: toSeconds(creditsStart), End: endSeconds, Valid: true };
     }
   }
 
@@ -228,7 +235,7 @@ function buildSegmentBody(itemId, introStart, introEnd, recapStart, recapEnd, cr
 
 function getItemRuntimeTicks(itemId) {
   try {
-    const url = `${JELLYFIN_URL}/Items?Ids=${itemId}&Fields=Overview`;
+    const url = `${JELLYFIN_URL}/Items?Ids=${itemId}`;
     const response = UrlFetchApp.fetch(url, {
       headers: { "Authorization": `MediaBrowser Token="${JELLYFIN_API_KEY}"` },
       muteHttpExceptions: true
