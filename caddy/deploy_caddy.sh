@@ -3,10 +3,21 @@
 REPO_DIR=~/homeLab
 CADDY_DIR=/etc/caddy
 SYSTEMD_OVERRIDE=/etc/systemd/system/caddy.service.d/override.conf
+CADDY_ENV="$CADDY_DIR/caddy.env"
 
 DEPLOY=false
 if [[ "$1" == "deploy" ]]; then
     DEPLOY=true
+fi
+
+# Load secrets from live caddy.env so variables like PATH_WWW are available
+if [[ -f "$CADDY_ENV" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$CADDY_ENV"
+    set +a
+else
+    echo "WARNING: $CADDY_ENV not found — PATH_WWW and other secrets will not be set."
 fi
 
 # Pull latest from GitHub
@@ -71,6 +82,39 @@ for SRC in "${!FILES[@]}"; do
         echo "OK: $DEST"
     fi
 done
+
+echo ""
+
+# Copy HTML files from repo to PATH_WWW
+if [[ -z "$PATH_WWW" ]]; then
+    echo "WARNING: PATH_WWW is not set — skipping HTML file deployment."
+else
+    echo "==> Checking HTML files -> $PATH_WWW"
+    for SRC in "$REPO_DIR"/caddy/*.html; do
+        [[ -f "$SRC" ]] || continue
+        DEST="$PATH_WWW/$(basename "$SRC")"
+
+        if [[ ! -f "$DEST" ]]; then
+            echo "NEW: $DEST does not exist."
+            CHANGES=true
+            if $DEPLOY; then
+                echo "==> Copying $SRC -> $DEST"
+                cp "$SRC" "$DEST"
+            fi
+        elif ! diff -q "$SRC" "$DEST" > /dev/null 2>&1; then
+            CHANGES=true
+            echo "CHANGED: $DEST"
+            diff "$SRC" "$DEST"
+            echo ""
+            if $DEPLOY; then
+                echo "==> Copying $SRC -> $DEST"
+                cp "$SRC" "$DEST"
+            fi
+        else
+            echo "OK: $DEST"
+        fi
+    done
+fi
 
 echo ""
 
