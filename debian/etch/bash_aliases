@@ -1,0 +1,1 @@
+alias lu='apt list --upgradable'
