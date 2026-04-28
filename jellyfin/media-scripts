@@ -52,7 +52,8 @@ function lookupItemIds() {
   const lastRow = sheet.getLastRow();
   if (lastRow < DATA_START_ROW) return;
 
-  const rows = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, COL_ITEMID).getValues();
+  const lastCol = sheet.getLastColumn();
+  const rows = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, lastCol).getValues();
   let lookupCount = 0;
   let failCount = 0;
 
@@ -62,16 +63,15 @@ function lookupItemIds() {
     const itemId = String(row[COL_ITEMID - 1]).trim();
 
     // Skip if ItemId already populated
-    if (itemId && itemId !== "") continue;
+    if (itemId !== "") continue;
+
+    // All columns except ItemID must be populated
+    if (!row.every((cell, idx) => idx === COL_ITEMID - 1 || String(cell).trim() !== "")) continue;
 
     const show    = String(row[COL_SHOW - 1]).trim();
-    const tvdb    = String(row[COL_TVDB - 1]).trim();
     const season  = row[COL_SEASON - 1];
     const episode = row[COL_EPISODE - 1];
     const title   = String(row[COL_TITLE - 1]).trim();
-
-    // Only process rows where all columns except ItemID are populated
-    if (!show || !tvdb || String(season).trim() === "" || String(episode).trim() === "" || !title) continue;
 
     // Build search term — prefer title if available, fall back to show name
     const searchTerm = title || show;
@@ -100,7 +100,8 @@ function pushSegments() {
   const lastRow = sheet.getLastRow();
   if (lastRow < DATA_START_ROW) return;
 
-  const rows = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, COL_CREDITS_END).getValues();
+  const lastCol = sheet.getLastColumn();
+  const rows = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, lastCol).getValues();
   let syncCount = 0;
   let skipCount = 0;
   let failCount = 0;
@@ -108,11 +109,6 @@ function pushSegments() {
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const rowNum = DATA_START_ROW + i;
-    const show    = String(row[COL_SHOW - 1]).trim();
-    const tvdb    = String(row[COL_TVDB - 1]).trim();
-    const season  = String(row[COL_SEASON - 1]).trim();
-    const episode = String(row[COL_EPISODE - 1]).trim();
-    const title   = String(row[COL_TITLE - 1]).trim();
     const itemId  = String(row[COL_ITEMID - 1]).trim();
 
     const introStart   = row[COL_INTRO_START - 1];
@@ -122,11 +118,8 @@ function pushSegments() {
     const creditsStart = row[COL_CREDITS_START - 1];
     const creditsEnd   = row[COL_CREDITS_END - 1];
 
-    // Only process rows where all columns are populated
-    if (!show || !tvdb || !season || !episode || !title || !itemId ||
-        !isPopulated(introStart) || !isPopulated(introEnd) ||
-        !isPopulated(recapStart) || !isPopulated(recapEnd) ||
-        !isPopulated(creditsStart) || !isPopulated(creditsEnd)) {
+    // All columns must be populated
+    if (!row.every(cell => String(cell).trim() !== "")) {
       skipCount++;
       continue;
     }
