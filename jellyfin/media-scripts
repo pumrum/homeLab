@@ -124,6 +124,12 @@ function pushSegments() {
       continue;
     }
 
+    // Skip if every segment column is blank or n/a
+    if (![introStart, introEnd, recapStart, recapEnd, creditsStart, creditsEnd].some(v => isPopulated(v))) {
+      skipCount++;
+      continue;
+    }
+
     const body = buildSegmentBody(itemId, introStart, introEnd, recapStart, recapEnd, creditsStart, creditsEnd);
     const result = postTimestamps(itemId, body);
 
