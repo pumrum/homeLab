@@ -1,6 +1,8 @@
 # Caddy Reverse Proxy
 
-Caddy 2.10.2 running in a Proxmox LXC container, configured with the Dynu DNS provider for ACME TLS certificates, optional mTLS client authentication, and environment-variable-driven site configuration.
+Caddy 2 running in a Proxmox LXC container, configured with the Dynu DNS provider for ACME TLS certificates, optional mTLS client authentication, and environment-variable-driven site configuration.
+
+Latest tested version: v2.11.2
 
 > **TODO:**
 > - Create git pull and compare scripts
@@ -9,7 +11,7 @@ Caddy 2.10.2 running in a Proxmox LXC container, configured with the Dynu DNS pr
 
 ## Table of Contents
 
-- [Install Caddy 2.10.2](#install-caddy-2102)
+- [Install Caddy 2](#install-caddy-2)
 - [Configure Shell Aliases](#configure-shell-aliases)
 - [Install Client CA for mTLS Authentication](#install-client-ca-for-mtls-authentication)
 - [Init Caddy Dynu Provider](#init-caddy-dynu-provider)
@@ -17,7 +19,7 @@ Caddy 2.10.2 running in a Proxmox LXC container, configured with the Dynu DNS pr
 
 ---
 
-## Install Caddy 2.10.2
+## Install Caddy 2
 
 1. Connect to `https://server.domain.com:8006` and log in as an administrator.
 2. In the left pane, expand **Datacenter**, click your **\<hostname\>**, then click **Shell** in the middle pane.
