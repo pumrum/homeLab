@@ -1,0 +1,307 @@
+// ============================================================
+// Jellyfin Segment Sync — Google Apps Script
+// ============================================================
+// CONFIGURATION — update these two values before running
+const props = PropertiesService.getScriptProperties();
+const JELLYFIN_URL     = props.getProperty('JELLYFIN_URL');
+const JELLYFIN_API_KEY = props.getProperty('JELLYFIN_API_KEY');
+const SHEET_NAME_TV    = props.getProperty('SHEET_NAME_TV');
+
+// Sheet config
+const DATA_START_ROW = 2;
+
+// Column indices (1-based)
+const COL_SHOW          =  1; // A
+const COL_TVDB          =  2; // B
+const COL_SEASON        =  3; // C
+const COL_EPISODE       =  4; // D
+const COL_TITLE         =  5; // E
+const COL_ITEMID        =  6; // F
+const COL_INTRO_START   = 15; // O
+const COL_INTRO_END     = 16; // P
+const COL_RECAP_START   = 17; // Q
+const COL_RECAP_END     = 18; // R
+const COL_CREDITS_START = 19; // S
+const COL_CREDITS_END   = 20; // T
+
+// ============================================================
+// MENU
+// ============================================================
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu("Jellyfin")
+    .addItem("Sync All Rows", "syncAll")
+    .addItem("Lookup Missing ItemIDs Only", "lookupItemIds")
+    .addItem("Push Segments Only", "pushSegments")
+    .addToUi();
+}
+
+// ============================================================
+// MAIN ENTRY POINTS
+// ============================================================
+
+// Run both passes on all rows
+function syncAll() {
+  lookupItemIds();
+  pushSegments();
+}
+
+// Pass 1 — fill in any blank ItemIds by searching Jellyfin
+function lookupItemIds() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME_TV);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < DATA_START_ROW) return;
+
+  const rows = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, COL_ITEMID).getValues();
+  let lookupCount = 0;
+  let failCount = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const rowNum = DATA_START_ROW + i;
+    const itemId = String(row[COL_ITEMID - 1]).trim();
+
+    // Skip if ItemId already populated
+    if (itemId && itemId !== "") continue;
+
+    const show    = String(row[COL_SHOW - 1]).trim();
+    const season  = row[COL_SEASON - 1];
+    const episode = row[COL_EPISODE - 1];
+    const title   = String(row[COL_TITLE - 1]).trim();
+
+    if (!show) continue; // skip empty rows
+
+    // Build search term — prefer title if available, fall back to show name
+    const searchTerm = title || show;
+    const foundId = searchJellyfinItem(show, season, episode, searchTerm);
+
+    if (foundId) {
+      sheet.getRange(rowNum, COL_ITEMID).setValue(foundId);
+      lookupCount++;
+    } else {
+      failCount++;
+    }
+
+    Utilities.sleep(100); // be gentle on the API
+  }
+
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    `Found: ${lookupCount} | Not found: ${failCount}`,
+    "ItemId Lookup Complete",
+    10
+  );
+}
+
+// Pass 2 — push segment times to Jellyfin for rows with an ItemId and at least one segment
+function pushSegments() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME_TV);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < DATA_START_ROW) return;
+
+  const rows = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, COL_CREDITS_END).getValues();
+  let syncCount = 0;
+  let skipCount = 0;
+  let failCount = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const rowNum = DATA_START_ROW + i;
+    const itemId = String(row[COL_ITEMID - 1]).trim();
+
+    if (!itemId || itemId === "") {
+      skipCount++;
+      continue;
+    }
+
+    const introStart   = row[COL_INTRO_START - 1];
+    const introEnd     = row[COL_INTRO_END - 1];
+    const recapStart   = row[COL_RECAP_START - 1];
+    const recapEnd     = row[COL_RECAP_END - 1];
+    const creditsStart = row[COL_CREDITS_START - 1];
+    const creditsEnd   = row[COL_CREDITS_END - 1];
+
+    // Skip rows with no complete segment pairs
+    const hasIntro   = isPopulated(introStart)   && isPopulated(introEnd);
+    const hasRecap   = isPopulated(recapStart)   && isPopulated(recapEnd);
+    const hasCredits = isPopulated(creditsStart) && (isPopulated(creditsEnd) || String(creditsEnd).trim().toLowerCase() === "end");
+    if (!hasIntro && !hasRecap && !hasCredits) {
+      skipCount++;
+      continue;
+    }
+
+    const body = buildSegmentBody(itemId, introStart, introEnd, recapStart, recapEnd, creditsStart, creditsEnd);
+    const result = postTimestamps(itemId, body);
+
+    if (result.success) {
+      syncCount++;
+    } else {
+      failCount++;
+    }
+
+    Utilities.sleep(100);
+  }
+
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    `Synced: ${syncCount} | Skipped: ${skipCount} | Failed: ${failCount}`,
+    "Segment Sync Complete",
+    10
+  );
+}
+
+// ============================================================
+// JELLYFIN API HELPERS
+// ============================================================
+
+function searchJellyfinItem(show, season, episode, searchTerm) {
+  try {
+    // Step 1 — find the SeriesId by searching for the show name
+    const searchUrl = `${JELLYFIN_URL}/Items?searchTerm=${encodeURIComponent(show)}&IncludeItemTypes=Series&Recursive=true&Limit=10`;
+    const searchResp = UrlFetchApp.fetch(searchUrl, {
+      headers: { "Authorization": `MediaBrowser Token="${JELLYFIN_API_KEY}"` },
+      muteHttpExceptions: true
+    });
+    if (searchResp.getResponseCode() !== 200) return null;
+
+    const searchData = JSON.parse(searchResp.getContentText());
+    if (!searchData.Items || searchData.Items.length === 0) return null;
+
+    // Match series name (case-insensitive)
+    const series = searchData.Items.find(item =>
+      item.Name && item.Name.toLowerCase().includes(show.toLowerCase())
+    ) || searchData.Items[0];
+    const seriesId = series.Id;
+
+    // Step 2 — fetch all episodes for this series and match by season + episode number
+    const episodesUrl = `${JELLYFIN_URL}/Shows/${seriesId}/Episodes`;
+    const episodesResp = UrlFetchApp.fetch(episodesUrl, {
+      headers: { "Authorization": `MediaBrowser Token="${JELLYFIN_API_KEY}"` },
+      muteHttpExceptions: true
+    });
+    if (episodesResp.getResponseCode() !== 200) return null;
+
+    const episodesData = JSON.parse(episodesResp.getContentText());
+    if (!episodesData.Items || episodesData.Items.length === 0) return null;
+
+    const s = parseInt(season);
+    const e = parseInt(episode);
+    const match = episodesData.Items.find(item =>
+      item.ParentIndexNumber === s && item.IndexNumber === e
+    );
+    return match ? match.Id : null;
+
+  } catch (e) {
+    Logger.log(`Search error: ${e.message}`);
+    return null;
+  }
+}
+
+function buildSegmentBody(itemId, introStart, introEnd, recapStart, recapEnd, creditsStart, creditsEnd) {
+  const body = {};
+
+  if (isPopulated(introStart) && isPopulated(introEnd)) {
+    body.Introduction = { EpisodeId: itemId, Start: toSeconds(introStart), End: toSeconds(introEnd), Valid: true };
+  }
+  if (isPopulated(recapStart) && isPopulated(recapEnd)) {
+    body.Recap = { EpisodeId: itemId, Start: toSeconds(recapStart), End: toSeconds(recapEnd), Valid: true };
+  }
+
+  const creditsEndIsEof = String(creditsEnd).trim().toLowerCase() === "end";
+  if (isPopulated(creditsStart) && (isPopulated(creditsEnd) || creditsEndIsEof)) {
+    let creditsEndSeconds;
+    if (creditsEndIsEof) {
+      const runtimeTicks = getItemRuntimeTicks(itemId);
+      if (runtimeTicks === null) {
+        Logger.log(`Could not fetch runtime for ${itemId}, skipping credits`);
+      } else {
+        creditsEndSeconds = runtimeTicks / 10000000;
+      }
+    } else {
+      creditsEndSeconds = toSeconds(creditsEnd);
+    }
+    if (creditsEndSeconds !== undefined) {
+      body.Credits = { EpisodeId: itemId, Start: toSeconds(creditsStart), End: creditsEndSeconds, Valid: true };
+    }
+  }
+
+  return body;
+}
+
+function getItemRuntimeTicks(itemId) {
+  try {
+    const url = `${JELLYFIN_URL}/Items?Ids=${itemId}&Fields=Overview`;
+    const response = UrlFetchApp.fetch(url, {
+      headers: { "Authorization": `MediaBrowser Token="${JELLYFIN_API_KEY}"` },
+      muteHttpExceptions: true
+    });
+    if (response.getResponseCode() !== 200) return null;
+    const data = JSON.parse(response.getContentText());
+    if (!data.Items || data.Items.length === 0) return null;
+    return data.Items[0].RunTimeTicks ?? null;
+  } catch (e) {
+    Logger.log(`Runtime fetch error: ${e.message}`);
+    return null;
+  }
+}
+
+function postTimestamps(itemId, body) {
+  try {
+    const url = `${JELLYFIN_URL}/Episode/${itemId}/Timestamps`;
+    const response = UrlFetchApp.fetch(url, {
+      method: "post",
+      headers: {
+        "Authorization": `MediaBrowser Token="${JELLYFIN_API_KEY}"`,
+        "Content-Type": "application/json"
+      },
+      payload: JSON.stringify(body),
+      muteHttpExceptions: true
+    });
+
+    const code = response.getResponseCode();
+    if (code === 200 || code === 204) {
+      return { success: true };
+    } else {
+      return { success: false, error: `HTTP ${code}: ${response.getContentText().substring(0, 100)}` };
+    }
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+// ============================================================
+// UTILITIES
+// ============================================================
+
+function hasValue(v) {
+  return v !== "" && v !== null && v !== undefined && !isNaN(Number(v));
+}
+
+// Accepts plain seconds (e.g. 90), MM:SS (e.g. 1:30), or HH:MM:SS (e.g. 1:30:00) with optional decimals
+function toSeconds(v) {
+  const s = String(v).trim();
+  if (s === "" || s.toLowerCase() === "n/a" || s.toLowerCase() === "end") return null;
+
+  // If it contains a colon, parse as time
+  if (s.indexOf(":") !== -1) {
+    const parts = s.split(":").map(Number);
+    if (parts.some(isNaN)) return null;
+    if (parts.length === 2) {
+      // MM:SS
+      return parts[0] * 60 + parts[1];
+    } else if (parts.length === 3) {
+      // HH:MM:SS
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+    return null;
+  }
+
+  // Plain number
+  const n = Number(s);
+  return isNaN(n) ? null : n;
+}
+
+function isPopulated(v) {
+  const s = String(v).trim().toLowerCase();
+  if (s === "" || s === "n/a") return false;
+  if (s === "end") return true; // handled separately for creditsEnd
+  return toSeconds(v) !== null;
+}
