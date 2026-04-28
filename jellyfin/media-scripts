@@ -87,6 +87,7 @@ function lookupItemIds() {
     Utilities.sleep(500); // be gentle on the API
   }
 
+  Logger.log(`ItemId Lookup Complete — Found: ${lookupCount} | Not found: ${failCount}`);
   SpreadsheetApp.getActiveSpreadsheet().toast(
     `Found: ${lookupCount} | Not found: ${failCount}`,
     "ItemId Lookup Complete",
@@ -130,7 +131,21 @@ function pushSegments() {
       continue;
     }
 
-    const body = buildSegmentBody(itemId, introStart, introEnd, recapStart, recapEnd, creditsStart, creditsEnd);
+    // For "end" credits, look up the episode runtime before building the body
+    let runtimeSeconds;
+    if (String(creditsEnd).trim().toLowerCase() === "end") {
+      const ticks = getItemRuntimeTicks(itemId);
+      if (ticks === null) {
+        Logger.log(`Row ${rowNum}: could not fetch runtime for ${itemId}`);
+        failCount++;
+        continue;
+      }
+      runtimeSeconds = ticks / 10000000;
+      Utilities.sleep(500);
+    }
+
+    const body = buildSegmentBody(itemId, introStart, introEnd, recapStart, recapEnd, creditsStart, creditsEnd, runtimeSeconds);
+    if (Object.keys(body).length === 0) { skipCount++; continue; }
     const result = postTimestamps(itemId, body);
 
     if (result.success) {
@@ -142,6 +157,7 @@ function pushSegments() {
     Utilities.sleep(500);
   }
 
+  Logger.log(`Segment Sync Complete — Synced: ${syncCount} | Skipped: ${skipCount} | Failed: ${failCount}`);
   SpreadsheetApp.getActiveSpreadsheet().toast(
     `Synced: ${syncCount} | Skipped: ${skipCount} | Failed: ${failCount}`,
     "Segment Sync Complete",
@@ -196,7 +212,7 @@ function searchJellyfinItem(show, season, episode, searchTerm) {
   }
 }
 
-function buildSegmentBody(itemId, introStart, introEnd, recapStart, recapEnd, creditsStart, creditsEnd) {
+function buildSegmentBody(itemId, introStart, introEnd, recapStart, recapEnd, creditsStart, creditsEnd, runtimeSeconds) {
   const body = {};
 
   if (isPopulated(introStart) && isPopulated(introEnd)) {
@@ -206,21 +222,11 @@ function buildSegmentBody(itemId, introStart, introEnd, recapStart, recapEnd, cr
     body.Recap = { EpisodeId: itemId, Start: toSeconds(recapStart), End: toSeconds(recapEnd), Valid: true };
   }
 
-  const creditsEndIsEof = String(creditsEnd).trim().toLowerCase() === "end";
-  if (isPopulated(creditsStart) && (isPopulated(creditsEnd) || creditsEndIsEof)) {
-    let creditsEndSeconds;
-    if (creditsEndIsEof) {
-      const runtimeTicks = getItemRuntimeTicks(itemId);
-      if (runtimeTicks === null) {
-        Logger.log(`Could not fetch runtime for ${itemId}, skipping credits`);
-      } else {
-        creditsEndSeconds = runtimeTicks / 10000000;
-      }
-    } else {
-      creditsEndSeconds = toSeconds(creditsEnd);
-    }
-    if (creditsEndSeconds !== undefined) {
-      body.Credits = { EpisodeId: itemId, Start: toSeconds(creditsStart), End: creditsEndSeconds, Valid: true };
+  if (isPopulated(creditsStart)) {
+    const creditsEndIsEof = String(creditsEnd).trim().toLowerCase() === "end";
+    const endSeconds = creditsEndIsEof ? runtimeSeconds : toSeconds(creditsEnd);
+    if (endSeconds !== undefined && endSeconds !== null) {
+      body.Credits = { EpisodeId: itemId, Start: toSeconds(creditsStart), End: endSeconds, Valid: true };
     }
   }
 
