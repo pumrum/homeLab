@@ -7,6 +7,7 @@ Latest tested version: 10.11
 > **TODO:**
 > * Update to use media CNAME
 > * Confirm mp4 playback in browser without transcoding
+> * Update new user process to include setting subtitle preference to Forced only
 
 ---
 
