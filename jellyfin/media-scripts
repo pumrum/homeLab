@@ -84,7 +84,7 @@ function lookupItemIds() {
       failCount++;
     }
 
-    Utilities.sleep(100); // be gentle on the API
+    Utilities.sleep(500); // be gentle on the API
   }
 
   SpreadsheetApp.getActiveSpreadsheet().toast(
@@ -133,7 +133,7 @@ function pushSegments() {
       failCount++;
     }
 
-    Utilities.sleep(100);
+    Utilities.sleep(500);
   }
 
   SpreadsheetApp.getActiveSpreadsheet().toast(
@@ -166,8 +166,8 @@ function searchJellyfinItem(show, season, episode, searchTerm) {
     ) || searchData.Items[0];
     const seriesId = series.Id;
 
-    // Step 2 — fetch all episodes for this series and match by season + episode number
-    const episodesUrl = `${JELLYFIN_URL}/Shows/${seriesId}/Episodes`;
+    // Step 2 — fetch only episodes from the target season
+    const episodesUrl = `${JELLYFIN_URL}/Shows/${seriesId}/Episodes?SeasonNumber=${parseInt(season)}`;
     const episodesResp = UrlFetchApp.fetch(episodesUrl, {
       headers: { "Authorization": `MediaBrowser Token="${JELLYFIN_API_KEY}"` },
       muteHttpExceptions: true
@@ -223,7 +223,7 @@ function buildSegmentBody(itemId, introStart, introEnd, recapStart, recapEnd, cr
 
 function getItemRuntimeTicks(itemId) {
   try {
-    const url = `${JELLYFIN_URL}/Items?Ids=${itemId}&Fields=Overview`;
+    const url = `${JELLYFIN_URL}/Items?Ids=${itemId}`;
     const response = UrlFetchApp.fetch(url, {
       headers: { "Authorization": `MediaBrowser Token="${JELLYFIN_API_KEY}"` },
       muteHttpExceptions: true
