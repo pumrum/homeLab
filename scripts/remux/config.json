@@ -1,0 +1,14 @@
+{
+  "spreadsheet_id": "abcdef123456",
+  "sheet_name_movie": "Movie",
+  "sheet_name_tv": "TV",
+  "sheet_mode": "Online",
+  "ffmpeg_path": "C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe",
+  "ffprobe_path": "C:\\Program Files\\ffmpeg\\bin\\ffprobe.exe",
+  "mediainfo_path": "C:\\Program Files\\MediaInfo_CLI_23.10_Windows_x64\\MediaInfo.exe",
+  "working_path_legacy": "R:\\legacy-raw",
+  "working_path_movie": "R:\\movie-raw",
+  "working_path_tv": "R:\\tv-raw",
+  "output_path": "G:\\remux\\output",
+  "execution_mode": "Enabled"
+}
