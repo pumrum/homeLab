@@ -1,2 +1,2 @@
 # Remux environment secrets (use credentials.json.template instead)
-scripts/remux/credentials.json
+credentials.json
