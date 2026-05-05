@@ -31,7 +31,7 @@ Manage mutual TLS client certificates using LibreSSL on macOS for use with Caddy
    chmod 600 ~/myca/serial
    ```
 
-3. Copy [`ca.cnf.template`](./ca.cnf.template) from this repository into `~/myca/` as `ca.cnf`:
+3. Copy [`ca.cnf`](./ca.cnf.template) from this repository into `~/myca/`:
 
    ```bash
    cp /path/to/repo/pki/ca.cnf.template ~/myca/ca.cnf
