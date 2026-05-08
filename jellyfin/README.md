@@ -2,7 +2,7 @@
 
 Jellyfin 10.11 running in a Proxmox LXC container, mounted to a remote media server over SSHFS, with TheTVDB and Webhook plugins configured for metadata and Home Assistant playback notifications.
 
-Latest tested version: 10.11
+Latest tested version: 10.11.6
 
 > **TODO:**
 > * Update to use media CNAME
