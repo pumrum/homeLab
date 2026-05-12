@@ -1,5 +1,4 @@
 {
-  "spreadsheet_id": "abcdef123456",
   "sheet_name_movie": "Movie",
   "sheet_name_tv": "TV",
   "sheet_mode": "Online",
@@ -10,5 +9,6 @@
   "working_path_movie": "R:\\movie-raw",
   "working_path_tv": "R:\\tv-raw",
   "output_path": "G:\\remux\\output",
-  "execution_mode": "Enabled"
+  "execution_mode": "Enabled",
+  "tvdb_720p_ids": [123456, 654321]
 }

@@ -28,9 +28,7 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 CONFIG_FILE = 'config.json'  # Path to configuration file
 CREDENTIALS_FILE = 'credentials.json'  # Path to your service account credentials
 
-# TVDB IDs that should be downscaled to 720p instead of 1080p
-# Edit this list to add or remove TVDB IDs as needed
-TVDB_720P_IDS = [123456, 654321]
+TVDB_720P_IDS = []  # populated from config.json at startup
 
 # Colors to use for text coloring
 BLUE   = '\033[94m'
@@ -526,9 +524,10 @@ def load_config():
         
         # Validate required fields for movie/TV dual mode
         required_fields = [
-            'spreadsheet_id', 'sheet_name_movie', 'sheet_name_tv', 'sheet_mode', 
-            'execution_mode', 'ffmpeg_path', 'ffprobe_path', 'mediainfo_path', 
-            'working_path_movie', 'working_path_tv', 'working_path_legacy', 'output_path'
+            'sheet_name_movie', 'sheet_name_tv', 'sheet_mode',
+            'execution_mode', 'ffmpeg_path', 'ffprobe_path', 'mediainfo_path',
+            'working_path_movie', 'working_path_tv', 'working_path_legacy', 'output_path',
+            'tvdb_720p_ids'
         ]
         missing_fields = [field for field in required_fields if field not in config]
         
@@ -564,6 +563,27 @@ def load_config():
         print(f"{RED}Error: Invalid JSON in {CONFIG_FILE}: {e}{RESET}")
         sys.exit(1)
 
+
+def load_credentials():
+    """Load secrets from credentials.json (spreadsheet_id, webhook_url, and service account fields)"""
+    try:
+        with open(CREDENTIALS_FILE, 'r') as f:
+            creds = json.load(f)
+
+        required_fields = ['spreadsheet_id', 'webhook_url']
+        missing_fields = [field for field in required_fields if field not in creds]
+        if missing_fields:
+            print(f"{RED}Error: Missing required fields in {CREDENTIALS_FILE}: {', '.join(missing_fields)}{RESET}")
+            sys.exit(1)
+
+        return creds
+
+    except FileNotFoundError:
+        print(f"{RED}Error: Credentials file '{CREDENTIALS_FILE}' not found.{RESET}")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"{RED}Error: Invalid JSON in {CREDENTIALS_FILE}: {e}{RESET}")
+        sys.exit(1)
 
 
 def get_google_sheets_service():
@@ -2430,7 +2450,13 @@ def main():
     # Load configuration first (before logging setup)
     config = load_config()
     output_path = config['output_path']
-    
+
+    credentials = load_credentials()
+    config['spreadsheet_id'] = credentials['spreadsheet_id']
+
+    global TVDB_720P_IDS
+    TVDB_720P_IDS = config['tvdb_720p_ids']
+
     # Set up logging to file and console
     log_file = setup_logging(output_path)
     
@@ -2541,7 +2567,7 @@ def main():
         interrupt_handler.uninstall()
         
         # Send webhook notification
-        webhook_url = "https://server.domain.com:1234/api/webhook/webhook_job_name"
+        webhook_url = credentials['webhook_url']
         if was_interrupted:
             send_webhook_notification(webhook_url, "remux interrupted")
         else:
