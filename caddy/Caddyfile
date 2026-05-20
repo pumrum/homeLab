@@ -143,11 +143,11 @@
 	encode zstd gzip
 
 	reverse_proxy {env.IP_JELLYFIN}:{env.PORT_JELLYFIN} {
-#		transport http {
-#			tls
-#			tls_insecure_skip_verify
-#			versions 1.1
-#		}
+		# transport http {
+		#	tls
+		#	tls_insecure_skip_verify
+		#	versions 1.1
+		# }
 		header_up Host {host}
 		header_up X-Real-IP {remote_host}
 		flush_interval -1
