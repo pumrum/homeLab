@@ -1,6 +1,6 @@
 # macOS Certificate Authority for Caddy
 
-Manage mutual TLS client certificates using LibreSSL on macOS for use with Caddy. The CA configuration template ([`ca.cnf.template`](./ca.cnf.template)) is stored separately in this repository.
+Manage mutual TLS client certificates using OpenSSL on macOS for use with Caddy. The CA configuration template ([`ca.cnf.template`](./ca.cnf.template)) is stored separately in this repository.
 
 ---
 
