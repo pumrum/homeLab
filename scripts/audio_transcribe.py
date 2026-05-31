@@ -29,11 +29,13 @@ import sys
 import textwrap
 from pathlib import Path
 
+# The venv lives next to this script so it's self-contained and portable
 VENV_DIR = Path(__file__).resolve().parent / ".transcribe_venv"
 
 # ── Virtual environment bootstrap ─────────────────────────────────────────────
 
 def in_venv():
+    # sys.prefix differs from sys.base_prefix only when running inside a venv
     return sys.prefix != sys.base_prefix
 
 def bootstrap_venv():
@@ -58,15 +60,17 @@ def bootstrap_venv():
         print("Installing dependencies (this takes a few minutes the first time)...\n")
         pip = [str(venv_python), "-m", "pip"]
 
+        # Upgrade pip first to avoid resolver warnings
         subprocess.check_call(pip + ["install", "--upgrade", "pip"],
                               stdout=subprocess.DEVNULL)
 
+        # Pin exact versions to avoid incompatibility between torch, torchaudio, and pyannote
         print("  Installing PyTorch, Whisper, pyannote, and all dependencies...")
         subprocess.check_call(pip + [
             "install",
             "torch==2.5.1",
             "torchaudio==2.5.1",
-            "numpy<2",
+            "numpy<2",           # numpy 2.x breaks several audio libraries
             "openai-whisper",
             "pyannote.audio==3.3.2",
             "matplotlib",
@@ -74,10 +78,12 @@ def bootstrap_venv():
 
         print("\nDependencies installed.\n")
 
-    # Re-exec this same script inside the venv
+    # Replace the current process with the venv Python running this same script,
+    # forwarding all original arguments so the user experience is seamless
     os.execv(str(venv_python), [str(venv_python), __file__] + sys.argv[1:])
 
 
+# Run bootstrap immediately — if we're not in the venv yet this call never returns
 bootstrap_venv()
 
 # ── From here on we're running inside the venv ────────────────────────────────
@@ -85,6 +91,7 @@ bootstrap_venv()
 # ── Monkey-patch huggingface_hub BEFORE any pyannote imports ──────────────────
 # pyannote.audio 3.3.2 passes use_auth_token= to hf_hub_download(), but newer
 # versions of huggingface_hub removed that kwarg in favor of token=.
+# This wrapper transparently renames the argument so both old and new hub versions work.
 
 import huggingface_hub
 import functools
@@ -92,11 +99,13 @@ import functools
 def _patch_hf_func(original_func):
     @functools.wraps(original_func)
     def wrapper(*args, **kwargs):
+        # Translate the deprecated kwarg to the current one
         if "use_auth_token" in kwargs:
             kwargs["token"] = kwargs.pop("use_auth_token")
         return original_func(*args, **kwargs)
     return wrapper
 
+# Apply the patch to every hub function that pyannote might call
 for fn_name in ("hf_hub_download", "snapshot_download", "model_info", "repo_info"):
     if hasattr(huggingface_hub, fn_name):
         setattr(huggingface_hub, fn_name, _patch_hf_func(getattr(huggingface_hub, fn_name)))
@@ -104,14 +113,17 @@ for fn_name in ("hf_hub_download", "snapshot_download", "model_info", "repo_info
 # Monkey-patch torchaudio in case AudioMetaData was removed
 import torchaudio
 if not hasattr(torchaudio, "AudioMetaData"):
+    # Some torchaudio builds omit this class; provide a no-op stand-in
     torchaudio.AudioMetaData = object
 if not hasattr(torchaudio, "list_audio_backends"):
     torchaudio.list_audio_backends = lambda: ["sox_io"]
 
+# Suppress noisy but harmless warnings from torch and whisper
 import warnings
 warnings.filterwarnings("ignore", message=".*weights_only.*")
 warnings.filterwarnings("ignore", message=".*FP16 is not supported on CPU.*")
 
+# Limit CPU thread usage to avoid thrashing on machines with many cores
 os.environ["OMP_NUM_THREADS"] = os.environ.get("OMP_NUM_THREADS", "1")
 os.environ["KMP_WARNINGS"] = "0"
 
@@ -133,7 +145,7 @@ def ensure_wav(audio_path: str) -> str:
     if p.suffix.lower() == ".wav":
         return audio_path
 
-    # Check ffmpeg is available
+    # ffmpeg must be installed for any non-wav format
     try:
         subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
     except (FileNotFoundError, subprocess.CalledProcessError):
@@ -141,6 +153,7 @@ def ensure_wav(audio_path: str) -> str:
         print("Install it with:  brew install ffmpeg")
         sys.exit(1)
 
+    # Reuse an existing converted file to avoid redundant re-encoding
     wav_path = p.with_suffix(".wav")
     if wav_path.exists():
         print(f"Using existing WAV file: {wav_path}")
@@ -150,8 +163,8 @@ def ensure_wav(audio_path: str) -> str:
     subprocess.check_call([
         "ffmpeg", "-i", str(audio_path),
         "-ar", "16000",      # 16kHz sample rate (optimal for speech models)
-        "-ac", "1",           # mono
-        "-c:a", "pcm_s16le",  # 16-bit PCM
+        "-ac", "1",           # mono — diarization and whisper both expect single channel
+        "-c:a", "pcm_s16le",  # 16-bit PCM, the widest-compatible WAV format
         "-y",                 # overwrite if exists
         str(wav_path),
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -164,6 +177,7 @@ def ensure_wav(audio_path: str) -> str:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def fmt_time(seconds: float) -> str:
+    # Format as MM:SS or HH:MM:SS depending on length
     h, rem = divmod(int(seconds), 3600)
     m, s = divmod(rem, 60)
     if h:
@@ -174,11 +188,13 @@ def fmt_time(seconds: float) -> str:
 def load_diarization_pipeline(hf_token: str):
     from pyannote.audio import Pipeline
 
+    # The model download (~1 GB) is cached by huggingface_hub after the first run
     print("Loading speaker diarization model (first run downloads ~1 GB)...")
     pipeline = Pipeline.from_pretrained(
         "pyannote/speaker-diarization-3.1",
         use_auth_token=hf_token,
     )
+    # Move model to GPU if available; MPS gives a speedup on Apple Silicon
     if torch.cuda.is_available():
         pipeline.to(torch.device("cuda"))
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -187,6 +203,7 @@ def load_diarization_pipeline(hf_token: str):
 
 
 def run_diarization(pipeline, audio_path: str):
+    # Returns a list of (start, end, speaker_label) tuples covering the whole file
     print("Running speaker diarization (this takes a while on long files)...")
     diarization = pipeline(audio_path)
     segments = []
@@ -198,6 +215,7 @@ def run_diarization(pipeline, audio_path: str):
 
 
 def run_whisper(audio_path: str, model_size: str, language):
+    # Prefer GPU; fall back to CPU which is slower but always available
     device = "cpu"
     if torch.cuda.is_available():
         device = "cuda"
@@ -205,6 +223,7 @@ def run_whisper(audio_path: str, model_size: str, language):
     model = whisper.load_model(model_size, device=device)
 
     print("Transcribing audio (this is the slow part — be patient)...")
+    # word_timestamps=True gives us per-word timing, enabling accurate speaker alignment
     options = dict(verbose=False, word_timestamps=True)
     if language:
         options["language"] = language
@@ -215,6 +234,8 @@ def run_whisper(audio_path: str, model_size: str, language):
 
 def assign_speakers(whisper_segments, diarization_segments):
     def best_speaker(seg_start, seg_end):
+        # For each whisper segment, find whichever diarization speaker
+        # has the most overlapping time with that segment's window
         overlaps = {}
         for d_start, d_end, speaker in diarization_segments:
             overlap_start = max(seg_start, d_start)
@@ -223,7 +244,7 @@ def assign_speakers(whisper_segments, diarization_segments):
                 overlaps[speaker] = overlaps.get(speaker, 0) + (overlap_end - overlap_start)
         if overlaps:
             return max(overlaps, key=overlaps.get)
-        return "UNKNOWN"
+        return "UNKNOWN"  # no diarization segment overlapped this whisper segment
 
     results = []
     for seg in whisper_segments:
@@ -238,6 +259,8 @@ def assign_speakers(whisper_segments, diarization_segments):
 
 
 def merge_consecutive(segments):
+    # Combine back-to-back segments from the same speaker into a single entry,
+    # as long as the gap between them is less than 1.5 seconds
     if not segments:
         return segments
     merged = [segments[0].copy()]
@@ -252,6 +275,8 @@ def merge_consecutive(segments):
 
 
 def rename_speakers(segments):
+    # Replace pyannote's internal labels (e.g. "SPEAKER_00") with
+    # friendly names ("Speaker 1", "Speaker 2", …) in order of first appearance
     seen = {}
     counter = 1
     for seg in segments:
@@ -267,6 +292,7 @@ def rename_speakers(segments):
 # ── Output formatters ─────────────────────────────────────────────────────────
 
 def write_txt(segments, path):
+    # Human-readable transcript: speaker header followed by timestamped lines
     with open(path, "w") as f:
         current_speaker = None
         for seg in segments:
@@ -278,12 +304,14 @@ def write_txt(segments, path):
 
 
 def write_json(segments, path):
+    # Structured output for downstream processing or import into other tools
     with open(path, "w") as f:
         json.dump(segments, f, indent=2, ensure_ascii=False)
     print(f"  Saved: {path}")
 
 
 def write_srt(segments, path):
+    # Standard subtitle format; compatible with video players and editing tools
     with open(path, "w") as f:
         for i, seg in enumerate(segments, 1):
             start = fmt_srt_time(seg["start"])
@@ -293,6 +321,7 @@ def write_srt(segments, path):
 
 
 def fmt_srt_time(seconds):
+    # SRT timestamps use comma as the decimal separator (HH:MM:SS,mmm)
     h, rem = divmod(int(seconds), 3600)
     m, s = divmod(rem, 60)
     ms = int((seconds - int(seconds)) * 1000)
@@ -330,6 +359,7 @@ def main():
                         help="Output directory (default: same as input file)")
     args = parser.parse_args()
 
+    # Resolve and validate the input path up front
     audio_path = Path(args.audio).resolve()
     if not audio_path.exists():
         sys.exit(f"Error: file not found: {audio_path}")
@@ -344,10 +374,12 @@ def main():
     wav_path = ensure_wav(str(audio_path))
 
     # ── Step 1: Whisper transcription ──
+    # Produces word-level segments with start/end timestamps
     whisper_segments = run_whisper(wav_path, args.whisper_model, args.language)
 
     # ── Step 2: Speaker diarization (optional) ──
     if args.no_diarize:
+        # Skip diarization — label every segment with a single generic speaker name
         final = [{"start": s["start"], "end": s["end"], "speaker": "Speaker", "text": s["text"].strip()}
                  for s in whisper_segments]
     else:
@@ -367,21 +399,26 @@ def main():
             print("=" * 60)
             sys.exit(1)
 
+        # Load the diarization model and identify speaker turns across the audio
         pipeline = load_diarization_pipeline(args.hf_token)
         diar_segments = run_diarization(pipeline, wav_path)
+        # Align whisper text segments with the diarization speaker turns
         final = assign_speakers(whisper_segments, diar_segments)
 
     # ── Step 3: Clean up ──
+    # Merge adjacent segments from the same speaker, then apply friendly names
     final = merge_consecutive(final)
     final = rename_speakers(final)
 
     # ── Step 4: Write outputs ──
+    # Produce three formats: plain text, JSON, and SRT subtitles
     print("Writing output files...")
     write_txt(final, out_dir / f"{stem}_transcript.txt")
     write_json(final, out_dir / f"{stem}_transcript.json")
     write_srt(final, out_dir / f"{stem}_transcript.srt")
 
     # ── Print preview ──
+    # Show the first 20 segments in the terminal so the user can spot-check quickly
     print(f"\n{'─' * 60}")
     print(f"TRANSCRIPT PREVIEW (first 20 entries)")
     print(f"{'─' * 60}\n")
