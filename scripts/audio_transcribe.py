@@ -4,22 +4,72 @@ Audio Transcription Script with Speaker Identification
 =========================================================
 Transcribes audio files with timestamps and speaker labels.
 
-This script creates its own virtual environment with pinned, compatible
-dependency versions.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HOW THIS SCRIPT MANAGES ITS OWN DEPENDENCIES (THE VENV)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Python scripts often rely on third-party libraries (like the AI models
+this script uses). Those libraries must be installed before the script
+can run. Normally you'd install them yourself with `pip install ...`,
+but that installs them globally on your machine — which can cause
+version conflicts if other projects need different versions of the same
+library.
 
+To avoid that problem, this script uses a "virtual environment" (venv).
+Think of a venv as a private, self-contained box of libraries that
+belongs only to this script. It lives in a hidden folder called
+  .transcribe_venv/
+in the same directory as this script.
+
+What happens the very first time you run this script:
+  1. Python notices the venv folder doesn't exist yet.
+  2. It creates it and downloads the required libraries into it
+     (PyTorch, Whisper, pyannote, etc.). This can take several minutes
+     and requires an internet connection. You'll see progress messages.
+  3. The script then restarts itself *inside* the venv so it has access
+     to those libraries.
+  4. From that point on, transcription runs normally.
+
+On every subsequent run:
+  - The venv already exists, so setup is skipped entirely.
+  - The script jumps straight to transcribing your audio.
+  - Startup is fast.
+
+What this means for you practically:
+  • You do NOT need to install anything manually before running this.
+  • Your global Python installation is not modified.
+  • The libraries are pinned to specific versions so the script behaves
+    consistently over time, even if newer (potentially incompatible)
+    versions of those libraries are released.
+  • If something breaks after an OS or Python update, you can wipe the
+    venv and let the script rebuild it cleanly by passing --clean-venv:
+      python3 audio_transcribe.py audio.m4a --clean-venv --hf-token hf_XXXX
+  • Disk space: the venv folder is roughly 3–5 GB (mostly PyTorch).
+    It is safe to delete it at any time; the script will just rebuild it
+    on the next run.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SUPPORTED FILE TYPES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Supports: m4a, mp3, mp4, ogg, flac, wav, webm, aac, wma
-(Non-wav formats are auto-converted via ffmpeg.)
+Non-wav formats are automatically converted via ffmpeg before
+transcription. ffmpeg must be installed separately:
+  brew install ffmpeg
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SPEAKER IDENTIFICATION (DIARIZATION)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 You'll need a free HuggingFace token for speaker diarization:
   1. Create an account at https://huggingface.co
   2. Accept the terms at https://huggingface.co/pyannote/speaker-diarization-3.1
   3. Accept the terms at https://huggingface.co/pyannote/segmentation-3.0
   4. Create a token at https://huggingface.co/settings/tokens
 
-Usage:
-  python3 transcribe_audio.py "audio.m4a" --hf-token hf_XXXX
-  python3 transcribe_audio.py "audio.m4a" --whisper-model medium --language en
-  python3 transcribe_audio.py "audio.m4a" --no-diarize
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+USAGE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  python3 audio_transcribe.py "audio.m4a" --hf-token hf_XXXX
+  python3 audio_transcribe.py "audio.m4a" --whisper-model medium --language en
+  python3 audio_transcribe.py "audio.m4a" --no-diarize
 """
 
 import argparse
