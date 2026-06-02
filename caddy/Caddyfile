@@ -72,7 +72,8 @@
 }
 
 {env.HOST_B_PROXMOX}.{env.OWN_DYNU_DOMAIN} {
-	import dynu_tls_staging
+	import ca_tls
+	import dynu_tls
 	import security_headers
 	encode zstd gzip
 
@@ -95,7 +96,7 @@
 
 {env.HOST_H_PROXMOX}.{env.OWN_DYNU_DOMAIN} {
 	import ca_tls
-	import dynu_tls_staging
+	import dynu_tls
 	import security_headers
 	encode zstd gzip
 
