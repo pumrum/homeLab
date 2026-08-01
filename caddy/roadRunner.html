@@ -18,6 +18,9 @@
   }
   .wrap {
     text-align: center;
+    max-width: 100vw;
+    padding: 0 10px;
+    box-sizing: border-box;
   }
   h1 {
     margin-bottom: 8px;
@@ -60,6 +63,19 @@
   const W = canvas.width;
   const H = canvas.height;
   const GROUND_Y = H - 50;
+
+  // --- Responsive scaling (fit the fixed W x H game to the viewport) ---
+  function fitCanvas() {
+    const chromeHeight = 90; // room for heading, hint, hud text
+    const maxW = window.innerWidth - 20;
+    const maxH = window.innerHeight - chromeHeight;
+    const scale = Math.min(1, maxW / W, maxH / H);
+    canvas.style.width = Math.floor(W * scale) + 'px';
+    canvas.style.height = Math.floor(H * scale) + 'px';
+  }
+  window.addEventListener('resize', fitCanvas);
+  window.addEventListener('orientationchange', fitCanvas);
+  fitCanvas();
 
   // --- Game state ---
   let state = 'ready'; // 'ready' | 'playing' | 'paused' | 'over' | 'quit'
