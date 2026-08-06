@@ -2,6 +2,7 @@
 
 import logging
 import re
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -28,20 +29,54 @@ account_lookup = {
 # Matches files like "NG_Bill_1234567890_2026_07_09.pdf"
 filename_pattern = re.compile(r"NG_Bill_(\d+)_(\d{4})_(\d{2})_(\d{2})\.pdf", re.IGNORECASE)
 
+# Matches files like "NG_Bill_1234567890_undefined.pdf", where the date must instead
+# be evaluated from the PDF contents
+undefined_pattern = re.compile(r"NG_Bill_(\d+)_undefined\.pdf", re.IGNORECASE)
+
+# Matches "DATE BILL ISSUED\nJul 24, 2026" in the extracted PDF text
+date_issued_pattern = re.compile(r"DATE BILL ISSUED\s+([A-Za-z]+ \d{1,2},\s*\d{4})", re.IGNORECASE)
+
+
+def date_from_pdf_contents(pdf_path: Path) -> str | None:
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        logging.error("PyMuPDF is required to evaluate PDF contents. Install with: pip install pymupdf")
+        return None
+
+    with fitz.open(pdf_path) as doc:
+        text = "".join(page.get_text() for page in doc)
+
+    match = date_issued_pattern.search(text)
+    if not match:
+        return None
+
+    issued_date = datetime.strptime(match.group(1), "%b %d, %Y")
+    return issued_date.strftime("%Y-%m-%d")
+
+
 for file_path in path_ngrid_bills.glob("*.pdf"):
     match = filename_pattern.match(file_path.name)
-    if not match:
-        logging.warning(f"Filename does not match expected pattern, skipping: {file_path.name}")
-        continue
+    if match:
+        account_number, year, month, day = match.groups()
+        formatted_date = f"{year}-{month}-{day}"
+    else:
+        undefined_match = undefined_pattern.match(file_path.name)
+        if not undefined_match:
+            logging.warning(f"Filename does not match expected pattern, skipping: {file_path.name}")
+            continue
 
-    account_number, year, month, day = match.groups()
+        account_number = undefined_match.group(1)
+        formatted_date = date_from_pdf_contents(file_path)
+        if not formatted_date:
+            logging.warning(f"Could not determine bill date from PDF contents, skipping: {file_path.name}")
+            continue
 
     property_unit = account_lookup.get(account_number)
     if not property_unit:
         logging.warning(f"No property/unit found for account {account_number}, skipping: {file_path.name}")
         continue
 
-    formatted_date = f"{year}-{month}-{day}"
     new_name = f"{formatted_date}_{COMPANY_NAME}_{property_unit}.pdf"
     new_path = file_path.with_name(new_name)
 
