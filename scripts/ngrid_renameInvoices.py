@@ -73,5 +73,9 @@ for file_path in path_ngrid_bills.glob("*.pdf"):
     new_name = f"{formatted_date}_{COMPANY_NAME}_{property_unit}.pdf"
     new_path = file_path.with_name(new_name)
 
+    if new_path.exists():
+        logging.warning(f"Target filename already exists, skipping: {file_path.name} -> {new_name}")
+        continue
+
     file_path.rename(new_path)
     logging.info(f"Renamed {file_path.name} to {new_name}")
