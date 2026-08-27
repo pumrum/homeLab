@@ -159,8 +159,8 @@
       quitGame();
     }
   });
-  canvas.addEventListener('mousedown', jump);
-  canvas.addEventListener('touchstart', (e) => { e.preventDefault(); jump(); }, {passive:false});
+  document.addEventListener('mousedown', jump);
+  document.addEventListener('touchstart', (e) => { e.preventDefault(); jump(); }, {passive:false});
   canvas.tabIndex = 0;
   canvas.addEventListener('click', () => canvas.focus());
 
