@@ -47,6 +47,18 @@
  *                    deactivating a statement scope only stops that scope's
  *                    Drive check, it doesn't change what a filename IS.
  *
+ *                    A "-Statements" row can also acknowledge one specific
+ *                    statement file that has no matching ledger row (e.g.
+ *                    an early month with zero transactions on that
+ *                    account): put the full dated filename in Inv_Year
+ *                    instead of a bare literal (e.g. "2019-03-31_Acme_1234"
+ *                    rather than "Acme_1234"). A real literal never starts
+ *                    with a date, so this is unambiguous. Such a row takes
+ *                    no part in statement classification -- it only
+ *                    suppresses MISSING_IN_SHEET for that exact Drive file,
+ *                    gated by Inv_Active like any other row. Inv_Folder /
+ *                    Inv_FolderURL are unused on these rows.
+ *
  *     Summary block  headers GY5:GZ5 (Metric, Count), data from GY6
  *     Detail table   headers HD5:HJ5 (Seq, Account, Year, Type, Filename,
  *                    URL, Detail), data from HD6
@@ -97,8 +109,20 @@ var DETAIL_START_COL = 212; // HD = column 212
 var DETAIL_COLS = 7;
 var DETAIL_ROWS_TO_CLEAR = 2000; // generous headroom for a few thousand ledger rows
 
-var FILENAME_SENTINELS = ['zNo_Invoice', 'zMissing_Invoice'];
+var FILENAME_SENTINELS = ['zNo_Invoice', 'zMissing_Invoice', 'xCell'];
 var URL_SENTINELS = ['zNo_URL', 'zMissing_URL'];
+
+// Every invoice URL is expected to have this exact shape -- the modern
+// Drive share-link format, not the older "open?id=" form (which is also
+// rejected even when something gets appended after it that happens to end
+// in the right suffix, e.g. "open?id=<ID>/view?usp=drive_link" -- that's
+// not a real URL shape at all, just a string that passes a suffix-only
+// check). A row's actual link target (see the urlLink field built in
+// loadLedgerRows_) that doesn't match this, or whose displayed link text
+// disagrees with that target, is flagged TYPE.URL_MALFORMED -- this is a
+// pure string check, independent of whether the URL actually resolves (see
+// TYPE.URL_BROKEN for that).
+var EXPECTED_URL_PATTERN = /^https:\/\/drive\.google\.com\/file\/d\/[a-zA-Z0-9_-]{10,}\/view\?usp=drive_link$/;
 
 var ACCOUNT_TYPE_ALL_YEARS = 'All';
 
@@ -130,6 +154,7 @@ var TYPE = {
   DUPLICATE_URL: 'DUPLICATE_URL',
   URL_MISMATCH: 'URL_MISMATCH',
   URL_BROKEN: 'URL_BROKEN',
+  URL_MALFORMED: 'URL_MALFORMED',
   MISSING_IN_DRIVE: 'MISSING_IN_DRIVE',
   MISSING_IN_SHEET: 'MISSING_IN_SHEET',
   UNCONFIGURED_FOLDER: 'UNCONFIGURED_FOLDER',
@@ -141,6 +166,7 @@ var SUMMARY_METRIC_ORDER = [
   'Last run timestamp',
   'Total ledger rows scanned',
   'Rows skipped (no invoice expected)',
+  'Acknowledged statements (no ledger row expected)',
   TYPE.NOT_ENTERED,
   TYPE.ORPHAN_FILENAME,
   TYPE.ORPHAN_URL,
@@ -148,6 +174,7 @@ var SUMMARY_METRIC_ORDER = [
   TYPE.DUPLICATE_URL,
   TYPE.URL_MISMATCH,
   TYPE.URL_BROKEN,
+  TYPE.URL_MALFORMED,
   TYPE.MISSING_IN_DRIVE,
   TYPE.MISSING_IN_SHEET,
   TYPE.UNCONFIGURED_FOLDER,
@@ -331,6 +358,29 @@ function runInvoiceRecon() {
 
   Logger.log('[%s] duplicate checks done', elapsed());
 
+  // ---- URL shape / link-text-vs-link-target check (pure string check, no Drive I/O) ----
+  // Shape compliance is judged against the actual link target (the URL a
+  // click would follow), not the displayed text -- a row with a customized
+  // display label (e.g. a friendly filename) but a correctly-shaped link
+  // is not malformed, it just has a label that happens to differ, which the
+  // second check below reports on its own. When a cell has no explicit
+  // rich-text link (urlLink is empty), the displayed text IS the literal
+  // URL, so it's used as the effective link target for the shape check.
+  checkableRows.forEach(function (row) {
+    var effectiveUrl = row.urlLink || row.url;
+    if (!EXPECTED_URL_PATTERN.test(effectiveUrl)) {
+      addDiscrepancy_(discrepancies, counts, TYPE.URL_MALFORMED, row, row.filename, row.url,
+        'Link URL "' + effectiveUrl + '" does not match the expected format ' +
+        '"https://drive.google.com/file/d/<ID>/view?usp=drive_link".');
+    }
+    if (row.urlLink && row.urlLink !== row.url) {
+      addDiscrepancy_(discrepancies, counts, TYPE.URL_MALFORMED, row, row.filename, row.url,
+        'Link text "' + row.url + '" does not match link URL "' + row.urlLink + '".');
+    }
+  });
+
+  Logger.log('[%s] URL suffix check done', elapsed());
+
   // ---- URL resolution checks (getFileById) ----
   // NOTE: each getFileById() call is a separate Drive API round trip. This
   // loop is the most likely place a large run exceeds the 6-minute Apps
@@ -369,10 +419,23 @@ function runInvoiceRecon() {
     scopes[row.scopeKey].push(row);
   });
 
+  // Multiple scope keys can resolve to the very same Drive folder -- most
+  // commonly a regular account whose invoices for every year live in one
+  // "All years" folder (Inv_Year = "All"), so "Checking|2022", "Checking|2023",
+  // etc. all fall back to that one folder via resolveFolderId_. Group scope
+  // keys by their RESOLVED folder before scanning, so each physical folder
+  // is scanned exactly once and MISSING_IN_SHEET is judged against every
+  // ledger row that maps into that folder -- not just one scope key's own
+  // year. Scanning per raw "Account|Year" key here would flag every other
+  // year's real invoices as MISSING_IN_SHEET, once for each additional
+  // active year sharing the folder (with a misleading, arbitrary year on
+  // the report row, since it'd just be whichever scope happened to be
+  // iterating).
+  var folderGroups = {}; // "AccountType folderId" -> { accountType, folderId, scopeKeys, rowsInScope }
   Object.keys(scopes).forEach(function (key) {
     var separatorIndex = key.indexOf('|');
     var accountType = key.substring(0, separatorIndex);
-    var scopeLabel = key.substring(separatorIndex + 1); // year, "All", or "Statements-XXXX"
+    var scopeLabel = key.substring(separatorIndex + 1); // year, "All", or a statement literal
     var rowsInScope = scopes[key];
 
     var folderId = resolveFolderId_(config, accountType, scopeLabel);
@@ -387,12 +450,25 @@ function runInvoiceRecon() {
       return;
     }
 
+    var groupKey = accountType + ' ' + folderId;
+    if (!folderGroups[groupKey]) {
+      folderGroups[groupKey] = { accountType: accountType, folderId: folderId, scopeKeys: [], rowsInScope: [] };
+    }
+    folderGroups[groupKey].scopeKeys.push(key);
+    folderGroups[groupKey].rowsInScope = folderGroups[groupKey].rowsInScope.concat(rowsInScope);
+  });
+
+  Object.keys(folderGroups).forEach(function (groupKey) {
+    var group = folderGroups[groupKey];
+    var accountType = group.accountType;
+    var rowsInScope = group.rowsInScope;
+
     var folder;
     try {
-      folder = DriveApp.getFolderById(folderId);
+      folder = DriveApp.getFolderById(group.folderId);
     } catch (e) {
       discrepancies.push({
-        seq: '', account: accountType, year: scopeLabel, type: TYPE.UNCONFIGURED_FOLDER,
+        seq: '', account: accountType, year: group.scopeKeys.join(', '), type: TYPE.UNCONFIGURED_FOLDER,
         filename: '', url: '',
         detail: 'Configured Folder ID does not resolve (' + e.message + ').'
       });
@@ -401,53 +477,81 @@ function runInvoiceRecon() {
     }
 
     // Build the set of actual files in the Drive folder, keyed by base name.
-    // NOTE: getFiles() pages through the ENTIRE folder every time this scope
+    // NOTE: getFiles() pages through the ENTIRE folder every time this group
     // runs. If a folder holds many years' worth of files (e.g. Checking's
     // single "All years" invoice folder, or either statements folder), this
     // can be slow even for a narrowly-scoped run.
-    var driveFilesByBase = {}; // baseName -> array of actual file names (handles case dupes)
+    var driveFilesByBase = {}; // baseName -> array of { name, url } (handles case dupes)
     var files = folder.getFiles();
     var fileCount = 0;
     while (files.hasNext()) {
       var f = files.next();
       var base = stripExtension_(f.getName());
       if (!driveFilesByBase[base]) driveFilesByBase[base] = [];
-      driveFilesByBase[base].push(f.getName());
+      // Build the URL in the same canonical shape EXPECTED_URL_PATTERN
+      // requires, rather than trusting f.getUrl() (which can come back with
+      // a different usp= value) -- this way a MISSING_IN_SHEET row's URL is
+      // already paste-ready and won't itself get flagged URL_MALFORMED.
+      driveFilesByBase[base].push({
+        name: f.getName(),
+        url: 'https://drive.google.com/file/d/' + f.getId() + '/view?usp=drive_link'
+      });
       fileCount++;
       if (fileCount % 100 === 0) {
-        Logger.log('[%s] scanning folder %s|%s: %s files so far', elapsed(), accountType, scopeLabel, fileCount);
+        Logger.log('[%s] scanning folder %s (%s): %s files so far', elapsed(), accountType, group.scopeKeys.join(', '), fileCount);
       }
     }
-    Logger.log('[%s] folder %s|%s scan complete: %s files total', elapsed(), accountType, scopeLabel, fileCount);
+    Logger.log('[%s] folder %s (%s) scan complete: %s files total', elapsed(), accountType, group.scopeKeys.join(', '), fileCount);
 
-    // Ledger filenames expected in this scope.
+    // Ledger filenames expected in this folder, across every scope key that
+    // maps into it.
     var ledgerFilenamesInScope = {};
     rowsInScope.forEach(function (row) {
       ledgerFilenamesInScope[row.filename] = true;
     });
 
     // MISSING_IN_DRIVE: ledger says it exists, Drive folder has nothing matching.
+    // Uses each row's own year/account (via addDiscrepancy_), so grouping
+    // multiple scope keys together here doesn't affect this report's labels.
     rowsInScope.forEach(function (row) {
       if (!driveFilesByBase[row.filename]) {
         addDiscrepancy_(discrepancies, counts, TYPE.MISSING_IN_DRIVE, row,
           row.filename, row.url,
           'No file named "' + row.filename + '" (any extension) found in the ' +
-          accountType + ' / ' + scopeLabel + ' folder.');
+          accountType + ' / ' + row.year + ' folder.');
       }
     });
 
-    // MISSING_IN_SHEET: Drive has a file, no ledger row in scope references it.
-    Object.keys(driveFilesByBase).forEach(function (base) {
-      if (!ledgerFilenamesInScope[base]) {
-        driveFilesByBase[base].forEach(function (actualName) {
-          discrepancies.push({
-            seq: '', account: accountType, year: scopeLabel, type: TYPE.MISSING_IN_SHEET,
-            filename: base, url: '',
-            detail: 'Drive file "' + actualName + '" is not referenced by any ledger row in this scope.'
-          });
-          counts[TYPE.MISSING_IN_SHEET]++;
-        });
+    // Acknowledged statement files (see loadFolderConfig_ header doc) apply
+    // per scope key, so union them across every scope key sharing this folder.
+    var acknowledgedInScope = {};
+    group.scopeKeys.forEach(function (key) {
+      var ack = config.acknowledgedStatementFiles[key];
+      if (ack) {
+        Object.keys(ack).forEach(function (fn) { acknowledgedInScope[fn] = true; });
       }
+    });
+
+    // MISSING_IN_SHEET: Drive has a file, no ledger row anywhere in this
+    // folder references it -- unless it's on the acknowledged list, e.g. an
+    // early statement month with no transactions to tie it to. The reported
+    // year is read off the file's own date prefix (this folder can span
+    // many years), not an arbitrary scope key.
+    Object.keys(driveFilesByBase).forEach(function (base) {
+      if (ledgerFilenamesInScope[base]) return;
+      if (acknowledgedInScope[base]) {
+        counts['Acknowledged statements (no ledger row expected)'] += driveFilesByBase[base].length;
+        return;
+      }
+      var fileYear = extractYear_(base);
+      driveFilesByBase[base].forEach(function (fileInfo) {
+        discrepancies.push({
+          seq: '', account: accountType, year: fileYear, type: TYPE.MISSING_IN_SHEET,
+          filename: base, url: fileInfo.url,
+          detail: 'Drive file "' + fileInfo.name + '" is not referenced by any ledger row in this scope.'
+        });
+        counts[TYPE.MISSING_IN_SHEET]++;
+      });
     });
   });
 
@@ -504,6 +608,7 @@ function loadSheetNames_() {
  *     statementLiterals: [ { account: "Credit", literal: "Acme_1234",
  *                            scopeKey: "Credit-Statements|Acme_1234" }, ... ]
  *     statementBankTokens: { "Acme": true, ... }
+ *     acknowledgedStatementFiles: { "Credit-Statements|Acme_1234": { "2019-03-31_Acme_1234": true }, ... }
  *   }
  *
  * folderByScope drives Drive I/O and only ever contains rows where
@@ -525,6 +630,14 @@ function loadSheetNames_() {
  * appears somewhere in your own config are ever treated as statements. An
  * ordinary invoice like "2021-02-08_SomeVendor" is left alone because
  * "SomeVendor" was never configured as a statement bank token.
+ *
+ * acknowledgedStatementFiles holds "-Statements" rows whose Inv_Year is a
+ * full dated filename rather than a bare literal (see the header doc for
+ * the distinguishing rule) -- ACTIVE rows only, since this is a per-row
+ * on/off toggle like folderByScope, not a classification fact. It's keyed
+ * by the same "Account-Statements|literal" scope key the Drive completeness
+ * check already groups rows by, so lookups there don't need any extra
+ * parsing.
  */
 function loadFolderConfig_(reconSheet, reconSheetName) {
   var headerRange = reconSheet.getRange(CONFIG_HEADER_ROW, CONFIG_START_COL, 1, 5);
@@ -536,9 +649,13 @@ function loadFolderConfig_(reconSheet, reconSheetName) {
   var folderByScope = {};
   var statementLiterals = [];
   var statementBankTokens = {};
+  var acknowledgedStatementFiles = {};
 
   if (numDataRows === 0) {
-    return { folderByScope: folderByScope, statementLiterals: statementLiterals, statementBankTokens: statementBankTokens };
+    return {
+      folderByScope: folderByScope, statementLiterals: statementLiterals,
+      statementBankTokens: statementBankTokens, acknowledgedStatementFiles: acknowledgedStatementFiles
+    };
   }
 
   var data = reconSheet.getRange(CONFIG_DATA_START_ROW, CONFIG_START_COL, numDataRows, 5).getValues();
@@ -549,6 +666,20 @@ function loadFolderConfig_(reconSheet, reconSheetName) {
     var folderIdRaw = String(row[colIndex.Inv_Folder] || '').trim();
 
     if (!configAccount || !configYear) return; // skip blank config rows
+
+    if (endsWith_(configAccount, STATEMENT_ACCOUNT_SUFFIX) && STATEMENT_DATE_PREFIX_PATTERN.test(configYear)) {
+      // Acknowledgment row: Inv_Year is a full dated statement filename
+      // (e.g. "2019-03-31_Acme_1234"), not a bare literal -- see header
+      // doc. It marks that one specific statement as expected to have no
+      // matching ledger row, and takes no part in statement classification.
+      if (active === 'Y') {
+        var ackLiteral = configYear.substring(configYear.match(STATEMENT_DATE_PREFIX_PATTERN)[0].length);
+        var ackScopeKey = configAccount + '|' + ackLiteral;
+        if (!acknowledgedStatementFiles[ackScopeKey]) acknowledgedStatementFiles[ackScopeKey] = {};
+        acknowledgedStatementFiles[ackScopeKey][configYear] = true;
+      }
+      return;
+    }
 
     if (endsWith_(configAccount, STATEMENT_ACCOUNT_SUFFIX)) {
       var baseAccount = configAccount.substring(0, configAccount.length - STATEMENT_ACCOUNT_SUFFIX.length);
@@ -572,7 +703,10 @@ function loadFolderConfig_(reconSheet, reconSheetName) {
     folderByScope[configAccount + '|' + configYear] = folderId;
   });
 
-  return { folderByScope: folderByScope, statementLiterals: statementLiterals, statementBankTokens: statementBankTokens };
+  return {
+    folderByScope: folderByScope, statementLiterals: statementLiterals,
+    statementBankTokens: statementBankTokens, acknowledgedStatementFiles: acknowledgedStatementFiles
+  };
 }
 
 /**
@@ -589,8 +723,12 @@ function looksLikeAnyStatement_(config, filename) {
   if (!prefixMatch) return false;
   var remainder = filename.substring(prefixMatch[0].length);
   var tokens = Object.keys(config.statementBankTokens);
+  // A bare token with no "_<suffix>" (e.g. "YYYY-MM-DD_Acme") isn't
+  // statement-shaped -- it's just an ordinary invoice that happens to start
+  // with a date and mention a bank name. Only the "<token>_<anything>" shape
+  // (matching a real statement literal like "Acme_1234") counts.
   return tokens.some(function (token) {
-    return remainder === token || remainder.indexOf(token + '_') === 0;
+    return remainder.indexOf(token + '_') === 0;
   });
 }
 
@@ -659,6 +797,14 @@ function loadLedgerRows_(ledgerSheet) {
 
   var data = ledgerSheet.getRange(LEDGER_DATA_START_ROW, firstCol, numDataRows, numCols).getValues();
 
+  // A URL cell can be a Sheets "Insert > Link" rich text run, where the
+  // displayed cell text and the actual link target (what navigation follows)
+  // are two different strings. getValues() above only ever returns the
+  // displayed text, so read the link target separately via rich text --
+  // getLinkUrl() returns null when the cell has no explicit link (i.e. the
+  // displayed text is typed in directly, with nothing to compare against).
+  var urlRichTextValues = ledgerSheet.getRange(LEDGER_DATA_START_ROW, LEDGER_COL.URL, numDataRows, 1).getRichTextValues();
+
   var rows = [];
   data.forEach(function (raw, i) {
     var seq = raw[LEDGER_COL.SEQ - firstCol];
@@ -666,6 +812,7 @@ function loadLedgerRows_(ledgerSheet) {
     var accountRaw = String(raw[LEDGER_COL.ACCOUNT - firstCol] || '').trim();
     var filenameRaw = raw[LEDGER_COL.FILENAME - firstCol];
     var urlRaw = raw[LEDGER_COL.URL - firstCol];
+    var urlLinkRaw = urlRichTextValues[i][0].getLinkUrl();
 
     // Skip fully blank rows (e.g. trailing empty rows in the range).
     if (!seq && !dateVal && !accountRaw && !filenameRaw && !urlRaw) return;
@@ -680,7 +827,8 @@ function loadLedgerRows_(ledgerSheet) {
       accountType: accountType,
       year: year,
       filename: filenameRaw === null || filenameRaw === undefined ? '' : String(filenameRaw).trim(),
-      url: urlRaw === null || urlRaw === undefined ? '' : String(urlRaw).trim()
+      url: urlRaw === null || urlRaw === undefined ? '' : String(urlRaw).trim(),
+      urlLink: urlLinkRaw === null || urlLinkRaw === undefined ? '' : String(urlLinkRaw).trim()
     });
   });
 
