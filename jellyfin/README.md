@@ -1,14 +1,15 @@
 # Jellyfin
 
-Jellyfin 10.11 running in a Proxmox LXC container, mounted to a remote media server over SSHFS, with TheTVDB and Webhook plugins configured for metadata and Home Assistant playback notifications.
+Jellyfin 10.12 running in a Proxmox LXC container, mounted to a remote media server over SSHFS, with TheTVDB and Webhook plugins configured for metadata and Home Assistant playback notifications.
 
-Latest tested version: 10.11.6
+Latest tested version: 10.12.x
 
 > **TODO:**
 > * Update to use media CNAME
 > * Confirm mp4 playback in browser without transcoding
 > * Update new user process to include setting subtitle preference to Forced only
 > * Create prerequisite section (dns, caddy, etc)
+> * Ditch fuse/sshfs
 
 ---
 
@@ -42,41 +43,42 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/Proxmo
 
 | Prompt | Selection |
 | --- | --- |
-| Install type | Advanced Install |
-| Container type | Unprivileged (recommended) |
-| Root password | *(set password)* → Next |
-| Confirm root password | *(confirm password)* → Next |
-| Container ID | *(accept default)* → Next |
-| Hostname | `<hostname>` → Next |
-| Disk size | 50 GB → Next |
-| CPU Cores | 2 → Next |
-| RAM | 8192 MiB → Next |
-| Network bridge | vmbr0 → Next |
-| IPv4 | dhcp |
-| IPv6 | disable |
-| MTU size | *(skip)* → Next |
-| DNS Search Domain | *(skip)* → Next |
-| DNS Server IP | *(skip)* → Next |
-| MAC Address | *(skip)* → Next |
-| VLAN Tag | *(skip)* → Next |
-| Tags | `community-scripts;media` → Next |
-| SSH Authorized key | none |
-| Root SSH access | Yes |
-| FUSE support | Yes |
-| TUN/TAP device | No |
-| Nesting | Yes |
-| GPU Passthrough | Yes |
-| Keyctl support | Yes |
-| APT Cacher-NG proxy | No |
-| Time zone | America/New_York → Next |
-| Container Protection | No |
-| Device node creation (mknod) | No |
-| Filesystem mounts | `fuse` → Next |
-| Verbose mode | Yes |
-| Create the LXC | Yes |
+| Community-Scripts Options | Advanced Install |
+| CONTAINER TYPE | Unprivileged (recommended) |
+| ROOT PASSWORD | *(set password)* → Next |
+| PASSWORD VERIFICATION | *(confirm password)* → Next |
+| CONTAINER ID | *(accept default) or specify* → Next |
+| HOSTNAME | `<hostname>` → Next |
+| DISK SIZE | 50 GB → Next |
+| CPU CORES | 2 → Next |
+| RAM SIZE | 8192 MiB → Next |
+| NETWORK BRIDGE | vmbr0 → Next |
+| IPv4 CONFIGURATION | dhcp |
+| IPv6 CONFIGURATION | disable |
+| MTU SIZE | *(blank)* → Next |
+| DNS SEARCH DOMAIN | *(blank)* → Next |
+| DNS SERVER | *(blank)* → Next |
+| MAC ADDRESS | *(blank)* → Next |
+| VLAN TAG | *(blank)* → Next |
+| CONTAINER TAGS | `community-scripts;media` → Next |
+| SSH KEY SOURCE | manual |
+| SSH ACCESS | Yes |
+| FUSE SUPPORT | Yes |
+| TUN/TAP SUPPORT | No |
+| NESTING SUPPORT | Yes |
+| GPU PASSTHROUGH | Yes |
+| APT CACHER PROXY | No |
+| HTTP/HTTPS PROXY | No |
+| CONTAINER TIMEZONE | America/New_York → Next |
+| CONTAINER PROTECTION | No |
+| DEVICE NODE CREATION | No |
+| MOUNT FILESYSTEMS | `fuse` → Next |
+| POST-INSTALL HOOK (HOST) | *(blank)* → Next |
+| VERBOSE MODE | Yes |
+| CONFIRM SETTINGS | Yes |
 | Write selections to config file | No |
 
-5. When prompted, type `1` and press **Enter** to configure the embedded GPU.
+5. If prompted, type `1` and press **Enter** to configure the embedded GPU.
 
 ---
 
