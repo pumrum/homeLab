@@ -310,11 +310,13 @@
   function drawClouds(t) {
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     // Slow parallax clouds based on elapsed time
-    const c = (elapsed * 30) % (W + 200);
+    const spanBuffer = 200; // off-screen margin each side, so clouds fully clear the canvas before wrapping
+    const total = W + spanBuffer * 2;
+    const c = (elapsed * 30) % total;
     const positions = [
-      { x: (W + 200) - c,             y: 40, s: 1.0 },
-      { x: (W + 200) - ((c+260)% (W+200)), y: 70, s: 0.7 },
-      { x: (W + 200) - ((c+540)% (W+200)), y: 30, s: 1.2 },
+      { x: (W + spanBuffer) - c,                    y: 40, s: 1.0 },
+      { x: (W + spanBuffer) - ((c+260) % total),    y: 70, s: 0.7 },
+      { x: (W + spanBuffer) - ((c+540) % total),    y: 30, s: 1.2 },
     ];
     for (const p of positions) {
       const s = p.s;
