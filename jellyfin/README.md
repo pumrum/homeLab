@@ -94,12 +94,17 @@ http://server.domain.com:8096/web/index.html#!/wizardstart.html
 | --- | --- |
 | Server name | `<hostname>` |
 | Preferred display language | English |
-| Admin username | *(set username)* |
-| Admin password | *(set password)* |
-| Media library | *(skip)* |
-| Metadata language | English |
-| Metadata country/region | United States |
-| Allow remote connections | ✅ Checked |
+| Click Next |
+| Username | *(set username)* |
+| Password | *(set password)* |
+| Password (confirm) | *(confirm password)* |
+| Click Next |
+| Media library | *(Next to skip)* |
+| Language | English |
+| Country/Region | United States |
+| Click Next |
+| Allow remote connections to this server | ✅ Checked |
+| Click Next |
 
 Click **Finish** to complete the wizard.
 
