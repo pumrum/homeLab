@@ -1,4 +1,4 @@
-# /etc/caddy/caddy.env
+# /etc/caddy/Caddyfile
 # Changes to this file may be committed by using a RELOAD as:
 # caddy reload --config /etc/caddy/Caddyfile
 # EXCEPTION: switching a site to a different provider (e.g. staging to live) requires a full service restart
