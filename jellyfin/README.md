@@ -1,8 +1,8 @@
 # Jellyfin
 
-Jellyfin 10.12 running in a Proxmox LXC container, mounted to a remote media server over SSHFS, with TheTVDB and Webhook plugins configured for metadata and Home Assistant playback notifications.
+Jellyfin 12 running in a Proxmox LXC container, mounted to a remote media server over SSHFS, with TheTVDB and Webhook plugins configured for metadata and Home Assistant playback notifications.
 
-Latest tested version: 10.12.x
+Latest tested version: 12.x
 
 > **TODO:**
 > * Update to use media CNAME
@@ -139,57 +139,52 @@ body, html {
 
 ## Init Media Connection
 
-### On the Jellyfin console (as root)
+Power off the Jellyfin container
 
-Set up SSH keys for the media connection:
+### On the Proxmox host server (as root)
 
-```bash
-touch /root/.ssh/authorized_keys
-chmod 600 /root/.ssh/authorized_keys
-vi /root/.ssh/authorized_keys          # paste in any user keys, save and exit
-ssh-keygen -t ed25519 -f /root/.ssh/jelly-<site>_<hostname>
-                                       # press Enter twice to skip passphrase
-```
-
-### On the media server (as root)
-
-Create the Jellyfin media user and authorize the key:
+Add the bind mount:
 
 ```bash
-useradd -M -N -g media -s /usr/sbin/nologin jelly-<site>
-touch /etc/ssh/authorized_keys/jelly-<site>
-chmod 644 /etc/ssh/authorized_keys/jelly-<site>
-vi /root/.ssh/authorized_keys          # paste in the Jellyfin public key, save and exit
+pct set <LXCID> -mp0 /mnt/media,mp=/mnt/media,ro=1
 ```
 
-### Back on the Jellyfin console (as root)
+Map the media gid into the container:
 
-Mount the remote media share over SSHFS:
-
+Once per host:
 ```bash
-mkdir /mnt/media
-chown root:jellyfin /mnt/media
-apt install -y sshfs
-sshfs jelly-<site>@<hostname>-media.domain.com:/ /mnt/media \
-  -o IdentityFile=/root/.ssh/jelly-<site>_jelly<site>
-# type 'yes' and press Enter to trust the fingerprint
+echo 'root:1002:1' >> /etc/subgid
 ```
 
-Verify the contents of `/mnt/media`, then persist the mount in `/etc/fstab`:
-
+Once per container:
 ```bash
-vi /etc/fstab
+vi /etc/pve/lxc/105.conf
+```
+```bash
+lxc.idmap: u 0 100000 65536
+lxc.idmap: g 0 100000 1002
+lxc.idmap: g 1002 1002 1
+lxc.idmap: g 1003 101003 64533
 ```
 
-Append the following line (update the GID to match the `jellyfin` group):
-
+Start the container:
+```bash
+pct start <LXCID>
 ```
-jelly-<site>@<hostname>-media.domain.com:/ /mnt/media fuse.sshfs _netdev,delay_connect,user,identityfile=/root/.ssh/jelly-<site>_<hostname>,allow_other,default_permissions,gid=118 0 0
+
+Update the container group:
+```bash
+pct exec 105 -- id jellyfin
+pct exec 105 -- groupadd -g 1002 media
+pct exec 105 -- usermod -aG media jellyfin
+pct exec 105 -- id jellyfin
 ```
 
-> ⚠️ Update the `gid` value to match the actual GID of the `jellyfin` group on the system.
-
----
+Restart and verify:
+```bash
+pct exec 105 -- systemctl restart jellyfin
+pct exec 105 -- sudo -u jellyfin ls /mnt/media/movie
+```
 
 ## Configure Jellyfin Server
 
