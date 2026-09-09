@@ -1,6 +1,6 @@
 # Jellyfin
 
-Jellyfin 12 running in a Proxmox LXC container, mounted to a remote media server over SSHFS, with TheTVDB and Webhook plugins configured for metadata and Home Assistant playback notifications.
+Jellyfin 12 running in a Proxmox LXC container, mounted to a remote media server over virtiofs, with TheTVDB and Webhook plugins configured for metadata and Home Assistant playback notifications.
 
 Latest tested version: 12.x
 
@@ -9,7 +9,7 @@ Latest tested version: 12.x
 > * Confirm mp4 playback in browser without transcoding
 > * Update new user process to include setting subtitle preference to Forced only
 > * Create prerequisite section (dns, caddy, etc)
-> * Ditch fuse/sshfs
+> * Disable realtime monitoring
 
 ---
 
@@ -46,21 +46,21 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/Proxmo
 | Community-Scripts Options | Advanced Install |
 | CONTAINER TYPE | Unprivileged (recommended) |
 | ROOT PASSWORD | *(set password)* → Next |
-| PASSWORD VERIFICATION | *(confirm password)* → Next |
-| CONTAINER ID | *(accept default) or specify* → Next |
-| HOSTNAME | `<hostname>` → Next |
-| DISK SIZE | 50 GB → Next |
-| CPU CORES | 2 → Next |
-| RAM SIZE | 8192 MiB → Next |
-| NETWORK BRIDGE | vmbr0 → Next |
+| PASSWORD VERIFICATION | *(confirm password)* |
+| CONTAINER ID | *(accept default) or specify* |
+| HOSTNAME | `<hostname>` |
+| DISK SIZE | 50 GB |
+| CPU CORES | 2 |
+| RAM SIZE | 8192 MiB |
+| NETWORK BRIDGE | vmbr0 |
 | IPv4 CONFIGURATION | dhcp |
 | IPv6 CONFIGURATION | disable |
-| MTU SIZE | *(blank)* → Next |
-| DNS SEARCH DOMAIN | *(blank)* → Next |
-| DNS SERVER | *(blank)* → Next |
-| MAC ADDRESS | *(blank)* → Next |
-| VLAN TAG | *(blank)* → Next |
-| CONTAINER TAGS | `community-scripts;media` → Next |
+| MTU SIZE | *(blank)* |
+| DNS SEARCH DOMAIN | *(blank)* |
+| DNS SERVER | *(blank)* |
+| MAC ADDRESS | *(blank)* |
+| VLAN TAG | *(blank)* |
+| CONTAINER TAGS | `community-scripts;media` |
 | SSH KEY SOURCE | manual |
 | SSH ACCESS | Yes |
 | FUSE SUPPORT | Yes |
@@ -69,11 +69,11 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/Proxmo
 | GPU PASSTHROUGH | Yes |
 | APT CACHER PROXY | No |
 | HTTP/HTTPS PROXY | No |
-| CONTAINER TIMEZONE | America/New_York → Next |
+| CONTAINER TIMEZONE | America/New_York |
 | CONTAINER PROTECTION | No |
 | DEVICE NODE CREATION | No |
-| MOUNT FILESYSTEMS | `fuse` → Next |
-| POST-INSTALL HOOK (HOST) | *(blank)* → Next |
+| MOUNT FILESYSTEMS | `fuse` |
+| POST-INSTALL HOOK (HOST) | *(blank)* |
 | VERBOSE MODE | Yes |
 | CONFIRM SETTINGS | Yes |
 | Write selections to config file | No |
