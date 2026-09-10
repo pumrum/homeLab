@@ -5,7 +5,15 @@ strip metadata from FLAC files:
 Get-ChildItem *.flac | ForEach-Object { ffmpeg -i $_.FullName -map_metadata -1 -c:a copy "clean_$($_.Name)" }
 ```
 
-xld > open folder as disc > get metadata > transcode
+xld > open folder as disc
+
+confirm AccurateRip: YES
+
+get metadata
+
+if not found, paste MusicBrainz URL
+
+transcode
 
 
 if an excessive intro needs trimming:
