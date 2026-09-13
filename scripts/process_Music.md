@@ -4,6 +4,9 @@ strip metadata from FLAC files:
 ```
 Get-ChildItem *.flac | ForEach-Object { ffmpeg -i $_.FullName -map_metadata -1 -c:a copy "clean_$($_.Name)" }
 ```
+```
+mkdir -p clean && for f in *.flac; do ffmpeg -i "$f" -map_metadata -1 -c:a copy "clean/$f"; done
+```
 
 xld > open folder as disc
 
