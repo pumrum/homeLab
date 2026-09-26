@@ -2360,7 +2360,7 @@ def process_content_type(content_type, config, paths, execution_mode):
         'skipped_exists': 0,
         'errors': 0,
         'total': 0,
-        'error_files': [],  # Track input files that resulted in errors
+        'error_files': [],  # Track input files that failed (transcode errors and missing sources)
         'interrupted': False  # Track if processing was interrupted
     }
     
@@ -2421,7 +2421,7 @@ def process_content_type(content_type, config, paths, execution_mode):
                 stats['skipped_exists'] += 1
             elif result is False:
                 stats['errors'] += 1
-                stats['error_files'].append(config_obj.input_file)
+                stats['error_files'].append(f"{config_obj.input_file} (row {idx}: transcode error)")
             elif result == 'interrupted':
                 # Transcoding was interrupted - stop processing
                 stats['interrupted'] = True
@@ -2434,12 +2434,15 @@ def process_content_type(content_type, config, paths, execution_mode):
                 is_legacy = 'legacy' in config_obj.video_title.lower() if config_obj.video_title else False
                 if is_legacy:
                     expected_path = config.get('working_path_legacy', working_path)
-                    print(f"{RED}Skipping row {idx}: File '{config_obj.input_file}' not found in {expected_path} (Legacy){RESET}")
+                    not_found_msg = f"not found in {expected_path} (Legacy)"
                 else:
-                    print(f"{RED}Skipping row {idx}: File '{config_obj.input_file}' not found in {working_path}{RESET}")
+                    not_found_msg = f"not found in {working_path}"
             else:
-                print(f"{RED}Skipping row {idx}: File '{config_obj.input_file}' not found in {working_path}{RESET}")
+                not_found_msg = f"not found in {working_path}"
+            print(f"{RED}Skipping row {idx}: File '{config_obj.input_file}' {not_found_msg}{RESET}")
             stats['skipped_not_found'] += 1
+            # List missing sources as failures in the end-of-run summary
+            stats['error_files'].append(f"{config_obj.input_file} (row {idx}: source {not_found_msg})")
     
     return stats
 
@@ -2545,10 +2548,10 @@ def main():
         print(f"  Skipped (file not found): {total_skipped_not_found}")
         print(f"  Errors: {total_errors}")
         
-        # List files that had errors
+        # List files that failed (transcode errors and missing source files)
         all_error_files = movie_stats['error_files'] + tv_stats['error_files']
         if all_error_files:
-            print(f"\n  Files with errors:{RED}")
+            print(f"\n  Failed files:{RED}")
             for error_file in all_error_files:
                 print(f"    - {error_file}")
         
