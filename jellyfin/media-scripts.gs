@@ -6,6 +6,8 @@ const props = PropertiesService.getScriptProperties();
 const JELLYFIN_URL     = props.getProperty('JELLYFIN_URL');
 const JELLYFIN_API_KEY = props.getProperty('JELLYFIN_API_KEY');
 const SHEET_NAME_TV    = props.getProperty('SHEET_NAME_TV');
+const TMDB_API_KEY     = props.getProperty('TMDB_API_KEY');
+const SHEET_NAME_MOVIE = 'Movie';
 
 // Sheet config
 const DATA_START_ROW = 2;
@@ -24,15 +26,27 @@ const COL_RECAP_END     = 18; // R
 const COL_CREDITS_START = 19; // S
 const COL_CREDITS_END   = 20; // T
 
+// Movie sheet column indices (1-based)
+const COL_MOVIE_TITLE   =  1; // A
+const COL_MOVIE_YEAR    =  2; // B
+const COL_MOVIE_TMDB    =  3; // C
+const COL_MOVIE_COLLECTION = 8; // H
+
+// TMDb validation config
+const TMDB_BATCH_SIZE   = 20;        // parallel requests per UrlFetchApp.fetchAll
+const TMDB_INVALID_BG   = "#f4cccc"; // light red highlight for failed validation
+
 // ============================================================
 // MENU
 // ============================================================
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu("Jellyfin")
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu("Jellyfin")
     .addItem("Sync All Rows", "syncAll")
     .addItem("Lookup Missing ItemIDs Only", "lookupItemIds")
     .addItem("Push Segments Only", "pushSegments")
+    .addSeparator()
+    .addItem("TMDb Validate", "tmdbValidate")
     .addToUi();
 }
 
@@ -167,6 +181,153 @@ function pushSegments() {
     "Segment Sync Complete",
     10
   );
+}
+
+// ============================================================
+// TMDB VALIDATION
+// ============================================================
+
+// Run all TMDb validations against the Movie sheet. Each unique TMDb ID is fetched once
+// and the result is shared by every check. Failed cells are highlighted red; a cell we
+// previously flagged that now passes is cleared.
+function tmdbValidate() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME_MOVIE);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < DATA_START_ROW) return;
+
+  const numRows = lastRow - DATA_START_ROW + 1;
+  const rows = sheet.getRange(DATA_START_ROW, 1, numRows, COL_MOVIE_COLLECTION).getValues();
+
+  // Each check reads its column from the row, compares against the TMDb movie,
+  // and returns { ok, detail } — or null to skip the row.
+  const checks = [
+    { name: "Year",       col: COL_MOVIE_YEAR,       fn: checkYear },
+    { name: "Collection", col: COL_MOVIE_COLLECTION, fn: checkCollection },
+  ];
+  checks.forEach(check => {
+    check.range = sheet.getRange(DATA_START_ROW, check.col, numRows, 1);
+    check.backgrounds = check.range.getBackgrounds();
+    check.okCount = 0;
+    check.mismatchCount = 0;
+  });
+
+  const uniqueIds = [...new Set(rows.map(row => parseTmdbId(row[COL_MOVIE_TMDB - 1])).filter(id => id))];
+  const movies = fetchTmdbMovies(uniqueIds);
+  let errorCount = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row    = rows[i];
+    const rowNum = DATA_START_ROW + i;
+    const tmdbId = parseTmdbId(row[COL_MOVIE_TMDB - 1]);
+    if (!tmdbId) continue;
+
+    const title = row[COL_MOVIE_TITLE - 1];
+    const { movie, error } = movies[tmdbId];
+    if (error) {
+      Logger.log(`Row ${rowNum}: "${title}" TMDb ${tmdbId} — ${error}`);
+      errorCount++;
+      continue;
+    }
+
+    checks.forEach(check => {
+      const result = check.fn(row[check.col - 1], movie);
+      if (!result) return;
+
+      if (result.ok) {
+        // Clear our own highlight if the value has since been fixed; leave other formatting alone
+        if (check.backgrounds[i][0].toLowerCase() === TMDB_INVALID_BG) {
+          check.backgrounds[i][0] = null;
+        }
+        check.okCount++;
+      } else {
+        Logger.log(`Row ${rowNum}: "${title}" ${check.name} — ${result.detail}`);
+        check.backgrounds[i][0] = TMDB_INVALID_BG;
+        check.mismatchCount++;
+      }
+    });
+  }
+
+  checks.forEach(check => check.range.setBackgrounds(check.backgrounds));
+
+  const summary = checks.map(c => `${c.name} ✓${c.okCount} ✗${c.mismatchCount}`).join(" | ")
+    + ` | Errors: ${errorCount}`;
+  Logger.log(`TMDb Validation Complete — ${summary}`);
+  SpreadsheetApp.getActiveSpreadsheet().toast(summary, "TMDb Validation Complete", 10);
+}
+
+// Year must match the TMDb release year. Blank years are skipped.
+function checkYear(value, movie) {
+  const year = String(value).trim();
+  if (year === "") return null;
+  const tmdbYear = (movie.release_date || "").substring(0, 4);
+  return {
+    ok: year === tmdbYear,
+    detail: `sheet "${year}" ≠ TMDb "${tmdbYear || "no release date"}" (${movie.title})`
+  };
+}
+
+// Collection must match the TMDb collection name exactly, or "None" if the movie isn't in one
+function checkCollection(value, movie) {
+  const collection = String(value).trim();
+  const tmdbCollection = movie.belongs_to_collection ? movie.belongs_to_collection.name : "None";
+  return {
+    ok: collection === tmdbCollection,
+    detail: `sheet "${collection}" ≠ TMDb "${tmdbCollection}"`
+  };
+}
+
+function parseTmdbId(v) {
+  return String(v).replace(/\D/g, "");
+}
+
+// ============================================================
+// TMDB API HELPERS
+// ============================================================
+
+// Fetch movies in parallel batches. Returns { [tmdbId]: { movie, error } }.
+function fetchTmdbMovies(tmdbIds) {
+  const results = {};
+
+  for (let b = 0; b < tmdbIds.length; b += TMDB_BATCH_SIZE) {
+    const batch = tmdbIds.slice(b, b + TMDB_BATCH_SIZE);
+    let responses;
+    try {
+      responses = UrlFetchApp.fetchAll(batch.map(id => tmdbRequest(`/movie/${id}`)));
+    } catch (e) {
+      batch.forEach(id => results[id] = { movie: null, error: `exception: ${e.message}` });
+      continue;
+    }
+
+    responses.forEach((resp, j) => {
+      const code = resp.getResponseCode();
+      if (code !== 200) {
+        results[batch[j]] = { movie: null, error: `HTTP ${code}` };
+        return;
+      }
+      try {
+        results[batch[j]] = { movie: JSON.parse(resp.getContentText()), error: null };
+      } catch (e) {
+        results[batch[j]] = { movie: null, error: `bad JSON: ${e.message}` };
+      }
+    });
+
+    Utilities.sleep(250); // stay well under TMDb rate limits
+  }
+
+  return results;
+}
+
+// Supports either a v3 API key or a v4 read access token (JWT, starts with "eyJ")
+function tmdbRequest(path) {
+  const base = `https://api.themoviedb.org/3${path}?language=en-US`;
+  if (TMDB_API_KEY.startsWith("eyJ")) {
+    return {
+      url: base,
+      headers: { "Authorization": `Bearer ${TMDB_API_KEY}` },
+      muteHttpExceptions: true
+    };
+  }
+  return { url: `${base}&api_key=${TMDB_API_KEY}`, muteHttpExceptions: true };
 }
 
 // ============================================================

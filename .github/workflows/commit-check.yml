@@ -1,0 +1,37 @@
+# Fails a PR if any of its commits has an author or committer email that
+# looks like git's hostname-based default (e.g. user@machine.local), which
+# would publish a local machine name in this public repo. Only runs on PRs
+# opened by the repo owner; other contributors' PRs show it as skipped.
+name: Commit check
+
+on:
+  pull_request:
+
+jobs:
+  author-emails:
+    name: Author emails
+    if: github.event.pull_request.user.login == github.repository_owner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check commit emails
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          bad=$(git log --format='%h %ae %ce' "$BASE..$HEAD" \
+            | grep -Ei '@[^ ]*\.(local|lan|localdomain|home|internal)( |$)' || true)
+          if [ -n "$bad" ]; then
+            # Report commit IDs only, so the log doesn't repeat the hostname
+            echo "$bad" | while read -r sha _; do
+              echo "::error::Commit $sha has a local-hostname author or committer email"
+            done
+            echo
+            echo "Set a real email (e.g. your GitHub noreply address) with:"
+            echo "  git config --global user.email \"<id>+<user>@users.noreply.github.com\""
+            echo "then rewrite the affected commits and force-push the branch."
+            exit 1
+          fi
+          echo "OK    $(git rev-list --count "$BASE..$HEAD") commit(s) checked"

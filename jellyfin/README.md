@@ -1,13 +1,15 @@
 # Jellyfin
 
-Jellyfin 10.11 running in a Proxmox LXC container, mounted to a remote media server over SSHFS, with TheTVDB and Webhook plugins configured for metadata and Home Assistant playback notifications.
+Jellyfin 12 running in a Proxmox LXC container, mounted to a remote media server over virtiofs, with TheTVDB and Webhook plugins configured for metadata and Home Assistant playback notifications.
 
-Latest tested version: 10.11.6
+Latest tested version: 12.x
 
 > **TODO:**
 > * Update to use media CNAME
 > * Confirm mp4 playback in browser without transcoding
 > * Update new user process to include setting subtitle preference to Forced only
+> * Create prerequisite section (dns, caddy, etc)
+> * Disable realtime monitoring
 
 ---
 
@@ -41,41 +43,42 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/Proxmo
 
 | Prompt | Selection |
 | --- | --- |
-| Install type | Advanced Install |
-| Container type | Unprivileged (recommended) |
-| Root password | *(set password)* → Next |
-| Confirm root password | *(confirm password)* → Next |
-| Container ID | *(accept default)* → Next |
-| Hostname | `<hostname>` → Next |
-| Disk size | 50 GB → Next |
-| CPU Cores | 2 → Next |
-| RAM | 8192 MiB → Next |
-| Network bridge | vmbr0 → Next |
-| IPv4 | dhcp |
-| IPv6 | disable |
-| MTU size | *(skip)* → Next |
-| DNS Search Domain | *(skip)* → Next |
-| DNS Server IP | *(skip)* → Next |
-| MAC Address | *(skip)* → Next |
-| VLAN Tag | *(skip)* → Next |
-| Tags | `community-scripts;media` → Next |
-| SSH Authorized key | none |
-| Root SSH access | Yes |
-| FUSE support | Yes |
-| TUN/TAP device | No |
-| Nesting | Yes |
-| GPU Passthrough | Yes |
-| Keyctl support | Yes |
-| APT Cacher-NG proxy | No |
-| Time zone | America/New_York → Next |
-| Container Protection | No |
-| Device node creation (mknod) | No |
-| Filesystem mounts | `fuse` → Next |
-| Verbose mode | Yes |
-| Create the LXC | Yes |
+| Community-Scripts Options | Advanced Install |
+| CONTAINER TYPE | Unprivileged (recommended) |
+| ROOT PASSWORD | *(set password)* → Next |
+| PASSWORD VERIFICATION | *(confirm password)* |
+| CONTAINER ID | *(accept default) or specify* |
+| HOSTNAME | `<hostname>` |
+| DISK SIZE | 50 GB |
+| CPU CORES | 2 |
+| RAM SIZE | 8192 MiB |
+| NETWORK BRIDGE | vmbr0 |
+| IPv4 CONFIGURATION | dhcp |
+| IPv6 CONFIGURATION | disable |
+| MTU SIZE | *(blank)* |
+| DNS SEARCH DOMAIN | *(blank)* |
+| DNS SERVER | *(blank)* |
+| MAC ADDRESS | *(blank)* |
+| VLAN TAG | *(blank)* |
+| CONTAINER TAGS | `community-scripts;media` |
+| SSH KEY SOURCE | manual |
+| SSH ACCESS | Yes |
+| FUSE SUPPORT | Yes |
+| TUN/TAP SUPPORT | No |
+| NESTING SUPPORT | Yes |
+| GPU PASSTHROUGH | Yes |
+| APT CACHER PROXY | No |
+| HTTP/HTTPS PROXY | No |
+| CONTAINER TIMEZONE | America/New_York |
+| CONTAINER PROTECTION | No |
+| DEVICE NODE CREATION | No |
+| MOUNT FILESYSTEMS | `fuse` |
+| POST-INSTALL HOOK (HOST) | *(blank)* |
+| VERBOSE MODE | Yes |
+| CONFIRM SETTINGS | Yes |
 | Write selections to config file | No |
 
-5. When prompted, type `1` and press **Enter** to configure the embedded GPU.
+5. If prompted, type `1` and press **Enter** to configure the embedded GPU.
 
 ---
 
@@ -91,12 +94,17 @@ http://server.domain.com:8096/web/index.html#!/wizardstart.html
 | --- | --- |
 | Server name | `<hostname>` |
 | Preferred display language | English |
-| Admin username | *(set username)* |
-| Admin password | *(set password)* |
-| Media library | *(skip)* |
-| Metadata language | English |
-| Metadata country/region | United States |
-| Allow remote connections | ✅ Checked |
+| Click Next |
+| Username | *(set username)* |
+| Password | *(set password)* |
+| Password (confirm) | *(confirm password)* |
+| Click Next |
+| Media library | *(Next to skip)* |
+| Language | English |
+| Country/Region | United States |
+| Click Next |
+| Allow remote connections to this server | ✅ Checked |
+| Click Next |
 
 Click **Finish** to complete the wizard.
 
@@ -131,57 +139,52 @@ body, html {
 
 ## Init Media Connection
 
-### On the Jellyfin console (as root)
+Power off the Jellyfin container
 
-Set up SSH keys for the media connection:
+### On the Proxmox host server (as root)
 
-```bash
-touch /root/.ssh/authorized_keys
-chmod 600 /root/.ssh/authorized_keys
-vi /root/.ssh/authorized_keys          # paste in any user keys, save and exit
-ssh-keygen -t ed25519 -f /root/.ssh/jelly-<site>_<hostname>
-                                       # press Enter twice to skip passphrase
-```
-
-### On the media server (as root)
-
-Create the Jellyfin media user and authorize the key:
+Add the bind mount:
 
 ```bash
-useradd -M -N -g media -s /usr/sbin/nologin jelly-<site>
-touch /etc/ssh/authorized_keys/jelly-<site>
-chmod 644 /etc/ssh/authorized_keys/jelly-<site>
-vi /root/.ssh/authorized_keys          # paste in the Jellyfin public key, save and exit
+pct set <LXCID> -mp0 /mnt/media,mp=/mnt/media,ro=1
 ```
 
-### Back on the Jellyfin console (as root)
+Map the media gid into the container:
 
-Mount the remote media share over SSHFS:
-
+Once per host:
 ```bash
-mkdir /mnt/media
-chown root:jellyfin /mnt/media
-apt install -y sshfs
-sshfs jelly-<site>@<hostname>-media.domain.com:/ /mnt/media \
-  -o IdentityFile=/root/.ssh/jelly-<site>_jelly<site>
-# type 'yes' and press Enter to trust the fingerprint
+echo 'root:1002:1' >> /etc/subgid
 ```
 
-Verify the contents of `/mnt/media`, then persist the mount in `/etc/fstab`:
-
+Once per container:
 ```bash
-vi /etc/fstab
+vi /etc/pve/lxc/105.conf
+```
+```bash
+lxc.idmap: u 0 100000 65536
+lxc.idmap: g 0 100000 1002
+lxc.idmap: g 1002 1002 1
+lxc.idmap: g 1003 101003 64533
 ```
 
-Append the following line (update the GID to match the `jellyfin` group):
-
+Start the container:
+```bash
+pct start <LXCID>
 ```
-jelly-<site>@<hostname>-media.domain.com:/ /mnt/media fuse.sshfs _netdev,delay_connect,user,identityfile=/root/.ssh/jelly-<site>_<hostname>,allow_other,default_permissions,gid=118 0 0
+
+Update the container group:
+```bash
+pct exec 105 -- id jellyfin
+pct exec 105 -- groupadd -g 1002 media
+pct exec 105 -- usermod -aG media jellyfin
+pct exec 105 -- id jellyfin
 ```
 
-> ⚠️ Update the `gid` value to match the actual GID of the `jellyfin` group on the system.
-
----
+Restart and verify:
+```bash
+pct exec 105 -- systemctl restart jellyfin
+pct exec 105 -- sudo -u jellyfin ls /mnt/media/movie
+```
 
 ## Configure Jellyfin Server
 
