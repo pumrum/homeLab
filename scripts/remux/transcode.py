@@ -859,6 +859,70 @@ def _normalize_tokens(layout_str):
     return set(norm)
 
 
+def _mediainfo_audio_lines(file_path, mediainfo_path, field):
+    """
+    Return one entry per audio track for the given MediaInfo field.
+    Blank entries are preserved so the list stays aligned with track indexes
+    (e.g. LPCM reports an empty ChannelLayout; dropping it would shift later tracks).
+    """
+    result = subprocess.run(
+        [str(mediainfo_path), f'--Inform=Audio;%{field}%\\n', str(file_path)],
+        capture_output=True, text=True, check=True
+    )
+    lines = [ln.strip() for ln in result.stdout.splitlines()]
+    # Only trim trailing blanks (end-of-output newlines), never interior ones
+    while lines and not lines[-1]:
+        lines.pop()
+    return lines
+
+
+# Default channel order by count (WAVE/FFmpeg conventions), used when MediaInfo
+# reports no layout - typically LPCM, which carries no channel mask.
+# Maps count -> (MediaInfo-style layout, FFmpeg layout name). FFmpeg guesses its own
+# layout for these tracks (e.g. "5.1" = back surrounds), which doesn't match the side
+# channels our pan filters use, so the FFmpeg name is applied via channelmap.
+DEFAULT_LAYOUTS_BY_COUNT = {
+    1: ("C", "mono"),
+    2: ("L R", "stereo"),
+    3: ("L R C", "3.0"),
+    5: ("L R C Ls Rs", "5.0(side)"),
+    6: ("L R C LFE Ls Rs", "5.1(side)"),
+    8: ("L R C LFE Lb Rb Ls Rs", "7.1"),
+}
+
+
+def settings_from_channel_count(channel_count):
+    """
+    Build audio settings for a track with no reported layout, using the default
+    layout for its channel count. Returns (settings, layout) or (None, None).
+    """
+    if channel_count not in DEFAULT_LAYOUTS_BY_COUNT:
+        return None, None
+    layout, ffmpeg_layout = DEFAULT_LAYOUTS_BY_COUNT[channel_count]
+    settings = determine_audio_settings(layout)
+    if settings is not None:
+        # Tells build_ffmpeg_command to relabel the input layout before filtering
+        settings['input_layout'] = ffmpeg_layout
+    return settings, layout
+
+
+def log_audio1_plan(audio1_settings, audio1_codec, audio1_channel_count):
+    """Print what will happen to the surround track (Audio 1): copy, transcode, or skip."""
+    codec = audio1_codec or 'unknown codec'
+    if audio1_settings['channels'] <= 2:
+        # build_ffmpeg_command only adds a surround track for sources with more than 2 channels
+        print(f"{YELLOW}Audio 1 - {codec} {audio1_settings['audio_layout']} ({audio1_channel_count} ch) - no surround track will be created{RESET}")
+    elif audio1_settings.get('copy_audio'):
+        print(f"{GREEN}Audio 1 - AC3 5.1 detected - will copy instead of transcoding{RESET}")
+    elif audio1_settings['channels'] > 6:
+        print(f"{PURPLE}Audio 1 - {codec} {audio1_channel_count} channels - will transcode to AC3 5.1 (downmixed from {audio1_settings['audio_layout']}){RESET}")
+    else:
+        print(f"{PURPLE}Audio 1 - {codec} source - will transcode to AC3 {audio1_settings['audio_layout']}{RESET}")
+
+    if audio1_settings['channels'] > 2 and not audio1_settings.get('copy_audio') and audio1_settings.get('input_layout'):
+        print(f"{PURPLE}Audio 1 - Source has no channel layout - will relabel as {GREEN}{audio1_settings['input_layout']}{PURPLE} via channelmap before encoding{RESET}")
+
+
 def get_audio_channel_layout(file_path, audio_track, mediainfo_path, channel_count=None):
     """
     Return the *raw* MediaInfo ChannelLayout string for the requested audio track.
@@ -877,12 +941,8 @@ def get_audio_channel_layout(file_path, audio_track, mediainfo_path, channel_cou
     """
     try:
         # First try standard ChannelLayout
-        result = subprocess.run(
-            [str(mediainfo_path), '--Inform=Audio;%ChannelLayout%\\n', str(file_path)],
-            capture_output=True, text=True, check=True
-        )
-        lines = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
-        
+        lines = _mediainfo_audio_lines(file_path, mediainfo_path, 'ChannelLayout')
+
         layout = lines[audio_track] if 0 <= audio_track < len(lines) else ''
         
         # If we got a layout, check if it matches the channel count
@@ -893,11 +953,7 @@ def get_audio_channel_layout(file_path, audio_track, mediainfo_path, channel_cou
             if layout_tokens != channel_count:
                 # Layout doesn't match channel count, try ChannelLayout_Original
                 print(f"{YELLOW}Warning: ChannelLayout '{layout}' has {layout_tokens} channels but expected {channel_count}, trying ChannelLayout_Original{RESET}")
-                result = subprocess.run(
-                    [str(mediainfo_path), '--Inform=Audio;%ChannelLayout_Original%\\n', str(file_path)],
-                    capture_output=True, text=True, check=True
-                )
-                lines_original = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
+                lines_original = _mediainfo_audio_lines(file_path, mediainfo_path, 'ChannelLayout_Original')
                 if 0 <= audio_track < len(lines_original) and lines_original[audio_track]:
                     return lines_original[audio_track]
                 # If ChannelLayout_Original is also empty/wrong, fall back to original layout
@@ -908,11 +964,7 @@ def get_audio_channel_layout(file_path, audio_track, mediainfo_path, channel_cou
             return layout
         
         # If ChannelLayout is empty, try ChannelLayout_Original (for DTS-HD MA, etc.)
-        result = subprocess.run(
-            [str(mediainfo_path), '--Inform=Audio;%ChannelLayout_Original%\\n', str(file_path)],
-            capture_output=True, text=True, check=True
-        )
-        lines_original = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
+        lines_original = _mediainfo_audio_lines(file_path, mediainfo_path, 'ChannelLayout_Original')
         return lines_original[audio_track] if 0 <= audio_track < len(lines_original) else ''
         
     except subprocess.CalledProcessError as e:
@@ -936,11 +988,7 @@ def get_audio_channel_count(file_path, audio_track, mediainfo_path):
         Integer containing the channel count (e.g., 2, 6, 8)
     """
     try:
-        result = subprocess.run(
-            [str(mediainfo_path), '--Inform=Audio;%Channel(s)%\\n', str(file_path)],
-            capture_output=True, text=True, check=True
-        )
-        lines = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
+        lines = _mediainfo_audio_lines(file_path, mediainfo_path, 'Channel(s)')
         if 0 <= audio_track < len(lines):
             try:
                 return int(lines[audio_track])
@@ -968,11 +1016,7 @@ def get_audio_codec(file_path, audio_track, mediainfo_path):
         String containing the codec name (e.g., "AC-3", "E-AC-3", "DTS", "AAC")
     """
     try:
-        result = subprocess.run(
-            [str(mediainfo_path), '--Inform=Audio;%Format%\\n', str(file_path)],
-            capture_output=True, text=True, check=True
-        )
-        lines = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
+        lines = _mediainfo_audio_lines(file_path, mediainfo_path, 'Format')
         return lines[audio_track] if 0 <= audio_track < len(lines) else ''
     except subprocess.CalledProcessError as e:
         print(f"{RED}Error getting audio codec for {file_path}: {e}{RESET}")
@@ -1667,30 +1711,13 @@ def transcode_file(video_path, config, paths, execution_mode):
         print(f"{YELLOW}Warning: MediaInfo did not return a channel layout for Audio 0{RESET}")
         print(f"{PURPLE}Audio 0 - Raw channel count: {GREEN}{audio0_channel_count}{RESET}")
         print(f"{PURPLE}Audio 0 - Using channel count to determine layout{RESET}")
-        
-        if audio0_channel_count == 1:
-            # Mono
-            audio0_settings = {
-                "audio_layout": "Mono",
-                "filter": "pan=stereo|FL=0.5*c0|FR=0.5*c0",
-                "channels": 1,
-                "ffmpeg_channel_layout": "mono",
-                "bitrate": "128k"
-            }
-            print(f"{PURPLE}Audio 0 - Determined audio layout: {GREEN}Mono (from channel count){RESET}")
-        elif audio0_channel_count == 2:
-            # Stereo
-            audio0_settings = {
-                "audio_layout": "Stereo",
-                "filter": "anull",
-                "channels": 2,
-                "ffmpeg_channel_layout": "stereo",
-                "bitrate": "256k"
-            }
-            print(f"{PURPLE}Audio 0 - Determined audio layout: {GREEN}Stereo (from channel count){RESET}")
-        else:
-            print(f"{RED}Error: Could not detect audio layout for Audio 0 and channel count ({audio0_channel_count}) is not 1 or 2{RESET}")
+
+        audio0_settings, default_layout = settings_from_channel_count(audio0_channel_count)
+        if audio0_settings is None:
+            print(f"{RED}Error: Could not detect audio layout for Audio 0 and no default layout for {audio0_channel_count} channels{RESET}")
             return False
+        print(f"{PURPLE}Audio 0 - Determined audio layout: {GREEN}{audio0_settings['audio_layout']} (default for {audio0_channel_count} channels: {default_layout}){RESET}")
+        print(f"{PURPLE}Audio 0 - Source has no channel layout - will relabel as {GREEN}{audio0_settings['input_layout']}{PURPLE} via channelmap before downmixing{RESET}")
     
     # Audio 1 analysis - skip if "No", reuse Audio 0 settings if same track
     if config.audio_1.strip().lower() == 'no':
@@ -1700,17 +1727,15 @@ def transcode_file(video_path, config, paths, execution_mode):
     else:
         audio1_track = int(config.audio_1)
         if audio1_track == audio0_track:
-            print(f"{PURPLE}Audio 1 - Using same track as Audio 0, reusing settings{RESET}")
             audio1_settings = audio0_settings.copy()  # Make a copy so we can modify it
             audio1_codec = get_audio_codec(video_path, audio1_track, paths['mediainfo_path'])
             audio1_channel_count = get_audio_channel_count(video_path, audio1_track, paths['mediainfo_path'])
-            
+            print(f"{PURPLE}Audio 1 - Using same track as Audio 0 (track {audio1_track}), reusing settings{RESET}")
+            print(f"{PURPLE}Audio 1 - Codec: {GREEN}{audio1_codec}{PURPLE}, channels: {GREEN}{audio1_channel_count}{PURPLE}, layout: {GREEN}{audio1_settings['audio_layout']}{RESET}")
+
             # Check if this is AC3 5.1 that should be copied
-            if audio1_codec == 'AC-3' and audio1_channel_count == 6:
-                audio1_settings['copy_audio'] = True
-                print(f"{GREEN}Audio 1 - AC3 5.1 detected - will copy instead of transcoding{RESET}")
-            else:
-                audio1_settings['copy_audio'] = False
+            audio1_settings['copy_audio'] = audio1_codec == 'AC-3' and audio1_channel_count == 6
+            log_audio1_plan(audio1_settings, audio1_codec, audio1_channel_count)
         else:
             # Get codec first to determine if we need full analysis
             audio1_codec = get_audio_codec(video_path, audio1_track, paths['mediainfo_path'])
@@ -1740,47 +1765,23 @@ def transcode_file(video_path, config, paths, execution_mode):
                 print(f"{PURPLE}Audio 1 - Determined audio layout: {GREEN}{audio1_settings['audio_layout']}{RESET}")
                 
                 # Decide whether to copy or transcode based on codec and channel count
-                if audio1_codec == 'AC-3' and audio1_channel_count == 6:
-                    audio1_settings['copy_audio'] = True
-                    print(f"{GREEN}Audio 1 - AC3 5.1 detected - will copy instead of transcoding{RESET}")
-                else:
-                    audio1_settings['copy_audio'] = False
-                    if audio1_channel_count > 6:
-                        print(f"{PURPLE}Audio 1 - {audio1_channel_count} channels detected - will transcode to AC3{RESET}")
-                    else:
-                        print(f"{PURPLE}Audio 1 - Non-AC3 codec detected - will transcode to AC3{RESET}")
+                audio1_settings['copy_audio'] = audio1_codec == 'AC-3' and audio1_channel_count == 6
+                log_audio1_plan(audio1_settings, audio1_codec, audio1_channel_count)
             else:
                 # Fallback: Use channel count when MediaInfo doesn't provide layout string
                 print(f"{YELLOW}Warning: MediaInfo did not return a channel layout for Audio 1{RESET}")
                 print(f"{PURPLE}Audio 1 - Codec: {GREEN}{audio1_codec}{RESET}")
                 print(f"{PURPLE}Audio 1 - Raw channel count: {GREEN}{audio1_channel_count}{RESET}")
                 print(f"{PURPLE}Audio 1 - Using channel count to determine layout{RESET}")
-                
-                if audio1_channel_count == 1:
-                    # Mono
-                    audio1_settings = {
-                        "audio_layout": "Mono",
-                        "filter": "pan=stereo|FL=0.5*c0|FR=0.5*c0",
-                        "channels": 1,
-                        "ffmpeg_channel_layout": "mono",
-                        "bitrate": "128k",
-                        "copy_audio": False
-                    }
-                    print(f"{PURPLE}Audio 1 - Determined audio layout: {GREEN}Mono (from channel count){RESET}")
-                elif audio1_channel_count == 2:
-                    # Stereo
-                    audio1_settings = {
-                        "audio_layout": "Stereo",
-                        "filter": "anull",
-                        "channels": 2,
-                        "ffmpeg_channel_layout": "stereo",
-                        "bitrate": "256k",
-                        "copy_audio": False
-                    }
-                    print(f"{PURPLE}Audio 1 - Determined audio layout: {GREEN}Stereo (from channel count){RESET}")
-                else:
-                    print(f"{RED}Error: Could not detect audio layout for Audio 1 and channel count ({audio1_channel_count}) is not 1 or 2{RESET}")
+
+                audio1_settings, default_layout = settings_from_channel_count(audio1_channel_count)
+                if audio1_settings is None:
+                    print(f"{RED}Error: Could not detect audio layout for Audio 1 and no default layout for {audio1_channel_count} channels{RESET}")
                     return False
+                # A layout-less track is never AC3 5.1, so always transcode
+                audio1_settings['copy_audio'] = False
+                print(f"{PURPLE}Audio 1 - Determined audio layout: {GREEN}{audio1_settings['audio_layout']} (default for {audio1_channel_count} channels: {default_layout}){RESET}")
+                log_audio1_plan(audio1_settings, audio1_codec, audio1_channel_count)
     
     # Extract source metadata
     print(f"\n{PURPLE}Extracting source metadata...{RESET}")
@@ -2105,12 +2106,17 @@ def build_ffmpeg_command(video_path, config, paths, audio0_settings, audio1_sett
         audio0_title = "AAC Mono"
     else:
         audio0_title = "AAC Stereo"
-    
+
+    audio0_filter = audio0_settings['filter']
+    if audio0_settings.get('input_layout'):
+        # Source has no layout (e.g. LPCM) - relabel so pan's channel names resolve
+        audio0_filter = f"channelmap=channel_layout={audio0_settings['input_layout']},{audio0_filter}"
+
     cmd.extend([
         '-map', f'0:a:{audio0_track}',
         '-c:a:0', 'libfdk_aac',
         '-ac:a:0', '2',
-        '-filter:a:0', audio0_settings['filter'],
+        '-filter:a:0', audio0_filter,
         '-disposition:a:0', 'default',
         '-metadata:s:a:0', 'language=eng',
         '-metadata:s:a:0', f'title={audio0_title}'
@@ -2148,6 +2154,11 @@ def build_ffmpeg_command(video_path, config, paths, audio0_settings, audio1_sett
                 '-c:a:1', 'ac3',
                 '-ac:a:1', str(ac3_channels),
                 '-b:a:1', '640k',
+            ])
+            if audio1_settings.get('input_layout'):
+                # Source has no layout (e.g. LPCM) - relabel so the AC3 gets the correct speaker layout
+                cmd.extend(['-filter:a:1', f"channelmap=channel_layout={audio1_settings['input_layout']}"])
+            cmd.extend([
                 '-disposition:a:1', '0',
                 '-metadata:s:a:1', 'language=eng',
                 '-metadata:s:a:1', f'title=AC3 {audio1_title}'
@@ -2360,7 +2371,7 @@ def process_content_type(content_type, config, paths, execution_mode):
         'skipped_exists': 0,
         'errors': 0,
         'total': 0,
-        'error_files': [],  # Track input files that resulted in errors
+        'error_files': [],  # Track input files that failed (transcode errors and missing sources)
         'interrupted': False  # Track if processing was interrupted
     }
     
@@ -2421,7 +2432,7 @@ def process_content_type(content_type, config, paths, execution_mode):
                 stats['skipped_exists'] += 1
             elif result is False:
                 stats['errors'] += 1
-                stats['error_files'].append(config_obj.input_file)
+                stats['error_files'].append(f"{config_obj.input_file} (row {idx}: transcode error)")
             elif result == 'interrupted':
                 # Transcoding was interrupted - stop processing
                 stats['interrupted'] = True
@@ -2434,12 +2445,15 @@ def process_content_type(content_type, config, paths, execution_mode):
                 is_legacy = 'legacy' in config_obj.video_title.lower() if config_obj.video_title else False
                 if is_legacy:
                     expected_path = config.get('working_path_legacy', working_path)
-                    print(f"{RED}Skipping row {idx}: File '{config_obj.input_file}' not found in {expected_path} (Legacy){RESET}")
+                    not_found_msg = f"not found in {expected_path} (Legacy)"
                 else:
-                    print(f"{RED}Skipping row {idx}: File '{config_obj.input_file}' not found in {working_path}{RESET}")
+                    not_found_msg = f"not found in {working_path}"
             else:
-                print(f"{RED}Skipping row {idx}: File '{config_obj.input_file}' not found in {working_path}{RESET}")
+                not_found_msg = f"not found in {working_path}"
+            print(f"{RED}Skipping row {idx}: File '{config_obj.input_file}' {not_found_msg}{RESET}")
             stats['skipped_not_found'] += 1
+            # List missing sources as failures in the end-of-run summary
+            stats['error_files'].append(f"{config_obj.input_file} (row {idx}: source {not_found_msg})")
     
     return stats
 
@@ -2545,10 +2559,10 @@ def main():
         print(f"  Skipped (file not found): {total_skipped_not_found}")
         print(f"  Errors: {total_errors}")
         
-        # List files that had errors
+        # List files that failed (transcode errors and missing source files)
         all_error_files = movie_stats['error_files'] + tv_stats['error_files']
         if all_error_files:
-            print(f"\n  Files with errors:{RED}")
+            print(f"\n  Failed files:{RED}")
             for error_file in all_error_files:
                 print(f"    - {error_file}")
         
