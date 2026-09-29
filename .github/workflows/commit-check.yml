@@ -1,6 +1,7 @@
 # Fails a PR if any of its commits has an author or committer email that
 # looks like git's hostname-based default (e.g. user@machine.local), which
-# would publish a local machine name in this public repo.
+# would publish a local machine name in this public repo. Only runs on PRs
+# opened by the repo owner; other contributors' PRs show it as skipped.
 name: Commit check
 
 on:
@@ -9,6 +10,7 @@ on:
 jobs:
   author-emails:
     name: Author emails
+    if: github.event.pull_request.user.login == github.repository_owner
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
