@@ -7,6 +7,10 @@
 - **Never push directly to `main`.** Always work on a feature branch.
 - **Never close PRs** without explicit instruction.
 - After opening a PR, the task is done. Do not follow up with a merge.
+- **Never include local machine hostnames** in anything pushed to GitHub
+  (commit messages, PR text, file contents, or commit author/committer emails).
+  Before committing, confirm `git config user.email` is set to the GitHub noreply
+  address, not a `user@<hostname>.local`-style default. This repo is public.
 
 ## Workflow
 
