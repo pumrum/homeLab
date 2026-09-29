@@ -1,0 +1,78 @@
+# Parses every script in the repo without running it, and fails if any file
+# has a syntax error. No secrets needed; nothing is executed.
+name: Syntax check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch: # allows a manual run from the Actions tab
+
+jobs:
+  apps-script:
+    name: Apps Script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse .gs files
+        run: |
+          status=0
+          while IFS= read -r f; do
+            if node -e 'const f = process.argv[1]; new (require("vm").Script)(require("fs").readFileSync(f, "utf8"), { filename: f })' "$f"; then
+              echo "OK    $f"
+            else
+              echo "::error file=$f::JavaScript syntax error"; status=1
+            fi
+          done < <(git ls-files '*.gs')
+          exit $status
+
+  python:
+    name: Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse .py files
+        run: |
+          status=0
+          while IFS= read -r f; do
+            if python3 -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1])' "$f"; then
+              echo "OK    $f"
+            else
+              echo "::error file=$f::Python syntax error"; status=1
+            fi
+          done < <(git ls-files '*.py')
+          exit $status
+
+  shell:
+    name: Shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse shell scripts
+        run: |
+          status=0
+          while IFS= read -r f; do
+            if bash -n "$f"; then
+              echo "OK    $f"
+            else
+              echo "::error file=$f::Shell syntax error"; status=1
+            fi
+          done < <(git ls-files '*.sh' '*.bashrc' '*bash_aliases')
+          exit $status
+
+  json:
+    name: JSON
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate .json files
+        run: |
+          status=0
+          while IFS= read -r f; do
+            if python3 -m json.tool "$f" > /dev/null; then
+              echo "OK    $f"
+            else
+              echo "::error file=$f::Invalid JSON"; status=1
+            fi
+          done < <(git ls-files '*.json')
+          exit $status
