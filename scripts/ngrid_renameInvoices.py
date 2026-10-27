@@ -26,25 +26,29 @@ account_lookup = {
     if key.startswith(ACCOUNT_PREFIX)
 }
 
-# Matches files like "NG_Bill_1234567890_2026_07_09.pdf" or "NG_Bill_1234567890_undefined.pdf".
-# The date portion of the filename is not trusted; the invoice date always comes from the
-# PDF contents instead.
-filename_pattern = re.compile(r"NG_Bill_(\d+)_.+\.pdf", re.IGNORECASE)
+# Matches "ACCOUNT NUMBER\n 12345-67890" in the extracted PDF text
+account_number_pattern = re.compile(r"ACCOUNT NUMBER\s+(\d{5}-\d{5})", re.IGNORECASE)
 
 # Matches "DATE BILL ISSUED\nJul 24, 2026" in the extracted PDF text
 date_issued_pattern = re.compile(r"DATE BILL ISSUED\s+([A-Za-z]+ \d{1,2},\s*\d{4})", re.IGNORECASE)
 
+# Matches the service address line following "SERVICE FOR\n<name>\n", used in warnings
+service_address_pattern = re.compile(r"SERVICE FOR\s*\n[^\n]+\n([^\n]+)", re.IGNORECASE)
 
-def date_from_pdf_contents(pdf_path: Path) -> str | None:
-    try:
-        import fitz  # PyMuPDF
-    except ImportError:
-        logging.error("PyMuPDF is required to evaluate PDF contents. Install with: pip install pymupdf")
-        return None
+
+def pdf_text(pdf_path: Path) -> str:
+    import fitz  # PyMuPDF
 
     with fitz.open(pdf_path) as doc:
-        text = "".join(page.get_text() for page in doc)
+        return "".join(page.get_text() for page in doc)
 
+
+def account_from_text(text: str) -> str | None:
+    match = account_number_pattern.search(text)
+    return match.group(1).replace("-", "") if match else None
+
+
+def date_from_text(text: str) -> str | None:
     match = date_issued_pattern.search(text)
     if not match:
         return None
@@ -53,25 +57,41 @@ def date_from_pdf_contents(pdf_path: Path) -> str | None:
     return issued_date.strftime("%Y-%m-%d")
 
 
+try:
+    import fitz  # noqa: F401  PyMuPDF
+except ImportError:
+    logging.error("PyMuPDF is required to evaluate PDF contents. Install with: pip install pymupdf")
+    raise SystemExit(1)
+
 for file_path in path_ngrid_bills.glob("*.pdf"):
-    match = filename_pattern.match(file_path.name)
-    if not match:
-        logging.warning(f"Filename does not match expected pattern, skipping: {file_path.name}")
+    text = pdf_text(file_path)
+
+    account_number = account_from_text(text)
+    if not account_number:
+        logging.warning(f"Could not determine account number from PDF contents, skipping: {file_path.name}")
         continue
 
-    account_number = match.group(1)
-    formatted_date = date_from_pdf_contents(file_path)
+    formatted_date = date_from_text(text)
     if not formatted_date:
         logging.warning(f"Could not determine bill date from PDF contents, skipping: {file_path.name}")
         continue
 
     property_unit = account_lookup.get(account_number)
     if not property_unit:
-        logging.warning(f"No property/unit found for account {account_number}, skipping: {file_path.name}")
+        address_match = service_address_pattern.search(text)
+        address = address_match.group(1).strip() if address_match else "unknown address"
+        logging.warning(
+            f"No property/unit found for account {account_number} ({address}); "
+            f"add {ACCOUNT_PREFIX}{account_number}=<property_unit> to secrets.env. Skipping: {file_path.name}"
+        )
         continue
 
     new_name = f"{formatted_date}_{COMPANY_NAME}_{property_unit}.pdf"
     new_path = file_path.with_name(new_name)
+
+    if new_path == file_path:
+        # Already named correctly
+        continue
 
     if new_path.exists():
         logging.warning(f"Target filename already exists, skipping: {file_path.name} -> {new_name}")
