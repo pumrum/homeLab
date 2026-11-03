@@ -17,6 +17,12 @@ The end state:
 > - **[Admin]** steps run in an elevated PowerShell ("Run as administrator")
 >   signed in as the admin account. **[Bot]** steps run in a normal PowerShell
 >   signed in as the bot user.
+> - Paths used throughout:
+>   - `C:\src\homeLab`: the git repo (code only, read-only on the robot)
+>   - `C:\src\homeLab\scripts\automation\<process>`: this process's project
+>     folder (`pyproject.toml`, `.venv`). Examples use `account-recon`.
+>   - `C:\automation\<process>`: this process's private, writable data
+>     (`config.toml`, `runs\`, `profiles\`), kept outside the repo.
 > - Values in `<angle brackets>` are placeholders. Never commit real values
 >   (host names, account names, URLs) to this public repo.
 > - Policy names change between Windows and Edge releases. After each section,
@@ -212,15 +218,20 @@ user never needs to know it day to day; Autologon (A10) stores it encrypted.
 
 **Verify:** `Get-LocalGroupMember Administrators` does **not** list `rpa`.
 
-### A9. Working folder
+### A9. Working folders
 
 ```powershell
-New-Item -ItemType Directory -Path "C:\recon" -Force | Out-Null
-icacls "C:\recon" /grant "rpa:(OI)(CI)M"
+foreach ($d in "C:\src", "C:\automation") {
+  New-Item -ItemType Directory -Path $d -Force | Out-Null
+  icacls $d /grant "rpa:(OI)(CI)M"
+}
 ```
 
-The bot user can modify everything under `C:\recon` (repo, `.venv`, `runs\`,
-`profiles\`) and nothing else outside its own profile.
+- `C:\src` holds the repo clone (`C:\src\homeLab`). The bot user needs write
+  access only so `git checkout` and `uv sync` (which creates `.venv`) work.
+- `C:\automation\<process>` holds each process's private config and run data.
+
+The bot user can modify these two folders and its own profile, nothing else.
 
 ### A10. Automatic sign-in
 
@@ -241,6 +252,16 @@ lock immediately.)
 
 Sign in as `rpa` (it now does so automatically). The first sign-in builds the
 profile; wait for it to finish.
+
+The PowerShell blocks in B3 to B7 use these variables. Set them at the start
+of each PowerShell window you use for Part B:
+
+```powershell
+$repo    = "C:\src\homeLab"                        # repo clone (code only)
+$process = "account-recon"                         # process folder name (not final)
+$proj    = "$repo\scripts\automation\$process"     # project folder: pyproject.toml, .venv
+$data    = "C:\automation\$process"                 # private data: config.toml, runs, profiles
+```
 
 ### B1. Quiet per-user settings
 
@@ -300,37 +321,53 @@ The repo is public, so the robot clones it anonymously: no GitHub account,
 token or SSH key on this machine. A compromised robot can't change the code.
 
 ```powershell
-git clone <repo-url> C:\recon\app
-cd C:\recon\app
+git clone <repo-url> $repo
+cd $repo
 git config --global credential.helper ""      # never store or ask for credentials
 git remote set-url --push origin no-push      # any push fails immediately
 git fetch --tags
-git checkout <vX.Y.Z>                         # robots run tagged releases only
+git checkout "$process/v<X.Y.Z>"              # robots run tagged releases only
+cd $proj
 uv sync                                       # exact versions from uv.lock
 ```
 
+Tags carry the process name (for example `account-recon/v0.2.0`) because one
+repo holds several processes, each versioned on its own.
+
 Leave `user.name` and `user.email` unset so an accidental commit fails too.
 
-**Updating later:** `git fetch --tags`, `git checkout <new tag>`, `uv sync`,
-then run the environment check (B7). To roll back, check out the previous tag
-and `uv sync` again.
+**Updating later:**
+
+```powershell
+cd $repo; git fetch --tags; git checkout "$process/v<new>"
+cd $proj; uv sync
+```
+
+Then run the environment check (B7). To roll back, check out the previous tag
+and run `uv sync` again. Nothing in `$data` is touched by updates.
 
 ### B4. Private configuration and secrets
 
-Nothing private is in the repo. Create or copy these on the robot only:
+Nothing private is in the repo. Create the data folder, then create or copy
+the items below on the robot only:
+
+```powershell
+New-Item -ItemType Directory -Path "$data\runs", "$data\profiles" -Force | Out-Null
+```
 
 | Item | Location | How |
 | --- | --- | --- |
-| Real config | `C:\recon\config.toml` | Copy from your backup, or copy `config.example.toml` and fill in |
-| Passwords, API tokens, webhook URL | Windows Credential Manager (bot user) | `uv run recon setup-secrets` |
-| Large keys (e.g. Google service account) | Encrypted file in `%USERPROFILE%\.recon\` | `setup-secrets` imports it; delete the original download |
+| Real config | `C:\automation\<process>\config.toml` | Copy from your backup, or copy `config.example.toml` and fill in |
+| Passwords, API tokens, webhook URL | Windows Credential Manager (bot user) | `cd $proj; uv run recon setup-secrets` |
+| Large keys (e.g. Google service account) | Encrypted file in `%USERPROFILE%\.<process>\` | `setup-secrets` imports it; delete the original download |
 | SFTP key | `%USERPROFILE%\.ssh\` | Generate on this machine with `ssh-keygen -t ed25519`; never copy a key in |
 
-Never copy browser profiles from another machine. Each site asks for
+Browser profiles (`$data\profiles`) and run output (`$data\runs`) are created
+by the app. Never copy browser profiles from another machine. Each site asks for
 verification once on the first run; approve it and the profile remembers this
 machine.
 
-**Verify:** `uv run recon check-config`
+**Verify:** `cd $proj; uv run recon check-config`
 
 ### B5. Lock at sign-in
 
@@ -347,12 +384,12 @@ Register-ScheduledTask -TaskName "Lock at sign-in" -Action $a -Trigger $t
 ### B6. Daily job
 
 ```powershell
-$a = New-ScheduledTaskAction -Execute "C:\recon\app\.venv\Scripts\python.exe" `
-  -Argument "-m recon run" -WorkingDirectory "C:\recon\app"
+$a = New-ScheduledTaskAction -Execute "$proj\.venv\Scripts\python.exe" `
+  -Argument "-m recon run" -WorkingDirectory $proj
 $t = New-ScheduledTaskTrigger -Daily -At 8:00
 $s = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
   -MultipleInstances IgnoreNew -RestartCount 1 -RestartInterval (New-TimeSpan -Minutes 15)
-Register-ScheduledTask -TaskName "Account Recon" -Action $a -Trigger $t -Settings $s
+Register-ScheduledTask -TaskName $process -Action $a -Trigger $t -Settings $s
 ```
 
 - **StartWhenAvailable:** a run missed while the machine was off starts soon after boot.
@@ -366,9 +403,10 @@ the bot user is back on the console before the next run.
 
 ### B7. Verify the whole machine
 
-From `C:\recon\app` (or the smoke-test folder before the app exists):
+From the project folder (or the smoke-test folder before the app exists):
 
 ```powershell
+cd $proj
 uv run python env_check.py          # fake bank site on this machine only
 uv run python env_check.py --lock   # same, with Windows locked
 ```
@@ -389,7 +427,41 @@ locked, and (at the scheduled time) a run summary arrives.
 | --- | --- |
 | After a major Edge update | Run `env_check.py`; check `edge://policy` |
 | After a feature update of Windows | Re-run Part A verify lines; check B1 settings survived |
-| Deploying a new release | `git fetch --tags`, `git checkout <tag>`, `uv sync`, `env_check.py` |
+| Deploying a new release | `git fetch --tags`, `git checkout <process>/v<X.Y.Z>`, `uv sync` in the project folder, `env_check.py` |
 | Changing the bot user's password | Update it in Autologon (A10) |
 | Changing any site password | `uv run recon setup-secrets` for that entry |
 | Rebuilding the machine | Parts A and B in order; restore `config.toml` from backup; new keys and secrets |
+
+---
+
+## Part D: Developer workstation
+
+Code is written and tested on a developer workstation, then released to the
+robot by tag. The workstation should match the robot where it affects how the
+code behaves (Python version, locked library versions, Edge, paths), and
+differ where the robot's settings exist only for unattended running.
+
+**Keep identical on both machines:** Python 3.13 (minor version), `uv.lock`,
+Edge stable channel kept up to date, and the paths `C:\src\homeLab` and
+`C:\automation\<process>`. Same paths mean the same config file works on both.
+
+| Step | Workstation | Notes |
+| --- | --- | --- |
+| A1 Base install | Partly | Keep your existing setup and account; just stay fully patched. No rename, fixed address or display setting needed |
+| A2 Windows Update policy | Skip | Use your normal update settings |
+| A3 Power | Skip | |
+| A4 Quiet system | Skip | Optional: `DontShowUI` if crash dialogs annoy you |
+| A5 Edge policies | Skip | They would change your everyday browser. Test runs use their own profile folder; `env_check.py` will WARN about missing policies, which is expected here |
+| A6 Remote access | Skip | |
+| A7 Security | Same | BitLocker on: this machine also holds private config and test secrets |
+| A8 Bot user | Skip | You develop as yourself |
+| A9 Working folders | Same paths | Create `C:\src` and `C:\automation`; no `icacls` needed, your account owns them |
+| A10 Automatic sign-in | Skip | |
+| B1 Quiet profile | Partly | Only turn off the python.exe and python3.exe app execution aliases |
+| B2 Tools | Same, plus more | Also install `gh` (GitHub CLI), Claude Code, and run `pre-commit install` in the repo |
+| B3 Repo | Different | Authenticated clone with push rights (`gh auth login`); set `user.name` and your GitHub no-reply `user.email`; work on branches, not tags |
+| B4 Config and secrets | Same locations | Same `config.toml` path. Secrets in your own Credential Manager. Use separate Gmail tokens and SSH key for this machine, so revoking one never breaks the robot. Never copy browser profiles between machines |
+| B5 Lock at sign-in | Skip | |
+| B6 Daily job | **Never** | Two machines running the job would both write to the same sheets. The workstation only runs on demand, with you present |
+| B7 Verify | Same | Run `env_check.py`; expect WARN for Edge policies and automatic sign-in off. `--lock` is optional here |
+| C Maintenance | Partly | Rerun `env_check.py` after major Edge or Windows updates; deployment rows don't apply |
