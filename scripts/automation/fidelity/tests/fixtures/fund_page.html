@@ -1,0 +1,58 @@
+<!doctype html>
+<!-- Synthetic test page. Made-up fund and numbers; mirrors the structure of a
+     real fund summary page (Angular components, Daily Info header, Details card). -->
+<html lang="en">
+<head><meta charset="utf-8"><title>Test Portfolio 2042 | Test Site</title></head>
+<body>
+<h1>Test Portfolio 2042</h1>
+
+<section class="daily-info">
+  <h2>Daily Info</h2>
+  <mfl-label section="dailyInfo" label="ASOF" isheader="" size="xs" type="text" class="mfl-label">
+    <div class="mfl-label-wrapper"><span class="mfl-label-text font-xs">
+      <span><span>AS OF</span><span> 11/02/2026</span></span>
+      <mfl-footnotes><sup class="footnote"></sup></mfl-footnotes></span></div>
+  </mfl-label>
+  <div class="mfl-daily-info-snapshot-nav flex flex-row">
+    <mfl-daily-info-nav><div class="mfl-daily-info-nav-wrapper flex flex-col">
+      <div class="title-column font-xxs label"><mfl-label section="dailyInfo" isheader="" size="xs" class="mfl-label">
+        <div class="mfl-label-wrapper"><span class="mfl-label-text font-xs label"><span><span>Unit Value</span></span></span></div>
+      </mfl-label></div>
+      <div class="flex flex-row justify-start items-center">
+        <div class="value-column font-xxl label">$12.34</div>
+        <mfl-daily-info-nav-change><div class="nav-change-wrapper">
+          <mfl-label section="dailyInfo" isheader="" size="sm" type="text" class="mfl-label nav-change-label">
+            <div class="mfl-label-wrapper"><span class="mfl-label-text font-sm"><span><span>Unit Value Change</span></span></span></div>
+          </mfl-label>
+          <div class="font-sm number-negative"> -0.02 (-0.16%) </div>
+        </div></mfl-daily-info-nav-change>
+      </div>
+    </div></mfl-daily-info-nav>
+  </div>
+</section>
+
+<section class="average-annual-returns">
+  <h2>Average Annual Returns</h2>
+  <mfl-label label="ASOF" isheader="" size="xs" type="text" class="mfl-label">
+    <div class="mfl-label-wrapper"><span class="mfl-label-text font-xs"><span><span>AS OF</span><span> 10/31/2026</span></span></span></div>
+  </mfl-label>
+  <div>1 Yr +9.99%</div>
+</section>
+
+<section class="details">
+  <h2>Details</h2>
+  <mfl-card-data-row role="listitem" class="mfl-card-data-row mfl-card-row-type"><div mflcardrow="" class="mfl-card-row">
+    <div class="card-row-title flex flex-row"><mfl-label size="xs" class="mfl-label"><div class="mfl-label-wrapper"><span class="mfl-label-text font-xs label"><span><span slot="start"></span><span>Exp Ratio (Net)</span><span></span></span></span></div></mfl-label></div>
+    <div class="card-row-data flex justify-between items-center flex-1"><span class="date-text font-sm">01/02/2026</span><span class="additional-text font-sm"></span><span class="data-text font-md">0.50%</span></div>
+  </div></mfl-card-data-row>
+  <mfl-card-data-row role="listitem" class="mfl-card-data-row mfl-card-row-type"><div mflcardrow="" class="mfl-card-row">
+    <div class="card-row-title flex flex-row"><mfl-label size="xs" class="mfl-label"><div class="mfl-label-wrapper"><span class="mfl-label-text font-xs label"><span><span slot="start"></span><span>Unit Value</span><span></span></span></span></div></mfl-label></div>
+    <div class="card-row-data flex justify-between items-center flex-1"><span class="date-text font-sm">11/02/2026</span><span class="additional-text font-sm"></span><span class="data-text font-md">$12.34</span></div>
+  </div></mfl-card-data-row>
+  <mfl-card-data-row role="listitem" class="mfl-card-data-row mfl-card-row-type"><div mflcardrow="" class="mfl-card-row">
+    <div class="card-row-title flex flex-row"><mfl-label size="xs" class="mfl-label"><div class="mfl-label-wrapper"><span class="mfl-label-text font-xs label"><span><span slot="start"></span><span>12 Month Low-High</span><span></span></span></span></div></mfl-label></div>
+    <div class="card-row-data flex justify-between items-center flex-1"><span class="date-text font-sm">10/31/2026</span><span class="additional-text font-sm"></span><span class="data-text font-md">$10.00 - $13.00</span></div>
+  </div></mfl-card-data-row>
+</section>
+</body>
+</html>

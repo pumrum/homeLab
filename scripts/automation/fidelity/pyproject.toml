@@ -1,0 +1,16 @@
+[project]
+name = "fidelity-nav"
+version = "0.1.0"
+description = "Daily NAV (unit value) of selected funds, appended to a CSV"
+requires-python = ">=3.13,<3.14"
+dependencies = ["automation-common", "beautifulsoup4>=4.12"]
+
+[project.scripts]
+fidelity-nav = "fidelity_nav.main:main"
+
+[tool.uv.sources]
+automation-common = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
