@@ -29,6 +29,47 @@ def test_valid_config(tmp_path):
     assert cfg.funds[0].url == "https://example.invalid/fund/TEST1"
 
 
+def test_sheet_is_optional(tmp_path):
+    assert load_config(_write(tmp_path, GOOD)).sheet is None
+
+
+def test_sheet_section(tmp_path):
+    text = GOOD + (
+        '\n[sheet]\nspreadsheet_id = "made-up-spreadsheet-id-0123456789"\nworksheet = "NAV"\n'
+    )
+    sheet = load_config(_write(tmp_path, text)).sheet
+    assert sheet is not None
+    assert (sheet.spreadsheet_id, sheet.worksheet) == ("made-up-spreadsheet-id-0123456789", "NAV")
+
+
+FUNDS = [{"symbol": "TEST1", "url": "https://x.invalid"}]
+
+
+@pytest.mark.parametrize(
+    ("sheet", "message"),
+    [
+        ({"worksheet": "NAV"}, '"spreadsheet_id"'),
+        ({"spreadsheet_id": "made-up-spreadsheet-id-0123456789"}, '"worksheet"'),
+        ({"spreadsheet_id": "<spreadsheet id>", "worksheet": "NAV"}, "placeholder"),
+        ({"spreadsheet_id": "https://docs.google.com/spreadsheets/d/abc/edit",
+          "worksheet": "NAV"}, "not the whole address"),
+        ({"spreadsheet_id": "made-up-spreadsheet-id-0123456789", "worksheet": "NAV",
+          "range": "A1"}, "unknown"),
+        ("NAV", "must be a table"),
+    ],
+)
+def test_invalid_sheet_section(sheet, message):
+    with pytest.raises(ConfigError, match=message):
+        parse_config({"funds": FUNDS, "sheet": sheet})
+
+
+def test_sheet_error_never_repeats_the_id():
+    bad_id = "short-private-id"
+    with pytest.raises(ConfigError) as e:
+        parse_config({"funds": FUNDS, "sheet": {"spreadsheet_id": bad_id, "worksheet": "NAV"}})
+    assert bad_id not in str(e.value)
+
+
 def test_missing_file(tmp_path):
     with pytest.raises(ConfigError, match="not found"):
         load_config(tmp_path / "config.toml")

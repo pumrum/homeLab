@@ -5,3 +5,9 @@
 [[funds]]
 symbol = "XXXXX"        # fund symbol or ID, capital letters and digits
 url = "https://..."     # the fund's summary page
+
+# Optional: copy new rows to a Google Sheet (see README "Google Sheet").
+# Remove the leading "# " from the three lines below to turn it on.
+# [sheet]
+# spreadsheet_id = "<ID>"   # from .../spreadsheets/d/<ID>/edit
+# worksheet = "NAV"         # the tab name

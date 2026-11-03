@@ -41,11 +41,20 @@ Machine setup: [`machine-prep.md`](machine-prep.md).
 
 ## Secrets
 
-- Only through `automation_common.secrets` (keyring, i.e. Windows Credential
-  Manager of the `robot` user). Entry names `<process>/<name>`; shared ones
-  `automation/<name>` (e.g. `automation/home-assistant-webhook`).
-- Never read, print, export, or store secret values, and never run `cmdkey` or
-  `keyring` yourself. Pass the run's `masker` so values are hidden in logs.
+- Only through `automation_common.secrets`. Entry names `<process>/<name>`;
+  shared ones `automation/<name>` (e.g. `automation/home-assistant-webhook`).
+  - Short values (passwords, tokens, URLs): Windows Credential Manager of the
+    `robot` user, via keyring (`get_secret`, `get_credential`).
+  - Values over Credential Manager's 2,560-byte limit (e.g. the Google service
+    account key `automation/google-service-account`): a DPAPI-encrypted file
+    `%USERPROFILE%\.<prefix>\<name>.dpapi` (`read_secret_file`), created by the
+    person with `tools/import_secret_file.py`.
+- Never read, print, export, or store secret values, and never run `cmdkey`,
+  `keyring`, or `tools/import_secret_file.py` yourself. Pass the run's
+  `masker` so values are hidden in logs.
+- Google Sheets: `automation_common.sheets.open_worksheet` (service account,
+  Sheets scope only). Spreadsheet IDs are private config: add them to the
+  masker and never put them in messages.
 
 ## Code rules
 
