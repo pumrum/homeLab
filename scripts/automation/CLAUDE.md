@@ -5,7 +5,48 @@ root `CLAUDE.md` (US English, public repo, no bank names, ask before push/PR)
 apply too.
 Machine setup: [`machine-prep.md`](machine-prep.md).
 
-## Machines and paths (Windows 11)
+## Building a new automation
+
+The existing process folders here are the working examples; the steps to add a
+package are in [`README.md`](README.md). Before writing code:
+
+1. **Ask what isn't clear:** the site or source, what to capture, where it
+   goes (CSV, Google Sheet, webhook message), how often, and whether it needs
+   a sign-in. Keep real URLs and IDs out of the repo.
+2. **Reuse before writing:** see "Shared code" below. Sign-in has its own
+   caveat under "Browser rules".
+3. **Learn the real page, don't guess.** With the maintainer's OK, load a
+   public page once in the built-in browser and read its structure. Never sign
+   in to anything yourself. If you can't load it, build from candidates plus a
+   text fallback, add a `--dump` option, and ask the maintainer to run it and
+   paste the output. Real labels often differ from what the request calls them.
+4. **Write a synthetic fixture** that mirrors the real structure with made-up
+   names and values, then the parser and its tests.
+
+When you finish, tell the maintainer what you built, what you couldn't verify,
+and what to check. Give the test steps as PowerShell commands for the robot
+test workstation, in `powershell` code blocks, including anything only the
+maintainer can do (secrets, Google or Home Assistant setup, config values).
+
+## Naming and generic docs
+
+- Process names, folders, packages, and commands never name a bank, even when
+  the automation uses a bank's site. Use a neutral name (e.g. `account-recon`).
+- This `CLAUDE.md`, `README.md`, `machine-prep.md`, and `common/` are generic:
+  they use `<process>` and never name a specific process. Only a process's own
+  folder and the workspace wiring (`pyproject.toml`, `uv.lock`) may name it.
+
+## Machines
+
+| Machine | Used for |
+| --- | --- |
+| Developer workstation | Where Claude Code runs: code, tests, commits, PRs. Runs on demand only, never scheduled |
+| Robot test workstation | The maintainer tests branches end to end here. Read-only clone, no Claude Code |
+| Unattended robot | Runs the scheduled jobs from `main`. Read-only clone, no Claude Code |
+
+Live runs happen on the test workstation or robot, by the maintainer.
+
+## Paths (Windows 11)
 
 | Path | Purpose |
 | --- | --- |
@@ -23,6 +64,25 @@ Machine setup: [`machine-prep.md`](machine-prep.md).
 - Find the data folder only through `automation_common.config.process_dir(<process>)`:
   env var `AUTOMATION_DATA_ROOT` (default `C:\automation`) plus the process
   name. Tests use a temp folder.
+- Never read anything under `C:\automation\`, including browser profiles and
+  run folders. The maintainer copies what you need into `triage/`.
+
+## Shared code
+
+Use these from `automation_common` instead of writing your own:
+
+| Module | Gives you |
+| --- | --- |
+| `run` | `Run`: run folder, log with secrets masked, summary, webhook notification, and exit code |
+| `config` | `process_dir`, TOML loading, and validation helpers |
+| `secrets` | Credential Manager entries and encrypted secret files |
+| `browser` | `launch_edge`, `find_first`, `click_until`, `type_date`, tracing, and failure evidence |
+| `sheets` | `open_worksheet`: read a Google Sheet tab and append rows |
+| `notify` | The webhook POST (`Run` calls it for you) |
+
+When copying a data file to a sheet, compare the two and append what's missing,
+so the next run catches up after a failed write. A process with a `sheet.py`
+shows how.
 
 ## Workspace and packaging
 
@@ -87,6 +147,11 @@ Machine setup: [`machine-prep.md`](machine-prep.md).
 - Date inputs: `type_date` (click, select all, type key by key, Tab, read back).
 - Clicks: `click_until` (normal, then forced, then keyboard; verify after each).
 - Never start a Playwright trace before any sign-in is complete.
+- Sign-in is not built yet: `automation_common` has no sign-in or MFA-wait
+  helper, and no process signs in. The only sign-in flow is the FakeBank one in
+  `tools/env_check.py`. Build the helper in `common/` when a process first
+  needs it; the MFA wait must time out, and tell the maintainer it's new and
+  untested on a real site.
 - On failure save to the run folder: screenshot, `fail_NN_page.txt`
   (`save_page_evidence`, a shadow-DOM-piercing outline), and `trace.zip`.
 - Respect sites: one page load per item per run, no parallel requests.
@@ -96,16 +161,16 @@ Machine setup: [`machine-prep.md`](machine-prep.md).
 - `uv run pytest` and `uv run ruff check .` from here. Unit tests use
   synthetic fixtures only (e.g. a made-up HTML page mirroring the real
   structure). No test touches the network or a real site.
-- Live runs happen only on the maintainer's machine, by the maintainer.
-  Don't run anything against real sites unless asked.
+- Don't run anything against real sites unless asked.
 
 ## Versions, branches, and releases
 
 - Branches `feature/<process>-<what>`, PR into `main`.
-- Tags per process: `<process>/vX.Y.Z` (SemVer). The robot runs only tagged
-  releases. The maintainer creates tags; you may propose one.
-- Each process keeps a `CHANGELOG.md` (newest first, `Unreleased` on top) and
-  bumps `version` in its `pyproject.toml` with the release.
+- The robot currently runs `main`: merging a PR is the release. To deploy, the
+  maintainer runs `git pull` and `uv sync` on the robot.
+- Release tags are on hold. Don't create or propose them, or write steps that
+  depend on them, until the maintainer brings them back.
+- Each process keeps a `CHANGELOG.md`, with new entries under `Unreleased`.
 
 ## Fixing a site change
 

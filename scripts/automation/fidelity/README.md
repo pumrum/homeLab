@@ -119,7 +119,7 @@ the parser would read. Writes nothing to the CSV. Copy the files into
 
 ## Schedule (robot only)
 
-Register as the `robot` user (see machine-prep B6), from a tagged release:
+Register as the `robot` user (see machine-prep B6), on `main`:
 
 ```powershell
 $proj = "C:\src\homeLab\scripts\automation"

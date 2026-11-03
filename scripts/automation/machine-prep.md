@@ -400,8 +400,7 @@ git clone <repo-url> $repo
 cd $repo
 git config --global credential.helper ""      # never store or ask for credentials
 git remote set-url --push origin no-push      # any push fails immediately
-git fetch --tags
-git checkout "$process/v<X.Y.Z>"              # robots run tagged releases only
+git switch main                               # the robot runs main
 cd $ws
 uv sync                                       # exact versions from uv.lock
 ```
@@ -410,20 +409,17 @@ uv sync                                       # exact versions from uv.lock
 code into it straight from the repo folders. Nothing is copied to
 `C:\automation`; that folder only ever holds data (B4).
 
-Tags carry the process name (`<process>/vX.Y.Z`) because one
-repo holds several processes, each versioned on its own.
-
 Leave `user.name` and `user.email` unset so an accidental commit fails too.
 
 **Updating later:**
 
 ```powershell
-cd $repo; git fetch --tags; git checkout "$process/v<new>"
+cd $repo; git switch main; git pull --ff-only
 cd $ws; uv sync
 ```
 
-Then run the environment check (B7). To roll back, check out the previous tag
-and run `uv sync` again. Nothing in `$data` is touched by updates.
+Then run the environment check (B7). To roll back, check out the last good
+commit and run `uv sync` again. Nothing in `$data` is touched by updates.
 
 ### B4. Private configuration and secrets
 
@@ -524,7 +520,7 @@ locked, and (at the scheduled time) a run summary arrives.
 | --- | --- |
 | After a major Edge update | Run `tools\env_check.py`; check `edge://policy` |
 | After a feature update of Windows | Re-run Part A verify lines; check B1 settings survived |
-| Deploying a new release | `git fetch --tags`, `git checkout <process>/v<X.Y.Z>`, `uv sync` in `$ws`, `tools\env_check.py` |
+| Deploying a new release | `git switch main`, `git pull --ff-only`, `uv sync` in `$ws`, `tools\env_check.py` |
 | Changing the bot user's password | Update it in Autologon (A10) |
 | Changing any site password | Edit that entry in Credential Manager (B4) |
 | Rebuilding the machine | Parts A and B in order; restore `config.toml` from backup; new keys and secrets |
@@ -534,7 +530,7 @@ locked, and (at the scheduled time) a run summary arrives.
 ## Part D: Developer workstation
 
 Code is written and tested on a developer workstation, then released to the
-robot by tag. The workstation should match the robot where it affects how the
+robot by merging into `main`. The workstation should match the robot where it affects how the
 code behaves (Python version, locked library versions, Edge, paths), and
 differ where the robot's settings exist only for unattended running.
 
@@ -556,7 +552,7 @@ Edge stable channel kept up to date, and the paths `C:\src\homeLab` and
 | A10 Automatic sign-in | Skip | |
 | B1 Quiet profile | Partly | Only turn off the python.exe and python3.exe app execution aliases |
 | B2 Tools | Same, plus more | Also install `gh` (GitHub CLI), Claude Code, and run `pre-commit install` in the repo |
-| B3 Repo | Different | Authenticated clone with push rights (`gh auth login`); set `user.name` and your GitHub no-reply `user.email`; work on branches, not tags. Still `uv sync` in `$ws` after switching branches |
+| B3 Repo | Different | Authenticated clone with push rights (`gh auth login`); set `user.name` and your GitHub no-reply `user.email`; work on feature branches. Still `uv sync` in `$ws` after switching branches |
 | B4 Config and secrets | Same locations | Same `config.toml` path. Secrets in your own Credential Manager. Use separate Gmail tokens and SSH key for this machine, so revoking one never breaks the robot. Never copy browser profiles between machines |
 | B5 Lock at sign-in | Skip | |
 | B6 Daily job | **Never** | Two machines running the job would both write to the same outputs. The workstation only runs on demand, with you present |
