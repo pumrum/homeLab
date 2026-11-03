@@ -5,9 +5,14 @@
     return run.exit_code         # 0 all OK, 1 any item failed
 
 Leaving the `with` block (normally or by an exception) always writes
-`summary.json` and `report.txt`, sends the summary to the webhook if one is
-configured, and closes the log. An unexpected exception is recorded as a
+`summary.json` and `report.txt`, sends a notification to the webhook if one
+is configured, and closes the log. An unexpected exception is recorded as a
 failed item, not re-raised, so the exit code still reflects it.
+
+The notification is only `{"title": ..., "message": ...}`: by default the
+process name and PASS or FAIL. A process can pass its own to Run.start(),
+e.g. `message=lambda s: f"{s.counts()['ok']} funds updated"`. The full
+summary stays in the run folder.
 """
 
 import datetime as dt
@@ -21,7 +26,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Self
 
-from automation_common.notify import notify_summary
+from automation_common.notify import send_notification
 from automation_common.secrets import SecretMasker
 
 log = logging.getLogger(__name__)
@@ -118,20 +123,34 @@ def make_run_dir(runs_dir: Path, now: dt.datetime) -> Path:
     raise RuntimeError(f"could not create a run folder under {runs_dir}")
 
 
-Notifier = Callable[[dict[str, Any], SecretMasker], bool]
+Notifier = Callable[[dict[str, str], SecretMasker], bool]
+MessageFn = Callable[[Summary], str]
+
+
+def pass_fail(summary: Summary) -> str:
+    """Default notification message: PASS or FAIL."""
+    return "PASS" if summary.exit_code == 0 else "FAIL"
 
 
 class Run:
     """A single run. Create with Run.start(); use as a context manager."""
 
     def __init__(
-        self, process: str, run_dir: Path, now: dt.datetime, notifier: Notifier
+        self,
+        process: str,
+        run_dir: Path,
+        now: dt.datetime,
+        notifier: Notifier,
+        title: str,
+        message: MessageFn,
     ) -> None:
         self.process = process
         self.run_dir = run_dir
         self.masker = SecretMasker()
         self.summary = Summary(process, run_dir.name, now)
         self.exit_code = 1
+        self.title = title
+        self.message = message
         self._notifier = notifier
         self._failures = 0
         self._handlers: list[logging.Handler] = []
@@ -142,10 +161,14 @@ class Run:
         process: str,
         data_dir: Path,
         now: dt.datetime | None = None,
-        notifier: Notifier = notify_summary,
+        notifier: Notifier = send_notification,
+        title: str | None = None,
+        message: MessageFn = pass_fail,
     ) -> Self:
+        """Start a run. `title` defaults to the process name, `message` to PASS/FAIL."""
         now = now or dt.datetime.now().astimezone()
-        run = cls(process, make_run_dir(data_dir / "runs", now), now, notifier)
+        run = cls(process, make_run_dir(data_dir / "runs", now), now, notifier,
+                  title or process, message)
         run._setup_logging()
         log.info("%s run %s started; run folder %s", process, run.run_dir.name, run.run_dir)
         return run
@@ -173,18 +196,27 @@ class Run:
             h.close()
         self._handlers.clear()
 
+    def _message_text(self) -> str:
+        """The process's message, or PASS/FAIL if its function fails."""
+        try:
+            return str(self.message(self.summary))
+        except Exception:  # noqa: BLE001 - a bad message must not lose the summary
+            log.exception("building the notification message failed; using PASS/FAIL")
+            return pass_fail(self.summary)
+
     def finish(self) -> int:
         """Write the summary and report, notify, close the log. Returns the exit code."""
         try:
             self.summary.finished_at = dt.datetime.now().astimezone()
-            data = self.summary.to_dict()
+            notification = {"title": self.title, "message": self._message_text()}
+            data = notification | self.summary.to_dict()
             (self.run_dir / "summary.json").write_text(
                 self.masker.mask(json.dumps(data, indent=2)), encoding="utf-8"
             )
             (self.run_dir / "report.txt").write_text(
                 self.masker.mask(self.summary.report_text()), encoding="utf-8"
             )
-            self._notifier(data, self.masker)
+            self._notifier(notification, self.masker)
             self.exit_code = self.summary.exit_code
             log.info("run finished: %s, exit code %s", data["result"], self.exit_code)
         except Exception:  # noqa: BLE001 - the summary step itself must never crash

@@ -28,7 +28,7 @@ def test_all_ok_exits_0_and_writes_summary(tmp_path):
     data = json.loads((run.run_dir / "summary.json").read_text(encoding="utf-8"))
     assert data["result"] == "ok"
     assert data["counts"] == {"ok": 1, "unchanged": 1, "failed": 0}
-    assert sent and sent[0]["run_id"] == run.run_dir.name
+    assert sent == [{"title": "test", "message": "PASS"}]
     assert "Result: OK" in (run.run_dir / "report.txt").read_text(encoding="utf-8")
     assert (run.run_dir / "run.log").exists()
 
@@ -63,6 +63,47 @@ def test_secrets_are_masked_in_log_and_summary(tmp_path):
         text = (run.run_dir / name).read_text(encoding="utf-8")
         assert "s3cr3t-value" not in text
         assert "***" in text
+
+
+def test_notification_defaults_to_process_and_pass(tmp_path):
+    sent = []
+    with _run(tmp_path, sent) as run:
+        run.summary.record("fetch", "AAA", Status.OK)
+    # Only what the notification shows goes to the webhook
+    assert sent == [{"title": "test", "message": "PASS"}]
+    # The full summary stays in the run folder
+    saved = json.loads((run.run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert (saved["message"], saved["result"], saved["items"][0]["item"]) == ("PASS", "ok", "AAA")
+
+
+def test_notification_says_fail_when_an_item_failed(tmp_path):
+    sent = []
+    with _run(tmp_path, sent) as run:
+        run.summary.record("fetch", "AAA", Status.FAILED, "boom")
+    assert sent[0]["message"] == "FAIL"
+
+
+def test_custom_title_and_message(tmp_path):
+    sent = []
+    run = Run.start("test", tmp_path, now=NOW, notifier=lambda s, m: sent.append(s) or False,
+                    title="Daily NAV", message=lambda s: f"{s.counts()['ok']} updated")
+    with run:
+        run.summary.record("fetch", "AAA", Status.OK)
+        run.summary.record("fetch", "BBB", Status.OK)
+    assert (sent[0]["title"], sent[0]["message"]) == ("Daily NAV", "2 updated")
+
+
+def test_broken_message_function_falls_back_to_pass_fail(tmp_path):
+    sent = []
+
+    def broken(summary):
+        raise KeyError("nope")
+
+    with Run.start("test", tmp_path, now=NOW, notifier=lambda s, m: sent.append(s) or False,
+                   message=broken) as run:
+        run.summary.record("fetch", "AAA", Status.OK)
+    assert sent[0]["message"] == "PASS"
+    assert run.exit_code == 0
 
 
 def test_log_timestamps_use_a_period_before_milliseconds(tmp_path):
