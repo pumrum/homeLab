@@ -123,7 +123,7 @@ Set-Reg "HKLM:\SOFTWARE\Policies\Microsoft\Windows\OneDrive" "DisableFileSyncNGS
 ```
 
 Uninstall apps the robot will never use (Settings > Apps > Installed apps):
-Copilot, Teams (personal), Xbox apps, Clipchamp, News, Weather, Solitaire, and
+Copilot, Teams (personal), Xbox apps, Clipchamp, Microsoft News, Weather, Solitaire, and
 similar. Removing them removes their notifications and background updates.
 
 **Verify:** reboot; no widgets button on the taskbar; OneDrive does not start.
