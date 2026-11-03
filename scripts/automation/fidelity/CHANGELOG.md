@@ -9,6 +9,10 @@ Versions follow [Semantic Versioning](https://semver.org/). Release tags are
   (`12:47:49.275`, not `12:47:49,275`).
 - The webhook gets only `title` ("fidelity") and `message` ("PASS" or
   "FAIL") instead of the full run summary, which stays in the run folder.
+- Optional Google Sheet: with a `[sheet]` section in `config.toml`, each run
+  appends the `nav.csv` rows the sheet doesn't have yet (as_of_date, symbol,
+  nav, retrieved_at), using a service account key stored encrypted for the
+  Windows user.
 
 ## 0.1.0 (unreleased)
 
