@@ -7,7 +7,7 @@ ever waiting for a click.
 The end state:
 
 - A local **admin** account you use for maintenance only.
-- A local **non-admin bot user** (`rpa` in this guide) that signs in
+- A local **non-admin bot user** (`robot` in this guide) that signs in
   automatically at boot, locks its screen immediately, and runs the job on the
   locked desktop.
 - Windows and Edge configured so no prompt, tip, dialog or restart interrupts a run.
@@ -265,23 +265,23 @@ Edge version. Edge will say it is "managed by your organization"; that is expect
 ### A8. Create the bot user
 
 ```powershell
-$pw = Read-Host -AsSecureString "Password for rpa"
-New-LocalUser -Name "rpa" -Password $pw -PasswordNeverExpires -AccountNeverExpires `
+$pw = Read-Host -AsSecureString "Password for robot"
+New-LocalUser -Name "robot" -Password $pw -PasswordNeverExpires -AccountNeverExpires `
   -Description "Unattended automation user"
-Add-LocalGroupMember -Group "Users" -Member "rpa"
+Add-LocalGroupMember -Group "Users" -Member "robot"
 ```
 
 Use a long random password and store it in your password manager. The bot
 user never needs to know it day to day; Autologon (A10) stores it encrypted.
 
-**Verify:** `Get-LocalGroupMember Administrators` does **not** list `rpa`.
+**Verify:** `Get-LocalGroupMember Administrators` does **not** list `robot`.
 
 ### A9. Working folders
 
 ```powershell
 foreach ($d in "C:\src", "C:\automation") {
   New-Item -ItemType Directory -Path $d -Force | Out-Null
-  icacls $d /grant "rpa:(OI)(CI)M"
+  icacls $d /grant "robot:(OI)(CI)M"
 }
 ```
 
@@ -297,7 +297,7 @@ The bot user can modify these two folders and its own profile, nothing else.
 winget install --id Microsoft.Sysinternals.Autologon -e
 ```
 
-Run **Autologon**, enter `rpa`, the machine name as domain, and the password,
+Run **Autologon**, enter `robot`, the machine name as domain, and the password,
 then click **Enable**. Autologon stores the password as an encrypted system
 secret, not in plain text in the registry.
 
@@ -308,7 +308,7 @@ lock immediately.)
 
 ## Part B: Bot user profile [Bot]
 
-Sign in as `rpa` (it now does so automatically). The first sign-in builds the
+Sign in as `robot` (it now does so automatically). The first sign-in builds the
 profile; wait for it to finish.
 
 The PowerShell blocks in B3 to B7 use these variables. Set them at the start
@@ -440,7 +440,7 @@ The bot works on a locked desktop, so the console never sits unlocked.
 
 ```powershell
 $a = New-ScheduledTaskAction -Execute "rundll32.exe" -Argument "user32.dll,LockWorkStation"
-$t = New-ScheduledTaskTrigger -AtLogOn -User "$env:COMPUTERNAME\rpa"
+$t = New-ScheduledTaskTrigger -AtLogOn -User "$env:COMPUTERNAME\robot"
 Register-ScheduledTask -TaskName "Lock at sign-in" -Action $a -Trigger $t
 ```
 
