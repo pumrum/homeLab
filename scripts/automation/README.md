@@ -4,11 +4,17 @@ Unattended Windows automations, one package per process, sharing
 `automation_common`. Machine setup (robot and developer workstation):
 [machine-prep.md](machine-prep.md). Standards: [CLAUDE.md](CLAUDE.md).
 
+Start Claude Code in `C:\src\homeLab`, not a parent folder, so it loads the
+repo's rules and permissions from the start. A good first prompt for a new
+automation: "Read `scripts/automation/CLAUDE.md`, then build an automation that
+does X."
+
 | Folder | What |
 | --- | --- |
-| `common/` | `automation_common`: run folder and summary, config, secrets, browser, notify |
+| `common/` | `automation_common`: run folder and summary, config, secrets, browser, Google Sheets, notify |
 | `<process>/` | One package per automation, with its own README, config example, and changelog |
 | `tools/env_check.py` | Machine check against FakeBank, a fake site served on 127.0.0.1 |
+| `tools/import_secret_file.py` | Encrypts a large secret, like a Google service account key, for the current Windows user |
 
 ## Set up and test
 
@@ -76,6 +82,7 @@ actions:
        parse.py              pure transforms
        store.py              write the output
        config.py             config validation
+       sheet.py              only if it copies data to a Google Sheet
      tests/                  synthetic fixtures only
    ```
 2. Set `PROCESS = "<process>"` in `__init__.py`; that name is the data folder.
@@ -83,17 +90,24 @@ actions:
    `[tool.uv.sources]` in the root `pyproject.toml`, and its tests to
    `testpaths`. Add the package to ruff's `known-first-party`.
 4. `uv sync`, write the parser against a synthetic fixture, `uv run pytest`.
-5. Secrets go in Credential Manager as `<process>/<name>`; read them with
-   `automation_common.secrets.get_credential`.
+5. Short secrets go in Credential Manager as `<process>/<name>`; read them with
+   `automation_common.secrets.get_credential`. Large ones, over 2,560 bytes, go
+   in an encrypted file imported with `tools\import_secret_file.py`. For Google
+   Sheets, use the shared `automation/google-service-account` key and
+   `automation_common.sheets.open_worksheet`, and share the sheet with the
+   service account as an Editor.
 6. Branch `feature/<process>-<what>`, PR into `main`.
 
 ## Release
 
-1. Update the process's `CHANGELOG.md` and the `version` in its `pyproject.toml`.
-2. After the PR is merged, the maintainer tags `main`: `<process>/vX.Y.Z`.
-3. On the robot:
+The robot runs `main`, so merging a PR is the release. Release tags are on hold.
+
+1. Add the change to the process's `CHANGELOG.md` under `Unreleased`.
+2. After the PR is merged, on the robot as `robot`:
 
    ```powershell
-   cd C:\src\homeLab; git fetch --tags; git checkout "<process>/vX.Y.Z"
+   cd C:\src\homeLab; git switch main; git pull --ff-only
    cd scripts\automation; uv sync; uv run python tools\env_check.py
    ```
+
+To roll back, check out the last good commit and run `uv sync` again.

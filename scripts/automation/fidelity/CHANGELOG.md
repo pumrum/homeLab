@@ -1,7 +1,7 @@
 # Changelog: fidelity-nav
 
-Versions follow [Semantic Versioning](https://semver.org/). Release tags are
-`fidelity/vX.Y.Z`.
+Versions follow [Semantic Versioning](https://semver.org/). The robot runs
+`main`; release tags are on hold.
 
 ## Unreleased
 
