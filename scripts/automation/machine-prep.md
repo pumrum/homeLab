@@ -1,6 +1,6 @@
 # Robot machine prep (Windows 11 Pro)
 
-How to prepare a Windows 11 Pro machine (physical or VM) to run Account Recon
+How to prepare a Windows 11 Pro machine (physical or VM) to run the automations
 unattended: daily, with no one signed in at the keyboard, and nothing on screen
 ever waiting for a click.
 
@@ -10,7 +10,7 @@ The end state:
 - A local **non-admin bot user** (`robot` in this guide) that signs in
   automatically at boot, locks its screen immediately, and runs the job on the
   locked desktop.
-- Windows and Edge configured so no prompt, tip, dialog or restart interrupts a run.
+- Windows and Edge configured so no prompt, tip, dialog, or restart interrupts a run.
 - Python and the repo installed for the bot user only, read-only from GitHub.
 
 > **Conventions**
@@ -19,10 +19,14 @@ The end state:
 >   signed in as the bot user.
 > - Paths used throughout:
 >   - `C:\src\homeLab`: the git repo (code only, read-only on the robot)
->   - `C:\src\homeLab\scripts\automation\<process>`: this process's project
->     folder (`pyproject.toml`, `.venv`). Examples use `account-recon`.
+>   - `C:\src\homeLab\scripts\automation`: the uv workspace shared by every
+>     automation (`pyproject.toml`, `uv.lock`, `.venv`, `tools\env_check.py`)
+>   - `C:\src\homeLab\scripts\automation\<process>`: one process's code
+>     (examples use `fidelity`, whose command is `fidelity-nav`)
 >   - `C:\automation\<process>`: this process's private, writable data
->     (`config.toml`, `runs\`, `profiles\`), kept outside the repo.
+>     (`config.toml`, `data\`, `runs\`, `profiles\`), kept outside the repo.
+>     Nothing is built or copied here; the code runs from the workspace and
+>     finds this folder itself.
 > - Values in `<angle brackets>` are placeholders. Never commit real values
 >   (host names, account names, URLs) to this public repo.
 > - Policy names change between Windows and Edge releases. After each section,
@@ -137,7 +141,7 @@ similar. Removing them removes their notifications and background updates.
 ### A5. Edge policies
 
 Machine-wide policies so Edge never shows first-run screens, restore prompts,
-sign-in or sync nags, password or autofill offers, promotions, the sidebar or a
+sign-in or sync nags, password or autofill offers, promotions, the sidebar, or a
 "Save as" dialog. They apply to every Edge profile, including the bot's.
 
 ```powershell
@@ -185,7 +189,7 @@ $policies = [ordered]@{
   PromptForDownloadLocation             = 0
   # Office files download instead of opening in the browser
   QuickViewOfficeFilesEnabled           = 0
-  # New tab page: no feed, quick links, top sites or background image
+  # New tab page: no feed, quick links, top sites, or background image
   NewTabPageContentEnabled              = 0
   NewTabPageQuickLinksEnabled           = 0
   NewTabPageHideDefaultTopSites         = 1
@@ -212,19 +216,19 @@ step prints an **OK** column for every policy.
 | --- | --- |
 | HideFirstRunExperience, AutoImportAtFirstRun | Welcome screens and import offers |
 | HideRestoreDialogEnabled | "Restore pages?" after a crash |
-| NewTabPageContentEnabled, NewTabPageQuickLinksEnabled, NewTabPageHideDefaultTopSites, NewTabPageAllowedBackgroundTypes = 3 | News feed, quick links, top sites and background image on the new tab page |
+| NewTabPageContentEnabled, NewTabPageQuickLinksEnabled, NewTabPageHideDefaultTopSites, NewTabPageAllowedBackgroundTypes = 3 | News feed, quick links, top sites, and background image on the new tab page |
 | StartupBoostEnabled, BackgroundModeEnabled | Edge preloading or staying alive in the background |
 | BrowserSignin, SyncDisabled | Sign-in and sync prompts |
 | PasswordManagerEnabled, Autofill* | Save-password and autofill offers |
-| DefaultBrowserSetting*, PromotionalTabsEnabled (deprecated), ShowRecommendationsEnabled (its replacement) | Default-browser nags, full-tab promotions, "What's new" and tips |
-| EdgeShoppingAssistantEnabled, HubsSidebarEnabled, TranslateEnabled, UserFeedbackAllowed | Shopping pop-ups, sidebar, translate and feedback prompts |
+| DefaultBrowserSetting*, PromotionalTabsEnabled (deprecated), ShowRecommendationsEnabled (its replacement) | Default-browser nags, full-tab promotions, "What's new", and tips |
+| EdgeShoppingAssistantEnabled, HubsSidebarEnabled, TranslateEnabled, UserFeedbackAllowed | Shopping pop-ups, sidebar, translate, and feedback prompts |
 | PromptForDownloadLocation | "Save as" dialog on downloads |
 | QuickViewOfficeFilesEnabled | Office files (Excel, Word, PowerPoint) opening in the browser instead of downloading |
 
 **Not settable by policy on a standalone machine.** On Windows that isn't
 joined to a domain or Microsoft Entra ID, or enrolled in device management,
 Edge blocks the startup and home page policies (`RestoreOnStartup`,
-`RestoreOnStartupURLs`, `HomepageLocation`, `NewTabPageLocation` and similar)
+`RestoreOnStartupURLs`, `HomepageLocation`, `NewTabPageLocation`, and similar)
 and shows them as "Error, Ignored". Don't set them. The bot is unaffected
 (Playwright opens `about:blank` itself); for manual use, set the startup page
 in Edge's own settings (step B1).
@@ -319,9 +323,9 @@ of each PowerShell window you use for Part B:
 
 ```powershell
 $repo    = "C:\src\homeLab"                        # repo clone (code only)
-$process = "account-recon"                         # process folder name (not final)
-$proj    = "$repo\scripts\automation\$process"     # project folder: pyproject.toml, .venv
-$data    = "C:\automation\$process"                 # private data: config.toml, runs, profiles
+$ws      = "$repo\scripts\automation"              # uv workspace: pyproject.toml, uv.lock, .venv
+$process = "fidelity"                              # process folder name
+$data    = "C:\automation\$process"                 # private data: config.toml, data, runs, profiles
 ```
 
 ### B1. Quiet per-user settings
@@ -336,7 +340,7 @@ $cdm = "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
 # No toast notifications
 Set-Reg "HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications" "ToastEnabled" 0
 
-# No tips, suggestions, "fun facts" or suggested apps
+# No tips, suggestions, "fun facts", or suggested apps
 foreach ($n in "SoftLandingEnabled","SystemPaneSuggestionsEnabled","SubscribedContent-338387Enabled",
                "SubscribedContent-338388Enabled","SubscribedContent-338389Enabled",
                "SubscribedContent-353694Enabled","SubscribedContent-353696Enabled",
@@ -370,7 +374,7 @@ Then, in Settings:
     starts** (no policy exists for this one).
 - System > Notifications: **Do not disturb** on, no exceptions.
 
-**Verify:** sign out and back in; no notifications, tips or setup screens appear.
+**Verify:** sign out and back in; no notifications, tips, or setup screens appear.
 
 ### B2. Tools
 
@@ -383,13 +387,13 @@ uv python install 3.13
 uv --version; git --version; uv python list --only-installed
 ```
 
-Python is never put on the global PATH. The project always runs from its own
-`.venv`, so other Python installs can't interfere.
+Python is never put on the global PATH. Every automation runs from the
+workspace's own `.venv`, so other Python installs can't interfere.
 
 ### B3. Repo, read-only
 
 The repo is public, so the robot clones it anonymously: no GitHub account,
-token or SSH key on this machine. A compromised robot can't change the code.
+token, or SSH key on this machine. A compromised robot can't change the code.
 
 ```powershell
 git clone <repo-url> $repo
@@ -398,11 +402,15 @@ git config --global credential.helper ""      # never store or ask for credentia
 git remote set-url --push origin no-push      # any push fails immediately
 git fetch --tags
 git checkout "$process/v<X.Y.Z>"              # robots run tagged releases only
-cd $proj
+cd $ws
 uv sync                                       # exact versions from uv.lock
 ```
 
-Tags carry the process name (for example `account-recon/v0.2.0`) because one
+`uv sync` creates `$ws\.venv` and installs every automation and the shared
+code into it straight from the repo folders. Nothing is copied to
+`C:\automation`; that folder only ever holds data (B4).
+
+Tags carry the process name (for example `fidelity/v0.1.0`) because one
 repo holds several processes, each versioned on its own.
 
 Leave `user.name` and `user.email` unset so an accidental commit fails too.
@@ -411,7 +419,7 @@ Leave `user.name` and `user.email` unset so an accidental commit fails too.
 
 ```powershell
 cd $repo; git fetch --tags; git checkout "$process/v<new>"
-cd $proj; uv sync
+cd $ws; uv sync
 ```
 
 Then run the environment check (B7). To roll back, check out the previous tag
@@ -423,22 +431,27 @@ Nothing private is in the repo. Create the data folder, then create or copy
 the items below on the robot only:
 
 ```powershell
-New-Item -ItemType Directory -Path "$data\runs", "$data\profiles" -Force | Out-Null
+New-Item -ItemType Directory -Path $data -Force | Out-Null
+Copy-Item "$ws\$process\config.example.toml" "$data\config.toml"   # or restore from backup
+notepad "$data\config.toml"                                       # replace every placeholder
 ```
 
 | Item | Location | How |
 | --- | --- | --- |
-| Real config | `C:\automation\<process>\config.toml` | Copy from your backup, or copy `config.example.toml` and fill in |
-| Passwords, API tokens, webhook URL | Windows Credential Manager (bot user) | `cd $proj; uv run recon setup-secrets` |
-| Large keys (e.g. Google service account) | Encrypted file in `%USERPROFILE%\.<process>\` | `setup-secrets` imports it; delete the original download |
-| SFTP key | `%USERPROFILE%\.ssh\` | Generate on this machine with `ssh-keygen -t ed25519`; never copy a key in |
+| Real config | `C:\automation\<process>\config.toml` | Copy from your backup, or copy `config.example.toml` and fill in (above) |
+| Passwords, API tokens, webhook URL | Windows Credential Manager (bot user) | Only the entries the process's README lists (`fidelity` needs none). Control Panel > Credential Manager > Windows Credentials > **Add a generic credential**: address = entry name (`<process>/<name>`, or `automation/<name>` for shared ones), user name, password = the secret |
+| Home Assistant webhook (optional, shared) | Windows Credential Manager (bot user) | Generic credential `automation/home-assistant-webhook`, password = the webhook URL. If it exists, every run POSTs its summary there |
+| Large keys (e.g. Google service account) | Encrypted file in `%USERPROFILE%\.<process>\` | Only if a process needs one; its README says how. Delete the original download |
+| SFTP key | `%USERPROFILE%\.ssh\` | Only if a process needs one. Generate on this machine with `ssh-keygen -t ed25519`; never copy a key in |
 
-Browser profiles (`$data\profiles`) and run output (`$data\runs`) are created
-by the app. Never copy browser profiles from another machine. Each site asks for
-verification once on the first run; approve it and the profile remembers this
+`data\`, `runs\`, and `profiles\` under `$data` are created by the app. Never
+copy browser profiles from another machine. A site that asks for verification
+does so once on the first run; approve it and the profile remembers this
 machine.
 
-**Verify:** `cd $proj; uv run recon check-config`
+**Verify:** run the process once (B7). A missing or wrong config, or one that
+still has placeholders, fails at start-up with the reason in the newest
+`$data\runs\<timestamp>\report.txt`.
 
 ### B5. Lock at sign-in
 
@@ -455,9 +468,9 @@ Register-ScheduledTask -TaskName "Lock at sign-in" -Action $a -Trigger $t
 ### B6. Daily job
 
 ```powershell
-$a = New-ScheduledTaskAction -Execute "$proj\.venv\Scripts\python.exe" `
-  -Argument "-m recon run" -WorkingDirectory $proj
-$t = New-ScheduledTaskTrigger -Daily -At 8:00
+$a = New-ScheduledTaskAction -Execute "$ws\.venv\Scripts\fidelity-nav.exe" `
+  -WorkingDirectory $ws                       # each process's command; see its README
+$t = New-ScheduledTaskTrigger -Daily -At 19:30   # per process (fidelity: after NAVs publish)
 $s = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
   -MultipleInstances IgnoreNew -RestartCount 1 -RestartInterval (New-TimeSpan -Minutes 15)
 Register-ScheduledTask -TaskName $process -Action $a -Trigger $t -Settings $s
@@ -474,29 +487,31 @@ the bot user is back on the console before the next run.
 
 ### B7. Verify the whole machine
 
-Python packages come from the project: its `pyproject.toml` and `uv.lock`
-are installed into the project's `.venv` by `uv sync` (B3). Once that's done,
-from the project folder:
+Python packages come from the workspace: its `pyproject.toml` and `uv.lock`
+are installed into `$ws\.venv` by `uv sync` (B3). Once that's done:
 
 ```powershell
-cd $proj
-uv run python env_check.py          # fake bank site on this machine only
-uv run python env_check.py --lock   # same, with Windows locked
+cd $ws
+uv run python tools\env_check.py          # fake bank site on this machine only
+uv run python tools\env_check.py --lock   # same, with Windows locked
+uv run fidelity-nav                       # one real run of the process
+Get-Content "$data\data\nav.csv"
 ```
 
-Before the project exists (a new machine, or a standalone copy of the check
-scripts), let uv bring the packages for just that run. Keep `env_check.py`
-and `smoke_common.py` in the same folder:
+Before `uv sync` has run (a new machine), let uv bring the packages for just
+that run. `env_check.py` finds the shared code in the clone by itself:
 
 ```powershell
-uv run --with playwright --with keyring python env_check.py
-uv run --with playwright --with keyring python env_check.py --lock
+cd $ws\tools
+uv run --no-project --with playwright --with keyring python env_check.py
+uv run --no-project --with playwright --with keyring python env_check.py --lock
 ```
 
 `env_check.py` confirms Python and Playwright, Edge launches with its sandbox
 on, the Edge policies are set, automatic sign-in is on, Credential Manager
-works, and a full sign-in, verification, date entry and download flow works,
-including on a locked screen. It never contacts a real bank.
+works, and a full sign-in, verification, date entry, and download flow works,
+including on a locked screen. It never contacts a real bank. Its report is in
+`C:\automation\env-check\runs\<timestamp>\report.txt`.
 
 Then reboot and walk away. Within a few minutes: bot user signed in, screen
 locked, and (at the scheduled time) a run summary arrives.
@@ -507,11 +522,11 @@ locked, and (at the scheduled time) a run summary arrives.
 
 | When | Do |
 | --- | --- |
-| After a major Edge update | Run `env_check.py`; check `edge://policy` |
+| After a major Edge update | Run `tools\env_check.py`; check `edge://policy` |
 | After a feature update of Windows | Re-run Part A verify lines; check B1 settings survived |
-| Deploying a new release | `git fetch --tags`, `git checkout <process>/v<X.Y.Z>`, `uv sync` in the project folder, `env_check.py` |
+| Deploying a new release | `git fetch --tags`, `git checkout <process>/v<X.Y.Z>`, `uv sync` in `$ws`, `tools\env_check.py` |
 | Changing the bot user's password | Update it in Autologon (A10) |
-| Changing any site password | `uv run recon setup-secrets` for that entry |
+| Changing any site password | Edit that entry in Credential Manager (B4) |
 | Rebuilding the machine | Parts A and B in order; restore `config.toml` from backup; new keys and secrets |
 
 ---
@@ -529,7 +544,7 @@ Edge stable channel kept up to date, and the paths `C:\src\homeLab` and
 
 | Step | Workstation | Notes |
 | --- | --- | --- |
-| A1 Base install | Partly | Keep your existing setup and account; just stay fully patched. No rename, fixed address or display setting needed |
+| A1 Base install | Partly | Keep your existing setup and account; just stay fully patched. No rename, fixed address, or display setting needed |
 | A2 Windows Update policy | Skip | Use your normal update settings |
 | A3 Power | Skip | |
 | A4 Quiet system | Skip | Optional: `DontShowUI` if crash dialogs annoy you |
@@ -541,9 +556,9 @@ Edge stable channel kept up to date, and the paths `C:\src\homeLab` and
 | A10 Automatic sign-in | Skip | |
 | B1 Quiet profile | Partly | Only turn off the python.exe and python3.exe app execution aliases |
 | B2 Tools | Same, plus more | Also install `gh` (GitHub CLI), Claude Code, and run `pre-commit install` in the repo |
-| B3 Repo | Different | Authenticated clone with push rights (`gh auth login`); set `user.name` and your GitHub no-reply `user.email`; work on branches, not tags |
+| B3 Repo | Different | Authenticated clone with push rights (`gh auth login`); set `user.name` and your GitHub no-reply `user.email`; work on branches, not tags. Still `uv sync` in `$ws` after switching branches |
 | B4 Config and secrets | Same locations | Same `config.toml` path. Secrets in your own Credential Manager. Use separate Gmail tokens and SSH key for this machine, so revoking one never breaks the robot. Never copy browser profiles between machines |
 | B5 Lock at sign-in | Skip | |
-| B6 Daily job | **Never** | Two machines running the job would both write to the same sheets. The workstation only runs on demand, with you present |
-| B7 Verify | Same | Run `env_check.py`; expect WARN for Edge policies and automatic sign-in off. `--lock` is optional here |
-| C Maintenance | Partly | Rerun `env_check.py` after major Edge or Windows updates; deployment rows don't apply |
+| B6 Daily job | **Never** | Two machines running the job would both write to the same outputs. The workstation only runs on demand, with you present |
+| B7 Verify | Same | Run `tools\env_check.py`; expect WARN for Edge policies and automatic sign-in off. `--lock` is optional here |
+| C Maintenance | Partly | Rerun `tools\env_check.py` after major Edge or Windows updates; deployment rows don't apply |

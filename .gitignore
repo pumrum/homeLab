@@ -1,1 +1,21 @@
 **/.DS_Store
+
+# Python and tooling
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Private config and secrets (real ones live outside the repo)
+config.toml
+.env
+*.pem
+*.ppk
+
+# Automation run output, browser state, and triage copies
+runs/
+profiles/
+triage/
+trace.zip
+*.log

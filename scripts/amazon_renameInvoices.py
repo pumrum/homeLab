@@ -46,7 +46,7 @@ for filename in os.listdir(folder_path):
             order_date_match = order_date_pattern_new.search(text)
             if not order_date_match:
                 order_date_match = order_date_pattern_old.search(text)
-            
+
             if order_date_match:
                 # Extract the date and convert it to YYYY-MM-DD format
                 order_date_str = order_date_match.group(1)
@@ -56,7 +56,7 @@ for filename in os.listdir(folder_path):
                 # Try to extract order number from PDF content first (new format)
                 order_number_match = order_number_pattern_content.search(text)
                 order_number = None
-                
+
                 if order_number_match:
                     order_number = order_number_match.group(1)
                     logging.info(f"Found order number in PDF content (new format): {order_number}")

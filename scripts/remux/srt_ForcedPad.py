@@ -19,7 +19,7 @@ def parse_timecode(timecode: str) -> timedelta:
     match = re.match(time_pattern, timecode)
     if not match:
         raise ValueError(f"Invalid timecode format: {timecode}")
-    
+
     hours, minutes, seconds, milliseconds = map(int, match.groups())
     return timedelta(hours=hours, minutes=minutes, seconds=seconds, milliseconds=milliseconds)
 
@@ -38,35 +38,35 @@ def parse_srt(content: str) -> List[Tuple[timedelta, timedelta, str]]:
     """Parse SRT content and return list of (start_time, end_time, text) tuples."""
     subtitles = []
     blocks = content.strip().split('\n\n')
-    
+
     for block in blocks:
         if not block.strip():
             continue
-            
+
         lines = block.strip().split('\n')
         if len(lines) < 3:
             continue
-        
+
         # Skip the subtitle number (first line)
         # Parse the timecode line (second line)
         timecode_line = lines[1]
         timecode_match = re.match(r'([\d:,]+)\s*-->\s*([\d:,]+)', timecode_line)
-        
+
         if not timecode_match:
             continue
-        
+
         start_time = parse_timecode(timecode_match.group(1))
         end_time = parse_timecode(timecode_match.group(2))
-        
+
         # Join remaining lines as subtitle text
         text = '\n'.join(lines[2:])
-        
+
         subtitles.append((start_time, end_time, text))
-    
+
     return subtitles
 
 
-def timecodes_match(tc1: Tuple[timedelta, timedelta], 
+def timecodes_match(tc1: Tuple[timedelta, timedelta],
                     tc2: Tuple[timedelta, timedelta],
                     tolerance_ms: int = 50) -> bool:
     """Check if two timecode ranges match within a tolerance."""
@@ -92,7 +92,7 @@ def find_base_filename(input_path: str) -> Tuple[str, str]:
     """
     # Remove directory path
     basename = os.path.basename(input_path)
-    
+
     # Match patterns like video.en.srt or video.en.sdh.srt
     if basename.endswith('.en.sdh.srt'):
         base_name = basename[:-len('.en.sdh.srt')]
@@ -102,11 +102,11 @@ def find_base_filename(input_path: str) -> Tuple[str, str]:
         forced_filename = base_name + '.en.forced.srt'
     else:
         raise ValueError(f"Input file must end with .en.srt or .en.sdh.srt, got: {basename}")
-    
+
     return base_name, forced_filename
 
 
-def merge_subtitles(source_subs: List[Tuple[timedelta, timedelta, str]], 
+def merge_subtitles(source_subs: List[Tuple[timedelta, timedelta, str]],
                     forced_subs: List[Tuple[timedelta, timedelta, str]]) -> List[Tuple[timedelta, timedelta, str]]:
     """
     Merge forced subtitles into source subtitles.
@@ -114,10 +114,10 @@ def merge_subtitles(source_subs: List[Tuple[timedelta, timedelta, str]],
     """
     # Combine both lists
     merged = source_subs + forced_subs
-    
+
     # Sort by start time
     merged.sort(key=lambda x: x[0])
-    
+
     return merged
 
 
@@ -131,33 +131,33 @@ def main():
         print("  merge   Merge forced subtitles into source file before padding")
         print("          (use when source file doesn't contain foreign language parts)")
         sys.exit(1)
-    
+
     input_path = sys.argv[1]
     merge_mode = len(sys.argv) > 2 and sys.argv[2].lower() == 'merge'
-    
+
     # Verify input file exists
     if not os.path.exists(input_path):
         print(f"Error: Input file not found: {input_path}")
         sys.exit(1)
-    
+
     # Determine filenames
     try:
         base_name, forced_filename = find_base_filename(input_path)
     except ValueError as e:
         print(f"Error: {e}")
         sys.exit(1)
-    
+
     # Build full paths
     input_dir = os.path.dirname(input_path) or '.'
     forced_path = os.path.join(input_dir, forced_filename)
     merged_path = os.path.join(input_dir, base_name + '.en.merged.srt')
     output_path = os.path.join(input_dir, base_name + '.en.padded.srt')
-    
+
     # Verify forced subtitle file exists
     if not os.path.exists(forced_path):
         print(f"Error: Forced subtitle file not found: {forced_path}")
         sys.exit(1)
-    
+
     print(f"Input file:  {input_path}")
     print(f"Forced file: {forced_path}")
     if merge_mode:
@@ -165,7 +165,7 @@ def main():
     print(f"Output file: {output_path}")
     print(f"Mode: {'MERGE' if merge_mode else 'STANDARD'}")
     print()
-    
+
     # Read and parse both files
     try:
         with open(input_path, 'r', encoding='utf-8') as f:
@@ -175,22 +175,22 @@ def main():
     except Exception as e:
         print(f"Error reading files: {e}")
         sys.exit(1)
-    
+
     print("Parsing source subtitles...")
     source_subs = parse_srt(source_content)
     print(f"Found {len(source_subs)} subtitles in source file")
-    
+
     print("Parsing forced subtitles...")
     forced_subs = parse_srt(forced_content)
     print(f"Found {len(forced_subs)} subtitles in forced file")
     print()
-    
+
     if merge_mode:
         # Merge forced subtitles into source
         print("Merging forced subtitles into source file...")
         source_subs = merge_subtitles(source_subs, forced_subs)
         print(f"Merged file now has {len(source_subs)} subtitles")
-        
+
         # Save the merged file
         print(f"Writing merged subtitles to {merged_path}...")
         write_srt(source_subs, merged_path)
@@ -200,7 +200,7 @@ def main():
         # Standard mode: verify all forced subtitles exist in source
         print("Verifying all forced subtitles exist in source file...")
         missing_forced = []
-        
+
         for forced_start, forced_end, forced_text in forced_subs:
             # Look for matching timecode in source
             found = False
@@ -208,10 +208,10 @@ def main():
                 if timecodes_match((forced_start, forced_end), (source_start, source_end)):
                     found = True
                     break
-            
+
             if not found:
                 missing_forced.append((forced_start, forced_end, forced_text))
-        
+
         if missing_forced:
             print(f"\nError: {len(missing_forced)} forced subtitle(s) not found in source file:")
             for start, end, text in missing_forced[:5]:  # Show first 5
@@ -221,16 +221,16 @@ def main():
                 print(f"  ... and {len(missing_forced) - 5} more")
             print("\nHint: Try running with 'merge' argument to merge forced subtitles into source first.")
             sys.exit(1)
-        
+
         print("✓ All forced subtitles found in source file")
         print()
-    
+
     # Create padded subtitles
     print("Creating padded subtitles...")
     padded_subs = []
     kept_count = 0
     replaced_count = 0
-    
+
     for source_start, source_end, source_text in source_subs:
         # Check if this timecode matches any forced subtitle
         is_forced = False
@@ -238,7 +238,7 @@ def main():
             if timecodes_match((source_start, source_end), (forced_start, forced_end)):
                 is_forced = True
                 break
-        
+
         if is_forced:
             # Keep the original text
             padded_subs.append((source_start, source_end, source_text))
@@ -247,15 +247,15 @@ def main():
             # Replace with zero-width space
             padded_subs.append((source_start, source_end, "\u200B"))
             replaced_count += 1
-    
+
     print(f"Kept {kept_count} forced subtitle(s)")
     print(f"Replaced {replaced_count} subtitle(s) with zero-width space")
     print()
-    
+
     # Write output file
     print(f"Writing to {output_path}...")
     write_srt(padded_subs, output_path)
-    
+
     print("✓ Done!")
 
 

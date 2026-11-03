@@ -69,7 +69,7 @@ Manage mutual TLS client certificates using OpenSSL on macOS for use with Caddy.
    ```bash
    openssl ca -config ~/myca/ca.cnf -revoke ~/myca/certs/client-1.crt
    ```
-   
+
 1. Generate the client private key:
 
    ```bash

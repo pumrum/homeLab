@@ -1,0 +1,7 @@
+# fidelity-nav configuration. Copy to C:\automation\fidelity\config.toml and
+# replace the placeholders. Every text value is quoted. Add one [[funds]]
+# block per fund; the run fails with a clear message until no placeholder is left.
+
+[[funds]]
+symbol = "XXXXX"        # fund symbol or ID, capital letters and digits
+url = "https://..."     # the fund's summary page

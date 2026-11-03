@@ -1,21 +1,49 @@
 # Repository conventions for Claude Code
 
+Automation work (anything under `scripts/automation/`) also follows
+[`scripts/automation/CLAUDE.md`](scripts/automation/CLAUDE.md).
+
 ## Hard rules — never violate
 
 - **Never merge pull requests.** Do not run `gh pr merge`, `git merge` into main,
   or any equivalent. The human maintainer merges manually via the GitHub web UI.
 - **Never push directly to `main`.** Always work on a feature branch.
 - **Never close PRs** without explicit instruction.
+- **Never create tags.** Propose them; the maintainer creates them.
+- **Ask before** pushing a branch, opening a PR, or doing anything the task
+  didn't list.
 - After opening a PR, the task is done. Do not follow up with a merge.
 - **Never include local machine hostnames** in anything pushed to GitHub
   (commit messages, PR text, file contents, or commit author/committer emails).
   Before committing, confirm `git config user.email` is set to the GitHub noreply
   address, not a `user@<hostname>.local`-style default. This repo is public.
 
+## Language
+
+- Write US English everywhere (code, comments, docs, commits, PRs, chat)
+  unless explicitly told otherwise: "behavior", "labeled", "color",
+  "organize", "canceled", "center", "license" (noun and verb).
+- Use the Oxford comma in lists of three or more: "code, tests, and docs".
+
+## The repo is public
+
+- Never commit, print, or log real values: account numbers, credentials,
+  private URLs, host names, email addresses, spreadsheet IDs, webhook URLs.
+  Use `<placeholders>` in docs and `config.example.toml` files.
+- Never name any bank anywhere: code, comments, tests, file names, commits,
+  issues, PRs. Test sites are called **FakeBank**.
+- Test data is synthetic. Never commit real downloads, screenshots, page
+  dumps, or traces.
+- Never read real config or secrets: `C:\automation\**`, `config.toml`,
+  `.env`, keys, tokens, browser profiles, run folders.
+
 ## Workflow
 
-1. Create a feature branch: `feature/<short-description>`
-2. Make changes, commit with a clear message
-3. Push the branch
-4. Open a PR with `gh pr create` — describe what changed and why
+1. Create a feature branch: `feature/<process>-<what>` (or
+   `feature/<short-description>` outside automations).
+2. Work in small commits with clear messages. `pre-commit` must pass; never
+   use `--no-verify`.
+3. Ask, then push the branch.
+4. Ask, then open a PR into `main` with `gh pr create`: what changed, why,
+   and what the maintainer must check by hand.
 5. Stop. Wait for human review and merge.
