@@ -1,7 +1,8 @@
 # Automation standards
 
 Applies to everything under `scripts/automation/`. The repo-wide rules in the
-root `CLAUDE.md` (public repo, no bank names, ask before push/PR) apply too.
+root `CLAUDE.md` (US English, public repo, no bank names, ask before push/PR)
+apply too.
 Machine setup: [`machine-prep.md`](machine-prep.md).
 
 ## Machines and paths (Windows 11)

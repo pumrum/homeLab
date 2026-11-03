@@ -18,6 +18,12 @@ Automation work (anything under `scripts/automation/`) also follows
   Before committing, confirm `git config user.email` is set to the GitHub noreply
   address, not a `user@<hostname>.local`-style default. This repo is public.
 
+## Language
+
+- Write US English everywhere (code, comments, docs, commits, PRs, chat)
+  unless explicitly told otherwise: "behavior", "labeled", "color",
+  "organize", "canceled", "center", "license" (noun and verb).
+
 ## The repo is public
 
 - Never commit, print or log real values: account numbers, credentials,

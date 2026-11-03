@@ -159,7 +159,7 @@ def parse_nav_page(html: str, today: dt.date) -> NavReading:
         validate(reading, today)
         return reading
     raise ParseError(
-        "NAV not found: no header, no Details row labelled "
+        "NAV not found: no header, no Details row labeled "
         + "/".join(NAV_LABELS)
         + ", and no match in the page text"
     )

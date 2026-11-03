@@ -1,7 +1,7 @@
 # fidelity-nav
 
 Opens each configured fund's summary page in Edge, reads the latest NAV
-(labelled "Unit Value" on 529 portfolio pages) and its "as of" date, and
+(labeled "Unit Value" on 529 portfolio pages) and its "as of" date, and
 appends it to `C:\automation\fidelity\data\nav.csv`. No sign-in and no
 secrets. One page load per fund, one fund at a time.
 
