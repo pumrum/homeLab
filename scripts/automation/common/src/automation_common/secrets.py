@@ -1,6 +1,6 @@
 """Secrets from Windows Credential Manager via keyring. Never logs values.
 
-Entry names: `<process>/<name>` for one automation (e.g. `fidelity/...`),
+Entry names: `<process>/<name>` for one automation (e.g. `<process>/login`),
 `automation/<name>` for shared ones (e.g. `automation/home-assistant-webhook`).
 Entries are created by hand on each machine; nothing here writes them.
 """

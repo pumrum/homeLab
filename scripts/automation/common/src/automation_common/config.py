@@ -26,7 +26,7 @@ def data_root(env: Mapping[str, str] | None = None) -> Path:
 
 
 def process_dir(process: str, env: Mapping[str, str] | None = None) -> Path:
-    """Return the private data folder for one automation, e.g. C:\\automation\\fidelity."""
+    """Return the private data folder for one automation, e.g. C:\\automation\\<process>."""
     return data_root(env) / process
 
 

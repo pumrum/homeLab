@@ -20,7 +20,7 @@ def test_get_credential_registers_value_with_masker(monkeypatch):
         secrets.keyring, "get_credential", lambda name, user: SimpleCredential("u", "pw-123")
     )
     m = SecretMasker()
-    cred = get_credential("fidelity/test", m)
+    cred = get_credential("example/test", m)
     assert cred is not None and cred.username == "u"
     assert "pw-123" not in repr(cred)
     assert m.mask("pw-123") == "***"

@@ -30,7 +30,7 @@ Machine setup: [`machine-prep.md`](machine-prep.md).
   - `pyproject.toml`: workspace root, members, dev tools (pytest, ruff), and lint and test config.
   - `common/`: package `automation_common` (shared code).
   - `<process>/`: one package per automation, depending on `automation-common`
-    as a workspace dependency, with a console script (e.g. `fidelity-nav`).
+    as a workspace dependency, with a console script (e.g. `<process>-<what>`).
   - `tools/`: scripts for people (e.g. `env_check.py`).
 - `uv sync` here installs everything. Add a dependency with `uv add` in the
   member folder, then commit the updated `uv.lock`.
