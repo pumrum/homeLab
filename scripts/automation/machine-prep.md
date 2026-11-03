@@ -129,7 +129,7 @@ Set-Reg "HKLM:\SOFTWARE\Policies\Microsoft\Windows\OneDrive" "DisableFileSyncNGS
 ```
 
 Uninstall apps the robot will never use (Settings > Apps > Installed apps):
-Copilot, Teams (personal), Xbox apps, Clipchamp, Microsoft News, Weather, Solitaire, and
+Copilot, Teams (personal), Xbox apps, Clipchamp, News, Weather, Solitaire, and
 similar. Removing them removes their notifications and background updates.
 
 **Verify:** reboot; no widgets button on the taskbar; OneDrive does not start.
@@ -142,35 +142,93 @@ sign-in or sync nags, password or autofill offers, promotions, the sidebar or a
 
 ```powershell
 $p = "HKLM:\SOFTWARE\Policies\Microsoft\Edge"
+
+# 1. Close Edge everywhere so the new policies load on next start
+Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force
+
+# 2. Create the policy key if it doesn't exist
 New-Item -Path $p -Force | Out-Null
-$policies = @{
-  HideFirstRunExperience = 1; AutoImportAtFirstRun = 4; RestoreOnStartup = 5
-  HideRestoreDialogEnabled = 1; StartupBoostEnabled = 0; BackgroundModeEnabled = 0
-  BrowserSignin = 0; SyncDisabled = 1; PasswordManagerEnabled = 0
-  AutofillAddressEnabled = 0; AutofillCreditCardEnabled = 0
-  DefaultBrowserSettingEnabled = 0; DefaultBrowserSettingsCampaignEnabled = 0
-  PromotionalTabsEnabled = 0; ShowRecommendationsEnabled = 0
-  EdgeShoppingAssistantEnabled = 0; HubsSidebarEnabled = 0; TranslateEnabled = 0
-  UserFeedbackAllowed = 0; PromptForDownloadLocation = 0
+
+# 3. Remove startup/home page policies that standalone Windows blocks ("Error, Ignored")
+foreach ($name in "RestoreOnStartup", "HomepageLocation", "HomepageIsNewTabPage", "NewTabPageLocation") {
+  Remove-ItemProperty -Path $p -Name $name -ErrorAction SilentlyContinue
+}
+Remove-Item -Path "$p\RestoreOnStartupURLs" -Recurse -ErrorAction SilentlyContinue
+
+# 4. Set every policy (all DWORD)
+$policies = [ordered]@{
+  # First run and import
+  HideFirstRunExperience                = 1
+  AutoImportAtFirstRun                  = 4
+  # Crash restore and background running
+  HideRestoreDialogEnabled              = 1
+  StartupBoostEnabled                   = 0
+  BackgroundModeEnabled                 = 0
+  # Sign-in and sync
+  BrowserSignin                         = 0
+  SyncDisabled                          = 1
+  # Passwords and autofill
+  PasswordManagerEnabled                = 0
+  AutofillAddressEnabled                = 0
+  AutofillCreditCardEnabled             = 0
+  # Default browser nags, promotions, tips, "What's new"
+  DefaultBrowserSettingEnabled          = 0
+  DefaultBrowserSettingsCampaignEnabled = 0
+  PromotionalTabsEnabled                = 0   # deprecated; kept until Edge removes it
+  ShowRecommendationsEnabled            = 0   # its replacement
+  # Shopping, sidebar, translate, feedback
+  EdgeShoppingAssistantEnabled          = 0
+  HubsSidebarEnabled                    = 0
+  TranslateEnabled                      = 0
+  UserFeedbackAllowed                   = 0
+  # Downloads go straight to the folder, no "Save as"
+  PromptForDownloadLocation             = 0
+  # New tab page: no feed, quick links, top sites or background image
+  NewTabPageContentEnabled              = 0
+  NewTabPageQuickLinksEnabled           = 0
+  NewTabPageHideDefaultTopSites         = 1
+  NewTabPageAllowedBackgroundTypes      = 3
 }
 foreach ($k in $policies.Keys) {
   New-ItemProperty -Path $p -Name $k -Value $policies[$k] -PropertyType DWord -Force | Out-Null
 }
+
+# 5. Show the result: every expected policy with its value, and anything unexpected
+$now = Get-ItemProperty -Path $p
+$policies.Keys | ForEach-Object {
+  [pscustomobject]@{ Policy = $_; Expected = $policies[$_]; Actual = $now.$_;
+                     OK = ($now.$_ -eq $policies[$_]) }
+} | Format-Table -AutoSize
+$extra = $now.PSObject.Properties.Name | Where-Object { $_ -notlike "PS*" -and -not $policies.Contains($_) }
+if ($extra) { "Other values present (not set by this script): $($extra -join ', ')" }
 ```
+
+The script is safe to run again; it always ends in the same state. The last
+step prints an **OK** column for every policy.
 
 | Policy | Stops |
 | --- | --- |
 | HideFirstRunExperience, AutoImportAtFirstRun | Welcome screens and import offers |
-| RestoreOnStartup = 5, HideRestoreDialogEnabled | Reopened tabs and "Restore pages?" after a crash |
+| HideRestoreDialogEnabled | "Restore pages?" after a crash |
+| NewTabPageContentEnabled, NewTabPageQuickLinksEnabled, NewTabPageHideDefaultTopSites, NewTabPageAllowedBackgroundTypes = 3 | News feed, quick links, top sites and background image on the new tab page |
 | StartupBoostEnabled, BackgroundModeEnabled | Edge preloading or staying alive in the background |
 | BrowserSignin, SyncDisabled | Sign-in and sync prompts |
 | PasswordManagerEnabled, Autofill* | Save-password and autofill offers |
-| DefaultBrowserSetting*, PromotionalTabsEnabled, ShowRecommendationsEnabled | Default-browser nags, promotions, tips |
+| DefaultBrowserSetting*, PromotionalTabsEnabled (deprecated), ShowRecommendationsEnabled (its replacement) | Default-browser nags, full-tab promotions, "What's new" and tips |
 | EdgeShoppingAssistantEnabled, HubsSidebarEnabled, TranslateEnabled, UserFeedbackAllowed | Shopping pop-ups, sidebar, translate and feedback prompts |
 | PromptForDownloadLocation | "Save as" dialog on downloads |
 
-**Verify:** open `edge://policy`, click **Reload policies**; every row should
-show OK. A row marked unknown or error means that policy was renamed in your
+**Not settable by policy on a standalone machine.** On Windows that isn't
+joined to a domain or Microsoft Entra ID, or enrolled in device management,
+Edge blocks the startup and home page policies (`RestoreOnStartup`,
+`RestoreOnStartupURLs`, `HomepageLocation`, `NewTabPageLocation` and similar)
+and shows them as "Error, Ignored". Don't set them. The bot is unaffected
+(Playwright opens `about:blank` itself); for manual use, set the startup page
+in Edge's own settings (step B1).
+
+**Verify:** sign in as the bot user, open Edge, open `edge://policy`, click
+**Reload policies**; every row should show OK, with no "Error, Ignored". A new
+tab should show only a search box, with no feed. A row marked unknown or error means that policy was renamed in your
 Edge version. Edge will say it is "managed by your organization"; that is expected.
 
 ### A6. Remote access
@@ -298,6 +356,13 @@ Then, in Settings:
 - Apps > Advanced app settings > **App execution aliases**: turn off
   **python.exe** and **python3.exe** (stops `python` opening the Microsoft Store).
 - Apps > Startup: turn off everything you don't need.
+- Edge, for opening it by hand as the bot user (these can't be set by policy
+  on a standalone machine; the bot itself always starts on `about:blank` and
+  never uses the toolbar):
+  - Settings > Start, home, and new tabs > When Edge starts > **Open these
+    pages** > add `about:blank`.
+  - Turn off the **Copilot** toolbar button (Settings > Copilot, or
+    Appearance > toolbar buttons, depending on the Edge version).
 - System > Notifications: **Do not disturb** on, no exceptions.
 
 **Verify:** sign out and back in; no notifications, tips or setup screens appear.
