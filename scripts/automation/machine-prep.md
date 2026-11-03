@@ -183,6 +183,8 @@ $policies = [ordered]@{
   UserFeedbackAllowed                   = 0
   # Downloads go straight to the folder, no "Save as"
   PromptForDownloadLocation             = 0
+  # Office files download instead of opening in the browser
+  QuickViewOfficeFilesEnabled           = 0
   # New tab page: no feed, quick links, top sites or background image
   NewTabPageContentEnabled              = 0
   NewTabPageQuickLinksEnabled           = 0
@@ -217,6 +219,7 @@ step prints an **OK** column for every policy.
 | DefaultBrowserSetting*, PromotionalTabsEnabled (deprecated), ShowRecommendationsEnabled (its replacement) | Default-browser nags, full-tab promotions, "What's new" and tips |
 | EdgeShoppingAssistantEnabled, HubsSidebarEnabled, TranslateEnabled, UserFeedbackAllowed | Shopping pop-ups, sidebar, translate and feedback prompts |
 | PromptForDownloadLocation | "Save as" dialog on downloads |
+| QuickViewOfficeFilesEnabled | Office files (Excel, Word, PowerPoint) opening in the browser instead of downloading |
 
 **Not settable by policy on a standalone machine.** On Windows that isn't
 joined to a domain or Microsoft Entra ID, or enrolled in device management,
@@ -363,6 +366,8 @@ Then, in Settings:
     pages** > add `about:blank`.
   - Turn off the **Copilot** toolbar button (Settings > Copilot, or
     Appearance > toolbar buttons, depending on the Edge version).
+  - Settings > Downloads: turn off **Show downloads menu when a download
+    starts** (no policy exists for this one).
 - System > Notifications: **Do not disturb** on, no exceptions.
 
 **Verify:** sign out and back in; no notifications, tips or setup screens appear.
@@ -370,6 +375,7 @@ Then, in Settings:
 ### B2. Tools
 
 ```powershell
+cd $HOME                                  # never work from C:\Windows\System32
 winget install --id astral-sh.uv -e
 winget install --id Git.Git -e
 # close and reopen PowerShell
@@ -468,12 +474,23 @@ the bot user is back on the console before the next run.
 
 ### B7. Verify the whole machine
 
-From the project folder (or the smoke-test folder before the app exists):
+Python packages come from the project: its `pyproject.toml` and `uv.lock`
+are installed into the project's `.venv` by `uv sync` (B3). Once that's done,
+from the project folder:
 
 ```powershell
 cd $proj
 uv run python env_check.py          # fake bank site on this machine only
 uv run python env_check.py --lock   # same, with Windows locked
+```
+
+Before the project exists (a new machine, or a standalone copy of the check
+scripts), let uv bring the packages for just that run. Keep `env_check.py`
+and `smoke_common.py` in the same folder:
+
+```powershell
+uv run --with playwright --with keyring python env_check.py
+uv run --with playwright --with keyring python env_check.py --lock
 ```
 
 `env_check.py` confirms Python and Playwright, Edge launches with its sandbox
