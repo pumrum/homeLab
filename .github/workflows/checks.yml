@@ -1,0 +1,28 @@
+# Runs pre-commit on every file, then the automation unit tests. No secrets
+# are used and nothing contacts a real site: tests use synthetic fixtures only.
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    name: pre-commit and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v6
+      - name: pre-commit (all files)
+        run: uvx pre-commit run --all-files --show-diff-on-failure
+      - name: Install automation workspace
+        working-directory: scripts/automation
+        run: uv sync --locked
+      - name: Unit tests
+        working-directory: scripts/automation
+        run: uv run pytest
