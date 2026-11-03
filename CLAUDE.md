@@ -23,16 +23,17 @@ Automation work (anything under `scripts/automation/`) also follows
 - Write US English everywhere (code, comments, docs, commits, PRs, chat)
   unless explicitly told otherwise: "behavior", "labeled", "color",
   "organize", "canceled", "center", "license" (noun and verb).
+- Use the Oxford comma in lists of three or more: "code, tests, and docs".
 
 ## The repo is public
 
-- Never commit, print or log real values: account numbers, credentials,
+- Never commit, print, or log real values: account numbers, credentials,
   private URLs, host names, email addresses, spreadsheet IDs, webhook URLs.
   Use `<placeholders>` in docs and `config.example.toml` files.
 - Never name any bank anywhere: code, comments, tests, file names, commits,
   issues, PRs. Test sites are called **FakeBank**.
 - Test data is synthetic. Never commit real downloads, screenshots, page
-  dumps or traces.
+  dumps, or traces.
 - Never read real config or secrets: `C:\automation\**`, `config.toml`,
   `.env`, keys, tokens, browser profiles, run folders.
 

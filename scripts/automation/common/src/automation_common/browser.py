@@ -5,7 +5,7 @@ Learned on a real bank site and kept on purpose:
     (pages hold hidden copies of controls)
   - escalate clicks: normal, forced, keyboard; verify the result after each
   - type dates key by key, then Tab out, then read the value back
-  - never use fixed sleeps: wait for elements, URLs or downloads
+  - never use fixed sleeps: wait for elements, URLs, or downloads
   - on failure save a screenshot and a shadow-DOM-piercing page outline
 """
 

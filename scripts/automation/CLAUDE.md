@@ -27,7 +27,7 @@ Machine setup: [`machine-prep.md`](machine-prep.md).
 ## Workspace and packaging
 
 - Python 3.13, uv. One uv workspace rooted here with a single committed `uv.lock`.
-  - `pyproject.toml`: workspace root, members, dev tools (pytest, ruff), lint and test config.
+  - `pyproject.toml`: workspace root, members, dev tools (pytest, ruff), and lint and test config.
   - `common/`: package `automation_common` (shared code).
   - `<process>/`: one package per automation, depending on `automation-common`
     as a workspace dependency, with a console script (e.g. `fidelity-nav`).
@@ -44,12 +44,12 @@ Machine setup: [`machine-prep.md`](machine-prep.md).
 - Only through `automation_common.secrets` (keyring, i.e. Windows Credential
   Manager of the `robot` user). Entry names `<process>/<name>`; shared ones
   `automation/<name>` (e.g. `automation/home-assistant-webhook`).
-- Never read, print, export or store secret values, and never run `cmdkey` or
+- Never read, print, export, or store secret values, and never run `cmdkey` or
   `keyring` yourself. Pass the run's `masker` so values are hidden in logs.
 
 ## Code rules
 
-- Fetch, transform and write are separate modules. Transforms/parsers are
+- Fetch, transform, and write are separate modules. Transforms/parsers are
   pure functions with unit tests.
 - Use `automation_common.run.Run`: it creates the run folder and log, and
   always writes the summary (`summary.json`, `report.txt`) on exit. If the
@@ -70,12 +70,12 @@ Machine setup: [`machine-prep.md`](machine-prep.md).
   Don't add flags that weaken security.
 - Selectors are lists of candidates, most specific first; `find_first` uses
   the first VISIBLE match (pages hold hidden copies of controls).
-- Never use fixed sleeps. Wait for elements, URLs or `expect_download`.
+- Never use fixed sleeps. Wait for elements, URLs, or `expect_download`.
 - Date inputs: `type_date` (click, select all, type key by key, Tab, read back).
 - Clicks: `click_until` (normal, then forced, then keyboard; verify after each).
 - Never start a Playwright trace before any sign-in is complete.
 - On failure save to the run folder: screenshot, `fail_NN_page.txt`
-  (`save_page_evidence`, a shadow-DOM-piercing outline) and `trace.zip`.
+  (`save_page_evidence`, a shadow-DOM-piercing outline), and `trace.zip`.
 - Respect sites: one page load per item per run, no parallel requests.
 
 ## Testing
@@ -86,7 +86,7 @@ Machine setup: [`machine-prep.md`](machine-prep.md).
 - Live runs happen only on the maintainer's machine, by the maintainer.
   Don't run anything against real sites unless asked.
 
-## Versions, branches and releases
+## Versions, branches, and releases
 
 - Branches `feature/<process>-<what>`, PR into `main`.
 - Tags per process: `<process>/vX.Y.Z` (SemVer). The robot runs only tagged

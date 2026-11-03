@@ -1,4 +1,4 @@
-"""One run of an automation: run folder, logging, summary and exit code.
+"""One run of an automation: run folder, logging, summary, and exit code.
 
     with Run.start("fidelity", process_dir("fidelity")) as run:
         ...                      # record each item with run.summary.record(...)

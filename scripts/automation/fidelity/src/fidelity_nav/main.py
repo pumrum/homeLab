@@ -1,8 +1,8 @@
 """fidelity-nav: config, run folder, one browser, per-fund loop, summary.
 
     uv run fidelity-nav            normal run: append NAVs to data\\nav.csv
-    uv run fidelity-nav --dump     save each page's outline, screenshot and
-                                   HTML to the run folder; writes no data
+    uv run fidelity-nav --dump     save each page's outline, screenshot,
+                                   and HTML to the run folder; writes no data
 """
 
 import argparse
@@ -34,7 +34,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(prog="fidelity-nav", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dump", action="store_true",
-                    help="save page outline, screenshot and HTML per fund; write no data")
+                    help="save page outline, screenshot, and HTML per fund; write no data")
     return ap.parse_args(argv)
 
 
@@ -50,7 +50,7 @@ def load_stage(run: Run, data_dir: Path) -> Config | None:
 
 
 def process_fund(run: Run, page: Page, fund: Fund, csv_path: Path) -> bool:
-    """Fetch, parse and store one fund. Records the result; never raises."""
+    """Fetch, parse, and store one fund. Records the result; never raises."""
     step = "fetch"
     try:
         html = fetch_page_html(page, fund.url)

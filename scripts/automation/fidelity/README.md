@@ -68,7 +68,7 @@ uv run fidelity-nav --dump
 ```
 
 Loads each fund page and saves `dump_<SYMBOL>.png`, `dump_<SYMBOL>_page.txt`
-(page outline) and `dump_<SYMBOL>.html` to the run folder, and reports what
+(page outline), and `dump_<SYMBOL>.html` to the run folder, and reports what
 the parser would read. Writes nothing to the CSV. Copy the files into
 `scripts\automation\triage\` (git-ignored) to have selectors updated.
 

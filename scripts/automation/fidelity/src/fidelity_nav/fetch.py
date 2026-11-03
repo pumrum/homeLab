@@ -53,7 +53,7 @@ def fetch_page_html(page: Page, url: str) -> str:
 
 
 def dump_fund_page(page: Page, url: str, run_dir: Path, prefix: str) -> str:
-    """For fixing selectors: load the page and save outline, screenshot and HTML.
+    """For fixing selectors: load the page and save outline, screenshot, and HTML.
 
     Saves even when the NAV element never appears. Returns the HTML.
     """

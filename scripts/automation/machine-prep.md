@@ -10,7 +10,7 @@ The end state:
 - A local **non-admin bot user** (`robot` in this guide) that signs in
   automatically at boot, locks its screen immediately, and runs the job on the
   locked desktop.
-- Windows and Edge configured so no prompt, tip, dialog or restart interrupts a run.
+- Windows and Edge configured so no prompt, tip, dialog, or restart interrupts a run.
 - Python and the repo installed for the bot user only, read-only from GitHub.
 
 > **Conventions**
@@ -141,7 +141,7 @@ similar. Removing them removes their notifications and background updates.
 ### A5. Edge policies
 
 Machine-wide policies so Edge never shows first-run screens, restore prompts,
-sign-in or sync nags, password or autofill offers, promotions, the sidebar or a
+sign-in or sync nags, password or autofill offers, promotions, the sidebar, or a
 "Save as" dialog. They apply to every Edge profile, including the bot's.
 
 ```powershell
@@ -189,7 +189,7 @@ $policies = [ordered]@{
   PromptForDownloadLocation             = 0
   # Office files download instead of opening in the browser
   QuickViewOfficeFilesEnabled           = 0
-  # New tab page: no feed, quick links, top sites or background image
+  # New tab page: no feed, quick links, top sites, or background image
   NewTabPageContentEnabled              = 0
   NewTabPageQuickLinksEnabled           = 0
   NewTabPageHideDefaultTopSites         = 1
@@ -216,19 +216,19 @@ step prints an **OK** column for every policy.
 | --- | --- |
 | HideFirstRunExperience, AutoImportAtFirstRun | Welcome screens and import offers |
 | HideRestoreDialogEnabled | "Restore pages?" after a crash |
-| NewTabPageContentEnabled, NewTabPageQuickLinksEnabled, NewTabPageHideDefaultTopSites, NewTabPageAllowedBackgroundTypes = 3 | News feed, quick links, top sites and background image on the new tab page |
+| NewTabPageContentEnabled, NewTabPageQuickLinksEnabled, NewTabPageHideDefaultTopSites, NewTabPageAllowedBackgroundTypes = 3 | News feed, quick links, top sites, and background image on the new tab page |
 | StartupBoostEnabled, BackgroundModeEnabled | Edge preloading or staying alive in the background |
 | BrowserSignin, SyncDisabled | Sign-in and sync prompts |
 | PasswordManagerEnabled, Autofill* | Save-password and autofill offers |
-| DefaultBrowserSetting*, PromotionalTabsEnabled (deprecated), ShowRecommendationsEnabled (its replacement) | Default-browser nags, full-tab promotions, "What's new" and tips |
-| EdgeShoppingAssistantEnabled, HubsSidebarEnabled, TranslateEnabled, UserFeedbackAllowed | Shopping pop-ups, sidebar, translate and feedback prompts |
+| DefaultBrowserSetting*, PromotionalTabsEnabled (deprecated), ShowRecommendationsEnabled (its replacement) | Default-browser nags, full-tab promotions, "What's new", and tips |
+| EdgeShoppingAssistantEnabled, HubsSidebarEnabled, TranslateEnabled, UserFeedbackAllowed | Shopping pop-ups, sidebar, translate, and feedback prompts |
 | PromptForDownloadLocation | "Save as" dialog on downloads |
 | QuickViewOfficeFilesEnabled | Office files (Excel, Word, PowerPoint) opening in the browser instead of downloading |
 
 **Not settable by policy on a standalone machine.** On Windows that isn't
 joined to a domain or Microsoft Entra ID, or enrolled in device management,
 Edge blocks the startup and home page policies (`RestoreOnStartup`,
-`RestoreOnStartupURLs`, `HomepageLocation`, `NewTabPageLocation` and similar)
+`RestoreOnStartupURLs`, `HomepageLocation`, `NewTabPageLocation`, and similar)
 and shows them as "Error, Ignored". Don't set them. The bot is unaffected
 (Playwright opens `about:blank` itself); for manual use, set the startup page
 in Edge's own settings (step B1).
@@ -340,7 +340,7 @@ $cdm = "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
 # No toast notifications
 Set-Reg "HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications" "ToastEnabled" 0
 
-# No tips, suggestions, "fun facts" or suggested apps
+# No tips, suggestions, "fun facts", or suggested apps
 foreach ($n in "SoftLandingEnabled","SystemPaneSuggestionsEnabled","SubscribedContent-338387Enabled",
                "SubscribedContent-338388Enabled","SubscribedContent-338389Enabled",
                "SubscribedContent-353694Enabled","SubscribedContent-353696Enabled",
@@ -374,7 +374,7 @@ Then, in Settings:
     starts** (no policy exists for this one).
 - System > Notifications: **Do not disturb** on, no exceptions.
 
-**Verify:** sign out and back in; no notifications, tips or setup screens appear.
+**Verify:** sign out and back in; no notifications, tips, or setup screens appear.
 
 ### B2. Tools
 
@@ -393,7 +393,7 @@ workspace's own `.venv`, so other Python installs can't interfere.
 ### B3. Repo, read-only
 
 The repo is public, so the robot clones it anonymously: no GitHub account,
-token or SSH key on this machine. A compromised robot can't change the code.
+token, or SSH key on this machine. A compromised robot can't change the code.
 
 ```powershell
 git clone <repo-url> $repo
@@ -444,7 +444,7 @@ notepad "$data\config.toml"                                       # replace ever
 | Large keys (e.g. Google service account) | Encrypted file in `%USERPROFILE%\.<process>\` | Only if a process needs one; its README says how. Delete the original download |
 | SFTP key | `%USERPROFILE%\.ssh\` | Only if a process needs one. Generate on this machine with `ssh-keygen -t ed25519`; never copy a key in |
 
-`data\`, `runs\` and `profiles\` under `$data` are created by the app. Never
+`data\`, `runs\`, and `profiles\` under `$data` are created by the app. Never
 copy browser profiles from another machine. A site that asks for verification
 does so once on the first run; approve it and the profile remembers this
 machine.
@@ -509,7 +509,7 @@ uv run --no-project --with playwright --with keyring python env_check.py --lock
 
 `env_check.py` confirms Python and Playwright, Edge launches with its sandbox
 on, the Edge policies are set, automatic sign-in is on, Credential Manager
-works, and a full sign-in, verification, date entry and download flow works,
+works, and a full sign-in, verification, date entry, and download flow works,
 including on a locked screen. It never contacts a real bank. Its report is in
 `C:\automation\env-check\runs\<timestamp>\report.txt`.
 
@@ -544,7 +544,7 @@ Edge stable channel kept up to date, and the paths `C:\src\homeLab` and
 
 | Step | Workstation | Notes |
 | --- | --- | --- |
-| A1 Base install | Partly | Keep your existing setup and account; just stay fully patched. No rename, fixed address or display setting needed |
+| A1 Base install | Partly | Keep your existing setup and account; just stay fully patched. No rename, fixed address, or display setting needed |
 | A2 Windows Update policy | Skip | Use your normal update settings |
 | A3 Power | Skip | |
 | A4 Quiet system | Skip | Optional: `DontShowUI` if crash dialogs annoy you |

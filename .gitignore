@@ -13,7 +13,7 @@ config.toml
 *.pem
 *.ppk
 
-# Automation run output, browser state and triage copies
+# Automation run output, browser state, and triage copies
 runs/
 profiles/
 triage/

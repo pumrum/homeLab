@@ -7,7 +7,7 @@ Unattended Windows automations, one package per process, sharing
 | Folder | What |
 | --- | --- |
 | `common/` | `automation_common`: run folder and summary, config, secrets, browser, notify |
-| `<process>/` | One package per automation, with its own README, config example and changelog |
+| `<process>/` | One package per automation, with its own README, config example, and changelog |
 | `tools/env_check.py` | Machine check against FakeBank, a fake site served on 127.0.0.1 |
 
 ## Set up and test
@@ -43,7 +43,7 @@ uv run <process-command>         # the console script named in the process's pyp
 
 Every run makes `C:\automation\<process>\runs\<yyyyMMdd_HHmmss>\` with
 `run.log`, `report.txt`, `summary.json`, and on failure `fail_NN.png`,
-`fail_NN_page.txt` and `trace.zip`. Exit code 0 means every item was OK.
+`fail_NN_page.txt`, and `trace.zip`. Exit code 0 means every item was OK.
 If the Credential Manager entry `automation/home-assistant-webhook` exists,
 the summary is POSTed to it as JSON.
 
@@ -53,7 +53,7 @@ the summary is POSTed to it as JSON.
 
    ```
    <process>/
-     pyproject.toml          project, package and console script names;
+     pyproject.toml          project, package, and console script names;
                              depends on automation-common = { workspace = true }
      config.example.toml     placeholders only
      CHANGELOG.md
