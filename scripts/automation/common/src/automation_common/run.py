@@ -1,6 +1,6 @@
 """One run of an automation: run folder, logging, summary, and exit code.
 
-    with Run.start("fidelity", process_dir("fidelity")) as run:
+    with Run.start(PROCESS, process_dir(PROCESS)) as run:
         ...                      # record each item with run.summary.record(...)
     return run.exit_code         # 0 all OK, 1 any item failed
 

@@ -20,7 +20,7 @@ def test_data_root_defaults_to_c_automation():
 def test_data_root_from_env(tmp_path):
     env = {"AUTOMATION_DATA_ROOT": str(tmp_path)}
     assert data_root(env) == tmp_path
-    assert process_dir("fidelity", env) == tmp_path / "fidelity"
+    assert process_dir("example", env) == tmp_path / "example"
 
 
 def test_load_toml_missing_file_says_what_to_do(tmp_path):
