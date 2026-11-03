@@ -1,6 +1,7 @@
 import datetime as dt
 import json
 import logging
+import re
 
 from automation_common.run import Run, Status, make_run_dir
 
@@ -62,6 +63,14 @@ def test_secrets_are_masked_in_log_and_summary(tmp_path):
         text = (run.run_dir / name).read_text(encoding="utf-8")
         assert "s3cr3t-value" not in text
         assert "***" in text
+
+
+def test_log_timestamps_use_a_period_before_milliseconds(tmp_path):
+    with _run(tmp_path, []) as run:
+        logging.getLogger("x").info("hello")
+        run.summary.record("x", "y", Status.OK)
+    first = (run.run_dir / "run.log").read_text(encoding="utf-8").splitlines()[0]
+    assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} ", first), first
 
 
 def test_failure_prefixes_count_up(tmp_path):

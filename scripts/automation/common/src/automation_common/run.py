@@ -94,6 +94,9 @@ class Summary:
 
 
 class _MaskingFormatter(logging.Formatter):
+    # 2026-11-03 12:47:49.275, not Python's default comma before the milliseconds
+    default_msec_format = "%s.%03d"
+
     def __init__(self, masker: SecretMasker) -> None:
         super().__init__(LOG_FORMAT)
         self._masker = masker

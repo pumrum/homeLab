@@ -3,6 +3,11 @@
 Versions follow [Semantic Versioning](https://semver.org/). Release tags are
 `fidelity/vX.Y.Z`.
 
+## Unreleased
+
+- Log timestamps use a period before the milliseconds
+  (`12:47:49.275`, not `12:47:49,275`).
+
 ## 0.1.0 (unreleased)
 
 - First version: reads each configured fund's NAV ("NAV" or "Unit Value")
