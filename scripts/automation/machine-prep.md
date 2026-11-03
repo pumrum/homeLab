@@ -22,7 +22,6 @@ The end state:
 >   - `C:\src\homeLab\scripts\automation`: the uv workspace shared by every
 >     automation (`pyproject.toml`, `uv.lock`, `.venv`, `tools\env_check.py`)
 >   - `C:\src\homeLab\scripts\automation\<process>`: one process's code
->     (examples use `fidelity`, whose command is `fidelity-nav`)
 >   - `C:\automation\<process>`: this process's private, writable data
 >     (`config.toml`, `data\`, `runs\`, `profiles\`), kept outside the repo.
 >     Nothing is built or copied here; the code runs from the workspace and
@@ -324,7 +323,8 @@ of each PowerShell window you use for Part B:
 ```powershell
 $repo    = "C:\src\homeLab"                        # repo clone (code only)
 $ws      = "$repo\scripts\automation"              # uv workspace: pyproject.toml, uv.lock, .venv
-$process = "fidelity"                              # process folder name
+$process = "processname"                           # process folder name under $ws
+$command = "processcommand"                        # its console script (see the process's pyproject.toml)
 $data    = "C:\automation\$process"                 # private data: config.toml, data, runs, profiles
 ```
 
@@ -410,7 +410,7 @@ uv sync                                       # exact versions from uv.lock
 code into it straight from the repo folders. Nothing is copied to
 `C:\automation`; that folder only ever holds data (B4).
 
-Tags carry the process name (for example `fidelity/v0.1.0`) because one
+Tags carry the process name (`<process>/vX.Y.Z`) because one
 repo holds several processes, each versioned on its own.
 
 Leave `user.name` and `user.email` unset so an accidental commit fails too.
@@ -439,7 +439,7 @@ notepad "$data\config.toml"                                       # replace ever
 | Item | Location | How |
 | --- | --- | --- |
 | Real config | `C:\automation\<process>\config.toml` | Copy from your backup, or copy `config.example.toml` and fill in (above) |
-| Passwords, API tokens, webhook URL | Windows Credential Manager (bot user) | Only the entries the process's README lists (`fidelity` needs none). Control Panel > Credential Manager > Windows Credentials > **Add a generic credential**: address = entry name (`<process>/<name>`, or `automation/<name>` for shared ones), user name, password = the secret |
+| Passwords, API tokens, webhook URL | Windows Credential Manager (bot user) | Only the entries the process's README lists (some need none). Control Panel > Credential Manager > Windows Credentials > **Add a generic credential**: address = entry name (`<process>/<name>`, or `automation/<name>` for shared ones), user name, password = the secret |
 | Home Assistant webhook (optional, shared) | Windows Credential Manager (bot user) | Generic credential `automation/home-assistant-webhook`, password = the webhook URL. If it exists, every run POSTs its summary there |
 | Large keys (e.g. Google service account) | Encrypted file in `%USERPROFILE%\.<process>\` | Only if a process needs one; its README says how. Delete the original download |
 | SFTP key | `%USERPROFILE%\.ssh\` | Only if a process needs one. Generate on this machine with `ssh-keygen -t ed25519`; never copy a key in |
@@ -468,9 +468,9 @@ Register-ScheduledTask -TaskName "Lock at sign-in" -Action $a -Trigger $t
 ### B6. Daily job
 
 ```powershell
-$a = New-ScheduledTaskAction -Execute "$ws\.venv\Scripts\fidelity-nav.exe" `
-  -WorkingDirectory $ws                       # each process's command; see its README
-$t = New-ScheduledTaskTrigger -Daily -At 19:30   # per process (fidelity: after NAVs publish)
+$a = New-ScheduledTaskAction -Execute "$ws\.venv\Scripts\$command.exe" `
+  -WorkingDirectory $ws
+$t = New-ScheduledTaskTrigger -Daily -At 8:00     # pick per process; see its README
 $s = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
   -MultipleInstances IgnoreNew -RestartCount 1 -RestartInterval (New-TimeSpan -Minutes 15)
 Register-ScheduledTask -TaskName $process -Action $a -Trigger $t -Settings $s
@@ -494,8 +494,8 @@ are installed into `$ws\.venv` by `uv sync` (B3). Once that's done:
 cd $ws
 uv run python tools\env_check.py          # fake bank site on this machine only
 uv run python tools\env_check.py --lock   # same, with Windows locked
-uv run fidelity-nav                       # one real run of the process
-Get-Content "$data\data\nav.csv"
+uv run $command                           # one real run of the process
+Get-ChildItem "$data\data"                # its output files
 ```
 
 Before `uv sync` has run (a new machine), let uv bring the packages for just
