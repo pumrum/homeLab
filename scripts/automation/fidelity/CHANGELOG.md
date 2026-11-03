@@ -7,6 +7,8 @@ Versions follow [Semantic Versioning](https://semver.org/). Release tags are
 
 - Log timestamps use a period before the milliseconds
   (`12:47:49.275`, not `12:47:49,275`).
+- The webhook gets only `title` ("fidelity") and `message` ("PASS" or
+  "FAIL") instead of the full run summary, which stays in the run folder.
 
 ## 0.1.0 (unreleased)
 

@@ -53,8 +53,12 @@ Machine setup: [`machine-prep.md`](machine-prep.md).
   pure functions with unit tests.
 - Use `automation_common.run.Run`: it creates the run folder and log, and
   always writes the summary (`summary.json`, `report.txt`) on exit. If the
-  `automation/home-assistant-webhook` secret exists, it POSTs the summary
-  there; otherwise it only logs it.
+  `automation/home-assistant-webhook` secret exists, it POSTs only
+  `{"title": ..., "message": ...}` there (default: the process name and
+  `PASS` or `FAIL`), which the Home Assistant automation shows as is;
+  otherwise it only logs it. Send nothing else to the webhook: details stay
+  in the run folder. Keep messages short: they are read on a watch. Pass
+  `title=` or `message=` to `Run.start` to change them.
 - Each stage, and each item within a stage (e.g. each fund), has its own
   try/except. Record one failure with `run.summary.record(...)`, then continue.
 - Exit code: 0 all OK, 1 any item failed.

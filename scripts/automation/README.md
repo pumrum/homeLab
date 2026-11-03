@@ -45,7 +45,17 @@ Every run makes `C:\automation\<process>\runs\<yyyyMMdd_HHmmss>\` with
 `run.log`, `report.txt`, `summary.json`, and on failure `fail_NN.png`,
 `fail_NN_page.txt`, and `trace.zip`. Exit code 0 means every item was OK.
 If the Credential Manager entry `automation/home-assistant-webhook` exists,
-the summary is POSTed to it as JSON.
+each run POSTs `{"title": "<process>", "message": "PASS"}` (or `"FAIL"`) to
+it, and nothing else; the details stay in the run folder. A generic Home
+Assistant webhook automation can pass both straight to a notification:
+
+```yaml
+actions:
+  - action: notify.mobile_app
+    data:
+      title: "{{ trigger.json.title }}"
+      message: "{{ trigger.json.message }}"
+```
 
 ## Add a new automation
 

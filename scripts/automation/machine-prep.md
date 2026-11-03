@@ -440,7 +440,7 @@ notepad "$data\config.toml"                                       # replace ever
 | --- | --- | --- |
 | Real config | `C:\automation\<process>\config.toml` | Copy from your backup, or copy `config.example.toml` and fill in (above) |
 | Passwords, API tokens, webhook URL | Windows Credential Manager (bot user) | Only the entries the process's README lists (some need none). Control Panel > Credential Manager > Windows Credentials > **Add a generic credential**: address = entry name (`<process>/<name>`, or `automation/<name>` for shared ones), user name, password = the secret |
-| Home Assistant webhook (optional, shared) | Windows Credential Manager (bot user) | Generic credential `automation/home-assistant-webhook`, password = the webhook URL. If it exists, every run POSTs its summary there |
+| Home Assistant webhook (optional, shared) | Windows Credential Manager (bot user) | Generic credential `automation/home-assistant-webhook`, password = the webhook URL. If it exists, every run POSTs a title and a PASS/FAIL message there |
 | Large keys (e.g. Google service account) | Encrypted file in `%USERPROFILE%\.<process>\` | Only if a process needs one; its README says how. Delete the original download |
 | SFTP key | `%USERPROFILE%\.ssh\` | Only if a process needs one. Generate on this machine with `ssh-keygen -t ed25519`; never copy a key in |
 

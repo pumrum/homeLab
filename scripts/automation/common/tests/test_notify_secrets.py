@@ -4,7 +4,7 @@ from keyring.credentials import SimpleCredential
 from keyring.errors import KeyringError
 
 from automation_common import secrets
-from automation_common.notify import WEBHOOK_SECRET, notify_summary
+from automation_common.notify import WEBHOOK_SECRET, send_notification
 from automation_common.secrets import SecretMasker, get_credential, get_secret
 
 
@@ -39,10 +39,14 @@ def test_keyring_error_returns_none(monkeypatch):
     assert get_secret("automation/nothing") is None
 
 
+NOTE = {"title": "example", "message": "PASS"}
+
+
 def test_notify_without_webhook_only_logs(caplog):
     posted = []
     caplog.set_level("INFO")
-    ok = notify_summary({"a": 1}, SecretMasker(), lambda n, m: None, lambda u, p: posted.append(u))
+    ok = send_notification(NOTE, SecretMasker(), lambda n, m: None,
+                           lambda u, p: posted.append(u))
     assert ok is False and posted == []
     assert "no webhook configured" in caplog.text
 
@@ -55,9 +59,10 @@ def test_notify_posts_and_never_logs_url(caplog):
         assert name == WEBHOOK_SECRET
         return "https://example.invalid/hook"
 
-    ok = notify_summary({"a": 1}, SecretMasker(), lookup, lambda u, p: posted.append((u, p)) or 200)
+    ok = send_notification(NOTE, SecretMasker(), lookup,
+                           lambda u, p: posted.append((u, p)) or 200)
     assert ok is True
-    assert posted == [("https://example.invalid/hook", {"a": 1})]
+    assert posted == [("https://example.invalid/hook", NOTE)]
     assert "example.invalid" not in caplog.text
 
 
@@ -66,4 +71,4 @@ def test_notify_failure_never_raises(exc):
     def post(url, payload):
         raise exc
 
-    assert notify_summary({}, SecretMasker(), lambda n, m: "https://x.invalid", post) is False
+    assert send_notification({}, SecretMasker(), lambda n, m: "https://x.invalid", post) is False
