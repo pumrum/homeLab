@@ -7,7 +7,7 @@ Unattended Windows automations, one package per process, sharing
 | Folder | What |
 | --- | --- |
 | `common/` | `automation_common`: run folder and summary, config, secrets, browser, notify |
-| `fidelity/` | `fidelity-nav`: daily NAV of selected funds into a CSV ([README](fidelity/README.md)) |
+| `<process>/` | One package per automation, with its own README, config example and changelog |
 | `tools/env_check.py` | Machine check against FakeBank, a fake site served on 127.0.0.1 |
 
 ## Set up and test
@@ -38,7 +38,7 @@ Each process reads `C:\automation\<process>\config.toml` (copied from its
 `AUTOMATION_DATA_ROOT` to use a different root than `C:\automation`.
 
 ```powershell
-uv run fidelity-nav
+uv run <process-command>         # the console script named in the process's pyproject.toml
 ```
 
 Every run makes `C:\automation\<process>\runs\<yyyyMMdd_HHmmss>\` with
@@ -49,10 +49,25 @@ the summary is POSTed to it as JSON.
 
 ## Add a new automation
 
-1. Copy the `fidelity/` layout to `<process>/`: `pyproject.toml` (rename the
-   project, package and script; keep `automation-common = { workspace = true }`),
-   `config.example.toml`, `CHANGELOG.md`, `README.md`,
-   `src/<package>/{__init__,__main__,main,fetch,parse,store,config}.py`, `tests/`.
+1. Copy an existing process folder to `<process>/` and rename it. The layout:
+
+   ```
+   <process>/
+     pyproject.toml          project, package and console script names;
+                             depends on automation-common = { workspace = true }
+     config.example.toml     placeholders only
+     CHANGELOG.md
+     README.md               what it does, config, run, schedule
+     src/<package>/
+       __init__.py           PROCESS = "<process>"
+       __main__.py           python -m <package>
+       main.py               config, run folder, per-item loop, summary
+       fetch.py              browser or download step
+       parse.py              pure transforms
+       store.py              write the output
+       config.py             config validation
+     tests/                  synthetic fixtures only
+   ```
 2. Set `PROCESS = "<process>"` in `__init__.py`; that name is the data folder.
 3. Add `"<process>"` to `members` and the package to `dependencies` and
    `[tool.uv.sources]` in the root `pyproject.toml`, and its tests to
