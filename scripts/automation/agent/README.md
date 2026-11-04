@@ -57,8 +57,7 @@ Copy-Item agent\config.example.toml C:\automation\agent\config.toml
 notepad C:\automation\agent\config.toml
 ```
 
-Fill in the broker's IP address or host name and one `[[jobs]]` block per job. Save
-it as plain UTF-8: a byte-order mark makes the config invalid at line 1. Use a
+Fill in the broker's IP address or host name and one `[[jobs]]` block per job. Use a
 different `topic_prefix` on a test machine, such as `automation-test`, so it can't
 react to the real schedule or disturb the robot's connection. If you limited the
 login, add matching lines for that prefix to `accesscontrollist` too.

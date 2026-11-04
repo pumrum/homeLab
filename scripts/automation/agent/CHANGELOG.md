@@ -14,3 +14,5 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
   failures log the reason.
 - Docs and the example config start with plain MQTT on port 1883 on a private
   network, with an access list and TLS as later hardening steps.
+- Accepts a config saved with a byte-order mark, through the shared loader. A file
+  that isn't UTF-8 now gets a clear error.
