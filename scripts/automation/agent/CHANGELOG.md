@@ -16,3 +16,7 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
   network, with an access list and TLS as later hardening steps.
 - Accepts a config saved with a byte-order mark, through the shared loader. A file
   that isn't UTF-8 now gets a clear error.
+- **Update** button and **Version** sensor in Home Assistant. A press starts a helper
+  task that stops the agent, runs `git pull --ff-only` and `uv sync`, goes back to the
+  previous commit if the sync fails, and starts the agent again. Refused while a job
+  is running or waiting. Sends `PASS` or `FAIL`. Needs the helper task registered once.

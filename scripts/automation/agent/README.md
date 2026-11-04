@@ -20,6 +20,8 @@ the listener at sign-in.
 | `<prefix>/<job>/run` | Send `run` to start the job. Don't retain it |
 | `<prefix>/<job>/state` | `idle`, `running`, `PASS`, or `FAIL` |
 | `<prefix>/agent/status` | `online` or `offline` |
+| `<prefix>/agent/update` | Send `update` to update the code. Don't retain it |
+| `<prefix>/agent/version` | The running commit |
 
 ## Prepare the broker
 
@@ -85,9 +87,13 @@ $a = New-ScheduledTaskAction -Execute "$ws\.venv\Scripts\automation-agent.exe" -
 $t = New-ScheduledTaskTrigger -AtLogOn -User "$env:COMPUTERNAME\robot"
 $s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew `
   -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName "automation-agent" -Action $a -Trigger $t -Settings $s
+$p = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\robot" -LogonType Interactive -RunLevel Limited
+Register-ScheduledTask -TaskName "automation-agent" -Action $a -Trigger $t -Settings $s -Principal $p
 Start-ScheduledTask -TaskName "automation-agent"
 ```
+
+To use the **Update** button, register its helper task too. See [Update the
+code](#update-the-code).
 
 **5. Add the schedule in Home Assistant.** Go to **Settings > Automations & scenes
 > Create automation > Edit in YAML**:
@@ -162,6 +168,8 @@ user <robot user>
 topic read automation/+/run
 topic write automation/+/state
 topic write automation/agent/status
+topic read automation/agent/update
+topic write automation/agent/version
 topic write homeassistant/#
 ```
 
@@ -208,6 +216,52 @@ Add a `[[jobs]]` block to `C:\automation\agent\config.toml` and restart the agen
 schedule as in step 5.
 
 ## Update the code
+
+### From Home Assistant
+
+The **Update** button on the device updates the code without signing in to the
+machine, and the **Version** sensor shows the running commit. It takes about a minute
+or so, and the device shows as unavailable until the agent is back.
+
+- **It updates only when you press it.** Merging to `main` changes nothing on the
+  robot until then. It pulls the branch that's checked out, so check that's `main`
+  when you set it up: `git branch --show-current`.
+- **It's refused while a job is running or waiting.** The press is logged, and you
+  press it again afterward. A schedule that fires during the update is missed.
+- **It sends a notification,** titled `agent update`, with `PASS` or `FAIL`. Details
+  are in `C:\automation\agent\logs\update.log`.
+- **If the pull or sync fails,** the helper goes back to the previous commit if it
+  had moved, syncs again, and restarts the agent, which sends the `FAIL`.
+- **If the new code stops the agent from starting or connecting,** nothing can report
+  it and the button is gone. The device stays unavailable and you need to sign in to
+  fix it, so consider the optional alert above. To go back, follow [By
+  hand](#by-hand), using `git reset --keep <last good commit>` in place of the pull.
+- **The message can't choose what runs.** The only word accepted is `update`, which
+  starts a fixed task that takes no input. Someone with the MQTT login could only make
+  the robot update to what's already on the checked-out branch.
+
+**Set it up once on each machine,** signed in as the user that runs the agent. The
+agent's own task must be registered too, because the helper stops and starts that
+task. If an agent was started by hand, the helper won't stop it, and you get a `FAIL`
+after 5 minutes.
+
+```powershell
+$ws = "C:\src\homeLab\scripts\automation"
+$a = New-ScheduledTaskAction -Execute "powershell.exe" -WorkingDirectory $ws `
+  -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$ws\agent\update_agent.ps1`""
+$s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -MultipleInstances IgnoreNew
+$p = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\robot" -LogonType Interactive -RunLevel Limited
+Register-ScheduledTask -TaskName "automation-agent-update" -Action $a -Settings $s -Principal $p
+```
+
+The task has no trigger, so it only runs when the agent asks. `-ExecutionPolicy
+Bypass` applies to this one script, which Windows' default policy would otherwise
+refuse to run.
+
+Until the helper is registered, pressing **Update** only logs an error and sends a
+`FAIL`.
+
+### By hand
 
 The running agent locks its files, so stop it before `uv sync`, at a time when no
 job is running:

@@ -84,6 +84,11 @@ class Runner:
         with self._lock:
             return name == self._running
 
+    def is_idle(self) -> bool:
+        """True if no job is running or waiting."""
+        with self._lock:
+            return self._running is None and not self._pending
+
     def start(self) -> None:
         threading.Thread(target=self._work, daemon=True, name="job-runner").start()
 

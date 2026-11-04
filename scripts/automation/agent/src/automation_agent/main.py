@@ -4,12 +4,16 @@ Runs for as long as the robot is signed in. Only jobs named in its private
 config can run, and the message's content is never used beyond the word "run".
 Each job keeps its own run folder and notification; a job that hangs or can't
 start is reported here, since it can't report itself.
+
+The word "update" starts one fixed helper task that updates this machine's code.
+It's refused while a job is running or waiting, and takes no input from the message.
 """
 
 import logging
 import logging.handlers
 import ssl
 import sys
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -28,10 +32,20 @@ from automation_agent.topics import (
     PASS,
     RUN_PAYLOAD,
     RUNNING,
+    UPDATE_PAYLOAD,
+    agent_discovery_messages,
     discovery_messages,
     run_topic,
     state_topic,
     status_topic,
+    update_topic,
+    version_topic,
+)
+from automation_agent.update import (
+    UNKNOWN_VERSION,
+    current_version,
+    start_update_task,
+    take_update_result,
 )
 from automation_common.config import ConfigError, process_dir
 from automation_common.notify import send_notification
@@ -46,6 +60,14 @@ LOG_BACKUPS = 5
 QOS = 1
 RETRY_MIN_S = 5
 RETRY_MAX_S = 60
+UPDATE_TITLE = "agent update"
+UPDATE_WAIT_S = 300  # the helper stops this agent within seconds; still here means it didn't
+
+
+def _after(delay_s: float, action: Callable[[], None]) -> None:
+    timer = threading.Timer(delay_s, action)
+    timer.daemon = True
+    timer.start()
 
 
 class Agent:
@@ -58,12 +80,19 @@ class Agent:
         masker: SecretMasker,
         run: Callable[[Job], JobResult],
         notify: Callable[[dict[str, str], SecretMasker], bool] = send_notification,
+        start_update: Callable[[], bool] = start_update_task,
+        version: str = UNKNOWN_VERSION,
+        after: Callable[[float, Callable[[], None]], None] = _after,
     ) -> None:
         self.cfg = cfg
         self.client = client
         self.masker = masker
         self.notify = notify
+        self.start_update = start_update
+        self.version = version
+        self.after = after
         self.connected_before = False
+        self.updating = False
         self.jobs ={run_topic(cfg.mqtt, j.name): j for j in cfg.jobs}
         self.runner = Runner(run, self._on_start, self._on_finish)
 
@@ -71,7 +100,11 @@ class Agent:
         if reason.is_failure:
             log.error("MQTT connection refused: %s", reason)
             return
-        log.info("connected to MQTT; %d job(s)", len(self.cfg.jobs))
+        log.info("connected to MQTT; %d job(s); version %s", len(self.cfg.jobs), self.version)
+        for topic, payload in agent_discovery_messages(self.cfg.mqtt).items():
+            client.publish(topic, payload, qos=QOS, retain=True)
+        client.publish(version_topic(self.cfg.mqtt), self.version, qos=QOS, retain=True)
+        client.subscribe(update_topic(self.cfg.mqtt), qos=QOS)
         for job in self.cfg.jobs:
             for topic, payload in discovery_messages(self.cfg.mqtt, job).items():
                 client.publish(topic, payload, qos=QOS, retain=True)
@@ -89,6 +122,9 @@ class Agent:
         log.warning("disconnected from MQTT (%s); reconnecting", reason)
 
     def on_message(self, client: Any, userdata: Any, message: Any) -> None:
+        if message.topic == update_topic(self.cfg.mqtt):
+            self._on_update_message(message)
+            return
         job = self.jobs.get(message.topic)
         if job is None:
             return
@@ -98,10 +134,42 @@ class Agent:
         if message.payload != RUN_PAYLOAD.encode():
             log.warning("ignored an unexpected message for %s", job.name)
             return
+        if self.updating:
+            log.warning("ignored a run request for %s: an update is starting", job.name)
+            return
         if self.runner.request(job):
             log.info("%s requested", job.name)
         else:
             log.info("%s is already running or waiting; ignored", job.name)
+
+    def _on_update_message(self, message: Any) -> None:
+        if message.retain:
+            log.warning("ignored a retained update message: it may be old")
+            return
+        if message.payload != UPDATE_PAYLOAD.encode():
+            log.warning("ignored an unexpected update message")
+            return
+        if self.updating:
+            log.info("an update is already starting; ignored")
+            return
+        if not self.runner.is_idle():
+            log.warning("update refused: a job is running or waiting; press it again afterward")
+            return
+        self.updating = True  # from here, run requests wait for the helper to stop this agent
+        log.info("update requested; starting the helper task")
+        if self.start_update():
+            self.after(UPDATE_WAIT_S, self._on_update_stalled)
+        else:
+            self._update_failed()
+
+    def _on_update_stalled(self) -> None:
+        log.error("the update helper didn't stop this agent; was it started by hand? "
+                  "See logs\\update.log")
+        self._update_failed()
+
+    def _update_failed(self) -> None:
+        self.updating = False
+        self.notify({"title": UPDATE_TITLE, "message": FAIL}, self.masker)
 
     def _publish_state(self, job: Job, state: str) -> None:
         self.client.publish(state_topic(self.cfg.mqtt, job.name), state, qos=QOS, retain=True)
@@ -167,6 +235,18 @@ def connect_until_up(
         delay = min(delay * 2, RETRY_MAX_S)
 
 
+def report_update_result(
+    data_dir: Path,
+    masker: SecretMasker,
+    notify: Callable[[dict[str, str], SecretMasker], bool] = send_notification,
+) -> None:
+    """Tell Home Assistant how the update that restarted this agent went, if there was one."""
+    result = take_update_result(data_dir)
+    if result is not None:
+        log.log(logging.INFO if result == PASS else logging.ERROR, "update finished: %s", result)
+        notify({"title": UPDATE_TITLE, "message": result}, masker)
+
+
 def main() -> int:
     data_dir = process_dir(PROCESS)
     masker = SecretMasker()
@@ -185,8 +265,10 @@ def main() -> int:
 
     scripts_dir = Path(sys.executable).parent
     workspace = scripts_dir.parents[1]
+    report_update_result(data_dir, masker)
     client = build_client(cfg, cred)
-    agent = Agent(cfg, client, masker, lambda job: run_job(job, scripts_dir, workspace))
+    agent = Agent(cfg, client, masker, lambda job: run_job(job, scripts_dir, workspace),
+                  version=current_version(workspace))
     client.on_connect = agent.on_connect
     client.on_disconnect = agent.on_disconnect
     client.on_message = agent.on_message
