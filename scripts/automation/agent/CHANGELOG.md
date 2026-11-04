@@ -20,3 +20,5 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
   task that stops the agent, runs `git pull --ff-only` and `uv sync`, goes back to the
   previous commit if the sync fails, and starts the agent again. Refused while a job
   is running or waiting. Sends `PASS` or `FAIL`. Needs the helper task registered once.
+- Logs each failed MQTT reconnect attempt, so a connection that doesn't come back is
+  visible in the log instead of the log going quiet.

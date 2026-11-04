@@ -147,6 +147,13 @@ def test_refused_connection_announces_nothing():
     assert client.published == [] and client.subscribed == []
 
 
+def test_failed_reconnect_attempt_is_logged(caplog):
+    agent, client, _, _ = _agent()
+    caplog.set_level("WARNING")
+    agent.on_connect_fail(client, None)
+    assert "reconnect attempt failed" in caplog.text
+
+
 def test_run_message_queues_the_job():
     agent, client, ran, _ = _agent()
     agent.on_message(client, None, _message())
