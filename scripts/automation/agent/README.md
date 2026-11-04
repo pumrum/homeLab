@@ -261,6 +261,11 @@ refuse to run.
 Until the helper is registered, pressing **Update** only logs an error and sends a
 `FAIL`.
 
+If you get a `FAIL` with nothing new in `update.log`, the script didn't run. Check
+the task with `Get-ScheduledTaskInfo -TaskName "automation-agent-update"`. A
+`LastTaskResult` of `4294770688` means PowerShell couldn't find the script, for
+example because the checkout is on a commit from before it existed.
+
 ### By hand
 
 The running agent locks its files, so stop it before `uv sync`, at a time when no

@@ -163,8 +163,8 @@ class Agent:
             self._update_failed()
 
     def _on_update_stalled(self) -> None:
-        log.error("the update helper didn't stop this agent; was it started by hand? "
-                  "See logs\\update.log")
+        log.error("the update helper didn't stop this agent in time. Was the agent started "
+                  "by hand? Check logs\\update.log and the helper task's last result")
         self._update_failed()
 
     def _update_failed(self) -> None:
