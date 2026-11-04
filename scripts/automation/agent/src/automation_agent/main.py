@@ -121,6 +121,10 @@ class Agent:
     ) -> None:
         log.warning("disconnected from MQTT (%s); reconnecting", reason)
 
+    def on_connect_fail(self, client: Any, userdata: Any) -> None:
+        # The MQTT library retries by itself, and is silent about it without this
+        log.warning("MQTT reconnect attempt failed; retrying")
+
     def on_message(self, client: Any, userdata: Any, message: Any) -> None:
         if message.topic == update_topic(self.cfg.mqtt):
             self._on_update_message(message)
@@ -271,6 +275,7 @@ def main() -> int:
                   version=current_version(workspace))
     client.on_connect = agent.on_connect
     client.on_disconnect = agent.on_disconnect
+    client.on_connect_fail = agent.on_connect_fail
     client.on_message = agent.on_message
     agent.runner.start()
     log.info("agent started")
