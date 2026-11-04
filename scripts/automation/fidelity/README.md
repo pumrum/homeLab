@@ -129,15 +129,15 @@ command = "fidelity-nav"
 timeout_minutes = 30
 ```
 
-Restart the agent, then add the schedule in Home Assistant. It runs after the
-day's NAVs are published:
+Restart the agent, then add the schedule in Home Assistant. It runs at 1:07 AM,
+because the day's NAV may not be updated yet in the evening:
 
 ```yaml
 alias: Run fidelity
 mode: single
 triggers:
   - trigger: time
-    at: "19:30:00"
+    at: "01:07:00"
 actions:
   - action: mqtt.publish
     data:
