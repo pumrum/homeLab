@@ -1,0 +1,15 @@
+# automation-agent configuration. Copy to C:\automation\agent\config.toml and
+# replace the placeholders. Every text value is quoted. The MQTT login goes in
+# Credential Manager as automation/mqtt, never here.
+
+[mqtt]
+host = "<broker address>"
+port = 1883                     # usually 1883, or 8883 with tls = true
+tls = false
+topic_prefix = "automation"     # use a different one on a test machine
+
+# One block per job Home Assistant may run. Nothing else can be run.
+[[jobs]]
+name = "<job>"                  # lowercase; used in topics and Home Assistant names
+command = "<console script>"    # its name only, as in the process's pyproject.toml
+timeout_minutes = 30            # a run longer than this is stopped and reported as FAIL

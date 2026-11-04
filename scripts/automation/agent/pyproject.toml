@@ -1,0 +1,19 @@
+[project]
+name = "automation-agent"
+version = "0.1.0"
+description = "Always-on MQTT listener: runs configured jobs when Home Assistant asks"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "automation-common",
+    "paho-mqtt>=2.1.0",
+]
+
+[project.scripts]
+automation-agent = "automation_agent.main:main"
+
+[tool.uv.sources]
+automation-common = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
