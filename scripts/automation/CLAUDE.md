@@ -147,11 +147,12 @@ shows how.
 - Date inputs: `type_date` (click, select all, type key by key, Tab, read back).
 - Clicks: `click_until` (normal, then forced, then keyboard; verify after each).
 - Never start a Playwright trace before any sign-in is complete.
-- Sign-in is not built yet: `automation_common` has no sign-in or MFA-wait
-  helper, and no process signs in. The only sign-in flow is the FakeBank one in
-  `tools/env_check.py`. Build the helper in `common/` when a process first
-  needs it; the MFA wait must time out, and tell the maintainer it's new and
-  untested on a real site.
+- Sign-in and MFA stay in each process's own package, not `common/`: they're
+  site-specific and the most likely part of a site to change. `automation_common`
+  has no sign-in or MFA helper. The FakeBank flow in `tools/env_check.py` is a
+  pattern to read, not a library to import. An MFA wait must time out, and tell
+  the maintainer that new sign-in code is untested on a real site. If a second
+  site needs identical code, raise it with the maintainer rather than moving it.
 - On failure save to the run folder: screenshot, `fail_NN_page.txt`
   (`save_page_evidence`, a shadow-DOM-piercing outline), and `trace.zip`.
 - Respect sites: one page load per item per run, no parallel requests.
