@@ -5,6 +5,8 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
 
 ## Unreleased
 
+- Scheduled by Home Assistant through automation-agent instead of Task Scheduler.
+
 - Log timestamps use a period before the milliseconds
   (`12:47:49.275`, not `12:47:49,275`).
 - The webhook gets only `title` ("fidelity") and `message` ("PASS" or
