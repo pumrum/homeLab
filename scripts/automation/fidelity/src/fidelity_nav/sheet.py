@@ -1,12 +1,14 @@
 """Pure planning for the Google Sheet copy of nav.csv. No network, no I/O.
 
-The sheet mirrors nav.csv's history, one row per CSV row:
+The sheet holds nav.csv's history, one row per distinct NAV:
 
     as_of_date | symbol | nav | retrieved_at
 
 Each run compares the CSV with what's already in the sheet and appends only
-the missing rows, in CSV order. A run whose sheet write failed is caught up
-by the next run, and re-running never duplicates rows.
+the missing rows, in CSV order. Rows match on date, symbol, and NAV, not on
+retrieved_at, because that only says when one machine fetched the value. A run
+whose sheet write failed is caught up by the next run, and re-running never
+duplicates rows. A revised NAV for the same date gets its own row.
 
 Cells are written as typed: as_of_date becomes a date and nav a number, so
 sheet formulas and sorting work. retrieved_at is written as text. Columns
@@ -25,7 +27,7 @@ COLUMNS = "A:D"
 # Google Sheets serial dates count days from 1899-12-30
 _SHEETS_EPOCH = dt.date(1899, 12, 30)
 
-Key = tuple[dt.date, str, Decimal, str]
+Key = tuple[dt.date, str, Decimal]
 
 
 class SheetLayoutError(Exception):
@@ -62,15 +64,14 @@ def _is_blank(row: Sequence[Any]) -> bool:
 def _sheet_key(row: Sequence[Any], n: int) -> Key:
     cells = list(row) + [""] * (len(HEADER) - len(row))
     try:
-        return (cell_date(cells[0]), str(cells[1]).strip(), cell_decimal(cells[2]),
-                str(cells[3]).strip())
+        return (cell_date(cells[0]), str(cells[1]).strip(), cell_decimal(cells[2]))
     except ValueError as e:
         raise SheetLayoutError(f"sheet row {n} can't be read ({e}); fix or delete it") from e
 
 
 def _csv_key(row: dict[str, str]) -> Key:
     return (dt.date.fromisoformat(row["as_of_date"]), row["symbol"],
-            Decimal(row["nav"]).normalize(), row["retrieved_at"])
+            Decimal(row["nav"]).normalize())
 
 
 def to_sheet_row(row: dict[str, str]) -> list[Any]:
@@ -83,7 +84,7 @@ def to_sheet_row(row: dict[str, str]) -> list[Any]:
 def plan_append(
     csv_rows: Iterable[dict[str, str]], sheet_rows: Sequence[Sequence[Any]]
 ) -> SheetPlan:
-    """Rows to append so the sheet holds every CSV row once."""
+    """Rows to append so the sheet holds each distinct CSV NAV once."""
     data_rows = [r for r in sheet_rows if not _is_blank(r)]
     out: list[list[Any]] = []
     if not data_rows:

@@ -56,7 +56,8 @@ have yet to the end of that tab:
   `retrieved_at` is text. Columns right of D are never touched, so put your
   own formulas there.
 - The sheet catches up by itself: if one run can't reach Google, the next run
-  appends what's missing. Running again never duplicates rows.
+  appends what's missing. Rows match on date, symbol, and NAV, so running again,
+  or on another machine, never duplicates a NAV. A revised NAV gets its own row.
 - An empty tab gets the header row first. If row 1 isn't that header, the
   sheet step fails with a message and writes nothing.
 - A sheet failure makes the run FAIL; `nav.csv` is still written.
