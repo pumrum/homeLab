@@ -414,8 +414,10 @@ Leave `user.name` and `user.email` unset so an accidental commit fails too.
 **Updating later:**
 
 ```powershell
+Stop-ScheduledTask -TaskName "automation-agent"   # it locks its files; check no job is running
 cd $repo; git switch main; git pull --ff-only
 cd $ws; uv sync
+Start-ScheduledTask -TaskName "automation-agent"
 ```
 
 Then run the environment check (B7). To roll back, check out the last good
@@ -461,20 +463,25 @@ Register-ScheduledTask -TaskName "Lock at sign-in" -Action $a -Trigger $t
 
 **Verify:** reboot and walk away. The bot user signs in, then the screen locks.
 
-### B6. Daily job
+### B6. Scheduled jobs
+
+Home Assistant schedules the jobs. On this machine, set up
+[automation-agent](agent/README.md), the MQTT listener that starts them. Task
+Scheduler only starts the agent at sign-in:
 
 ```powershell
-$a = New-ScheduledTaskAction -Execute "$ws\.venv\Scripts\$command.exe" `
-  -WorkingDirectory $ws
-$t = New-ScheduledTaskTrigger -Daily -At 8:00     # pick per process; see its README
-$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
-  -MultipleInstances IgnoreNew -RestartCount 1 -RestartInterval (New-TimeSpan -Minutes 15)
-Register-ScheduledTask -TaskName $process -Action $a -Trigger $t -Settings $s
+$a = New-ScheduledTaskAction -Execute "$ws\.venv\Scripts\automation-agent.exe" -WorkingDirectory $ws
+$t = New-ScheduledTaskTrigger -AtLogOn -User "$env:COMPUTERNAME\robot"
+$s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew `
+  -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName "automation-agent" -Action $a -Trigger $t -Settings $s
 ```
 
-- **StartWhenAvailable:** a run missed while the machine was off starts soon after boot.
-- **ExecutionTimeLimit:** a hung run is stopped after 2 hours.
-- **MultipleInstances IgnoreNew:** never two runs at once.
+- **ExecutionTimeLimit zero:** the agent runs for as long as the user is signed in.
+  Each job has its own time limit in the agent's config.
+- **RestartCount:** the agent comes back if it stops.
+- A schedule that fires while this machine or the agent is down is missed, not
+  caught up. The agent's README has an optional alert for that.
 - Registered by the bot user, the task runs only while that user is signed in,
   which Autologon guarantees.
 
@@ -520,7 +527,7 @@ locked, and (at the scheduled time) a run summary arrives.
 | --- | --- |
 | After a major Edge update | Run `tools\env_check.py`; check `edge://policy` |
 | After a feature update of Windows | Re-run Part A verify lines; check B1 settings survived |
-| Deploying a new release | `git switch main`, `git pull --ff-only`, `uv sync` in `$ws`, `tools\env_check.py` |
+| Deploying a new release | Stop the agent, `git switch main`, `git pull --ff-only`, `uv sync` in `$ws`, `tools\env_check.py`, start the agent |
 | Changing the bot user's password | Update it in Autologon (A10) |
 | Changing any site password | Edit that entry in Credential Manager (B4) |
 | Rebuilding the machine | Parts A and B in order; restore `config.toml` from backup; new keys and secrets |
@@ -555,6 +562,6 @@ Edge stable channel kept up to date, and the paths `C:\src\homeLab` and
 | B3 Repo | Different | Authenticated clone with push rights (`gh auth login`); set `user.name` and your GitHub no-reply `user.email`; work on feature branches. Still `uv sync` in `$ws` after switching branches |
 | B4 Config and secrets | Same locations | Same `config.toml` path. Secrets in your own Credential Manager. Use separate Gmail tokens and SSH key for this machine, so revoking one never breaks the robot. Never copy browser profiles between machines |
 | B5 Lock at sign-in | Skip | |
-| B6 Daily job | **Never** | Two machines running the job would both write to the same outputs. The workstation only runs on demand, with you present |
+| B6 Scheduled jobs | **Never** | Two machines running a job would both write to the same outputs. The workstation only runs on demand, with you present. To test the agent here, run it by hand with a different `topic_prefix` |
 | B7 Verify | Same | Run `tools\env_check.py`; expect WARN for Edge policies and automatic sign-in off. `--lock` is optional here |
 | C Maintenance | Partly | Rerun `tools\env_check.py` after major Edge or Windows updates; deployment rows don't apply |

@@ -37,8 +37,10 @@ def load_toml(path: Path) -> dict[str, Any]:
             f"config file not found: {path}. Copy config.example.toml there and fill it in."
         )
     try:
-        with path.open("rb") as f:
-            return tomllib.load(f)
+        # utf-8-sig also accepts the byte-order mark some Windows tools add
+        return tomllib.loads(path.read_text(encoding="utf-8-sig"))
+    except UnicodeDecodeError as e:
+        raise ConfigError(f"{path} is not valid UTF-8. Save it as UTF-8.") from e
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path} is not valid TOML: {e}") from e
 

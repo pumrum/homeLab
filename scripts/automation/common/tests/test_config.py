@@ -35,6 +35,20 @@ def test_load_toml_invalid(tmp_path):
         load_toml(path)
 
 
+def test_load_toml_accepts_a_byte_order_mark(tmp_path):
+    # Windows PowerShell 5.1's Set-Content -Encoding utf8 writes one
+    path = tmp_path / "config.toml"
+    path.write_bytes(b'\xef\xbb\xbfsymbol = "TEST1"\n')
+    assert load_toml(path) == {"symbol": "TEST1"}
+
+
+def test_load_toml_not_utf8_is_a_clear_error(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_bytes(b'symbol = "\xff"\n')
+    with pytest.raises(ConfigError, match="not valid UTF-8"):
+        load_toml(path)
+
+
 def test_require_str():
     assert require_str({"a": " x "}, "a", "here") == "x"
     with pytest.raises(ConfigError, match="quoted text"):

@@ -119,15 +119,38 @@ the parser would read. Writes nothing to the CSV. Copy the files into
 
 ## Schedule (robot only)
 
-Register as the `robot` user (see machine-prep B6), on `main`:
+Home Assistant schedules it through [automation-agent](../agent/README.md). After
+setting up the agent on the robot, add this to `C:\automation\agent\config.toml`:
 
-```powershell
-$proj = "C:\src\homeLab\scripts\automation"
-$a = New-ScheduledTaskAction -Execute "$proj\.venv\Scripts\fidelity-nav.exe" -WorkingDirectory $proj
-$t = New-ScheduledTaskTrigger -Daily -At 19:30     # after the day's NAVs are published
-$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 30) `
-  -MultipleInstances IgnoreNew -RestartCount 1 -RestartInterval (New-TimeSpan -Minutes 15)
-Register-ScheduledTask -TaskName "fidelity-nav" -Action $a -Trigger $t -Settings $s
+```toml
+[[jobs]]
+name = "fidelity"
+command = "fidelity-nav"
+timeout_minutes = 30
 ```
 
-Never schedule it on the developer workstation.
+Restart the agent, then add the schedule in Home Assistant. It runs at 1:07 AM,
+because the day's NAV may not be updated yet in the evening:
+
+```yaml
+alias: Run fidelity
+mode: single
+triggers:
+  - trigger: time
+    at: "01:07:00"
+actions:
+  - action: mqtt.publish
+    data:
+      topic: automation/fidelity/run
+      payload: run
+```
+
+The **Automation robot** device also gets a `fidelity run` button for manual runs.
+
+Once that works, remove the old Task Scheduler entry so it can't also run:
+
+```powershell
+Unregister-ScheduledTask -TaskName "fidelity-nav" -Confirm:$false
+```
+
+Never run the agent with the real topic prefix on the developer workstation.

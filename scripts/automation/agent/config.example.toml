@@ -1,0 +1,20 @@
+# automation-agent configuration. Copy to C:\automation\agent\config.toml and
+# replace the placeholders. Every text value is quoted. The MQTT login goes in
+# Credential Manager as automation/mqtt, never here.
+
+[mqtt]
+host = "<broker IP address or host name>"
+port = 1883
+tls = false                     # private network only; the agent logs a warning
+topic_prefix = "automation"     # use a different one on a test machine
+
+# To use TLS instead, see "Add TLS" in the README: use the name on the broker's
+# certificate as host, then set port = 8883 and tls = true. Only if your own CA
+# signed that certificate, also add:
+# ca_file = "C:\\automation\\agent\\mqtt-ca.crt"
+
+# One block per job Home Assistant may run. Nothing else can be run.
+[[jobs]]
+name = "<job>"                  # lowercase; used in topics and Home Assistant names
+command = "<console script>"    # its name only, as in the process's pyproject.toml
+timeout_minutes = 30            # a run longer than this is stopped and reported as FAIL

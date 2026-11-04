@@ -98,7 +98,7 @@ class Summary:
         return "\n".join(lines) + "\n"
 
 
-class _MaskingFormatter(logging.Formatter):
+class MaskingFormatter(logging.Formatter):
     # 2026-11-03 12:47:49.275, not Python's default comma before the milliseconds
     default_msec_format = "%s.%03d"
 
@@ -179,7 +179,7 @@ class Run:
         return f"fail_{self._failures:02d}"
 
     def _setup_logging(self) -> None:
-        fmt = _MaskingFormatter(self.masker)
+        fmt = MaskingFormatter(self.masker)
         file_handler = logging.FileHandler(self.run_dir / "run.log", encoding="utf-8")
         console = logging.StreamHandler()
         root = logging.getLogger()

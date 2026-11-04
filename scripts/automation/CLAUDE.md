@@ -42,9 +42,21 @@ maintainer can do (secrets, Google or Home Assistant setup, config values).
 | --- | --- |
 | Developer workstation | Where Claude Code runs: code, tests, commits, PRs. Runs on demand only, never scheduled |
 | Robot test workstation | The maintainer tests branches end to end here. Read-only clone, no Claude Code |
-| Unattended robot | Runs the scheduled jobs from `main`. Read-only clone, no Claude Code |
+| Unattended robot | Runs the jobs from `main`. Read-only clone, no Claude Code |
 
 Live runs happen on the test workstation or robot, by the maintainer.
+
+## Scheduling
+
+Home Assistant is the scheduler. `automation-agent` (the `agent/` package, see its
+README) stays connected to MQTT on the robot and starts jobs in the robot's desktop
+session. To schedule a new process, add a `[[jobs]]` block to the agent's private
+config and a Home Assistant automation that publishes `run`; give the maintainer
+those steps. Don't add Windows Task Scheduler entries for jobs: Task Scheduler only
+starts the agent at sign-in.
+
+The agent never takes a command from a message: it runs only jobs named in its
+config, and each job is a bare console script name. Keep it that way.
 
 ## Paths (Windows 11)
 
@@ -58,8 +70,8 @@ Live runs happen on the test workstation or robot, by the maintainer.
 | `C:\automation\<process>\runs\<yyyyMMdd_HHmmss>\` | Per-run log, report, summary, failure evidence, trace |
 | `C:\automation\<process>\profiles\` | Persistent browser profiles |
 
-- The robot runs as non-admin user `robot`, auto-signed-in and locked, from
-  Task Scheduler. Nothing may wait for a human: no `input()`, no dialogs.
+- The robot runs as non-admin user `robot`, auto-signed-in and locked, with jobs
+  started by `automation-agent`. Nothing may wait for a human: no `input()`, no dialogs.
   The only exception is an explicit MFA wait with a timeout.
 - Find the data folder only through `automation_common.config.process_dir(<process>)`:
   env var `AUTOMATION_DATA_ROOT` (default `C:\automation`) plus the process
@@ -168,7 +180,7 @@ shows how.
 
 - Branches `feature/<process>-<what>`, PR into `main`.
 - The robot currently runs `main`: merging a PR is the release. To deploy, the
-  maintainer runs `git pull` and `uv sync` on the robot.
+  maintainer stops the agent, runs `git pull` and `uv sync`, and restarts it.
 - Release tags are on hold. Don't create or propose them, or write steps that
   depend on them, until the maintainer brings them back.
 - Each process keeps a `CHANGELOG.md`, with new entries under `Unreleased`.

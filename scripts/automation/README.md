@@ -11,6 +11,7 @@ does X."
 
 | Folder | What |
 | --- | --- |
+| `agent/` | `automation-agent`: lets Home Assistant schedule and start jobs over MQTT ([README](agent/README.md)) |
 | `common/` | `automation_common`: run folder and summary, config, secrets, browser, Google Sheets, notify |
 | `<process>/` | One package per automation, with its own README, config example, and changelog |
 | `tools/env_check.py` | Machine check against FakeBank, a fake site served on 127.0.0.1 |
@@ -96,7 +97,9 @@ actions:
    Sheets, use the shared `automation/google-service-account` key and
    `automation_common.sheets.open_worksheet`, and share the sheet with the
    service account as an Editor.
-6. Branch `feature/<process>-<what>`, PR into `main`.
+6. To schedule it, add a job to `automation-agent`'s config and a Home Assistant
+   automation; see [agent/README.md](agent/README.md).
+7. Branch `feature/<process>-<what>`, PR into `main`.
 
 ## Release
 
@@ -106,8 +109,10 @@ The robot runs `main`, so merging a PR is the release. Release tags are on hold.
 2. After the PR is merged, on the robot as `robot`:
 
    ```powershell
+   Stop-ScheduledTask -TaskName "automation-agent"
    cd C:\src\homeLab; git switch main; git pull --ff-only
    cd scripts\automation; uv sync; uv run python tools\env_check.py
+   Start-ScheduledTask -TaskName "automation-agent"
    ```
 
 To roll back, check out the last good commit and run `uv sync` again.
