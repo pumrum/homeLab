@@ -411,7 +411,8 @@ code into it straight from the repo folders. Nothing is copied to
 
 Leave `user.name` and `user.email` unset so an accidental commit fails too.
 
-**Updating later:**
+**Updating later:** press the **Update** button in Home Assistant once its helper
+task is set up (see the [agent's README](agent/README.md#update-the-code)), or by hand:
 
 ```powershell
 Stop-ScheduledTask -TaskName "automation-agent"   # it locks its files; check no job is running
@@ -527,7 +528,7 @@ locked, and (at the scheduled time) a run summary arrives.
 | --- | --- |
 | After a major Edge update | Run `tools\env_check.py`; check `edge://policy` |
 | After a feature update of Windows | Re-run Part A verify lines; check B1 settings survived |
-| Deploying a new release | Stop the agent, `git switch main`, `git pull --ff-only`, `uv sync` in `$ws`, `tools\env_check.py`, start the agent |
+| Deploying a new release | Press **Update** in Home Assistant; or stop the agent, `git switch main`, `git pull --ff-only`, `uv sync` in `$ws`, start the agent. Then `tools\env_check.py` when you're next on the machine |
 | Changing the bot user's password | Update it in Autologon (A10) |
 | Changing any site password | Edit that entry in Credential Manager (B4) |
 | Rebuilding the machine | Parts A and B in order; restore `config.toml` from backup; new keys and secrets |

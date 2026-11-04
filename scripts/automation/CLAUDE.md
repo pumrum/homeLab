@@ -56,7 +56,9 @@ those steps. Don't add Windows Task Scheduler entries for jobs: Task Scheduler o
 starts the agent at sign-in.
 
 The agent never takes a command from a message: it runs only jobs named in its
-config, and each job is a bare console script name. Keep it that way.
+config, and each job is a bare console script name. The one other action is the
+word `update`, which starts a fixed helper task (`agent/update_agent.ps1`) that
+takes no input. Keep it that way.
 
 ## Paths (Windows 11)
 
@@ -180,7 +182,8 @@ shows how.
 
 - Branches `feature/<process>-<what>`, PR into `main`.
 - The robot currently runs `main`: merging a PR is the release. To deploy, the
-  maintainer stops the agent, runs `git pull` and `uv sync`, and restarts it.
+  maintainer presses **Update** in Home Assistant, or stops the agent, runs
+  `git pull` and `uv sync`, and restarts it. Nothing deploys without one of those.
 - Release tags are on hold. Don't create or propose them, or write steps that
   depend on them, until the maintainer brings them back.
 - Each process keeps a `CHANGELOG.md`, with new entries under `Unreleased`.

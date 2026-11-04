@@ -98,6 +98,23 @@ def test_request_is_ignored_while_running():
     assert runner.request(JOB) is True  # can run again once finished
 
 
+def test_is_idle_only_with_nothing_running_or_waiting():
+    seen = []
+    runner, _ = _runner()
+
+    def run(job):
+        seen.append(runner.is_idle())
+        return JobResult(True, "fine", True)
+
+    runner._run = run
+    assert runner.is_idle() is True
+    runner.request(JOB)
+    assert runner.is_idle() is False
+    runner.process_one(runner._queue.get_nowait())
+    assert seen == [False]
+    assert runner.is_idle() is True
+
+
 def test_events_in_order():
     runner, events = _runner()
     runner.request(JOB)
