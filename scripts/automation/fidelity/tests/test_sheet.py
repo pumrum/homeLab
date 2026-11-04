@@ -47,6 +47,20 @@ def test_revised_nav_for_the_same_date_is_its_own_row():
     assert plan.rows[0][2] == 12.35
 
 
+def test_same_nav_fetched_at_another_time_is_not_a_new_row():
+    # e.g. a sheet row written from another machine's run of the same day
+    refetched = ROW2 | {"retrieved_at": "2026-11-03T21:00:00-05:00"}
+    plan = plan_append([ROW1, refetched], [HEADER, SHEET_ROW1, SHEET_ROW2])
+    assert (plan.added, plan.rows) == (0, [])
+
+
+def test_same_nav_on_a_new_date_is_a_new_row():
+    next_day = ROW2 | {"as_of_date": "2026-11-03", "retrieved_at": "2026-11-04T19:30:05-05:00"}
+    plan = plan_append([ROW2, next_day], [HEADER, SHEET_ROW2])
+    assert plan.added == 1
+    assert plan.rows[0][0] == "2026-11-03"
+
+
 def test_text_cells_blank_rows_and_extra_columns_are_tolerated():
     sheet = [
         HEADER + ["my formula"],

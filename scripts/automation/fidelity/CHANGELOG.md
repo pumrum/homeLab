@@ -8,6 +8,9 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
 - Scheduled by Home Assistant through automation-agent instead of Task Scheduler.
 - Accepts a config saved with a byte-order mark, through the shared loader. A file
   that isn't UTF-8 now gets a clear error.
+- The sheet no longer gets a second row for a NAV it already has when the same value
+  was fetched at another time, such as by another machine. Rows match on date,
+  symbol, and NAV.
 - Log timestamps use a period before the milliseconds
   (`12:47:49.275`, not `12:47:49,275`).
 - The webhook gets only `title` ("fidelity") and `message` ("PASS" or
