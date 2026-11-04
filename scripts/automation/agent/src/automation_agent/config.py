@@ -24,9 +24,10 @@ DEFAULT_TIMEOUT_MINUTES = 30
 @dataclass(frozen=True)
 class Mqtt:
     host: str
-    port: int = 1883
-    tls: bool = False
+    port: int = 8883
+    tls: bool = True
     topic_prefix: str = "automation"
+    ca_file: str | None = None  # None: trust the Windows certificate store
 
 
 @dataclass(frozen=True)
@@ -58,7 +59,7 @@ def _mqtt(table: object) -> Mqtt:
     where = "[mqtt]"
     if not isinstance(table, dict):
         raise ConfigError(f"a {where} section is required")
-    reject_unknown_keys(table, {"host", "port", "tls", "topic_prefix"}, where)
+    reject_unknown_keys(table, {"host", "port", "tls", "ca_file", "topic_prefix"}, where)
     host = require_str(table, "host", where)
     prefix = table.get("topic_prefix", "automation")
     if not isinstance(prefix, str):
@@ -66,10 +67,19 @@ def _mqtt(table: object) -> Mqtt:
     _check_placeholders(where, host, prefix)
     if not _PREFIX.match(prefix):
         raise ConfigError(f'{where}: "topic_prefix" must be lowercase letters, digits, - or _')
-    tls = table.get("tls", False)
+    tls = table.get("tls", True)
     if not isinstance(tls, bool):
         raise ConfigError(f'{where}: "tls" must be true or false')
-    return Mqtt(host, _int(table, "port", 1883, 1, 65535, where), tls, prefix)
+    ca_file = table.get("ca_file")
+    if ca_file is not None:
+        ca_file = require_str(table, "ca_file", where)
+        _check_placeholders(where, ca_file)
+        if not tls:
+            raise ConfigError(f'{where}: "ca_file" needs tls = true')
+        if not Path(ca_file).is_file():
+            raise ConfigError(f'{where}: "ca_file" not found: {ca_file}')
+    port = _int(table, "port", 8883 if tls else 1883, 1, 65535, where)
+    return Mqtt(host, port, tls, prefix, ca_file)
 
 
 def _job(table: dict[str, Any], n: int) -> Job:

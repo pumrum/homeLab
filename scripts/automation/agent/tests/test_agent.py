@@ -1,9 +1,10 @@
+import ssl
 from types import SimpleNamespace
 
 from automation_agent.config import Config, Job, Mqtt
-from automation_agent.main import Agent
+from automation_agent.main import Agent, build_client, connect_until_up
 from automation_agent.runner import JobResult
-from automation_common.secrets import SecretMasker
+from automation_common.secrets import Credential, SecretMasker
 
 MQTT = Mqtt("broker.invalid")
 JOB = Job("example", "example-job")
@@ -52,6 +53,39 @@ def _states(client):
 
 def _connect(agent, client, reason=CONNECTED):
     agent.on_connect(client, None, None, reason, None)
+
+
+def test_connect_retries_with_backoff_and_logs_why(caplog):
+    attempts = []
+    waits = []
+
+    class Flaky:
+        def connect(self, host, port):
+            attempts.append((host, port))
+            if len(attempts) < 6:
+                raise ssl.SSLCertVerificationError("certificate verify failed")
+
+    caplog.set_level("ERROR")
+    connect_until_up(Flaky(), MQTT, wait=waits.append)
+    assert attempts[0] == ("broker.invalid", 8883)
+    assert waits == [5, 10, 20, 40, 60]
+    assert "certificate verify failed" in caplog.text
+
+
+def test_build_client_with_tls_requires_a_verified_certificate():
+    client = build_client(Config(MQTT, [JOB]), Credential("made-up", "made-up"))
+    context = client._ssl_context
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+    assert context.minimum_version >= ssl.TLSVersion.TLSv1_2
+
+
+def test_build_client_warns_when_tls_is_off(caplog):
+    caplog.set_level("WARNING")
+    plain = Mqtt("broker.invalid", 1883, False)
+    client = build_client(Config(plain, [JOB]), Credential("made-up", "made-up"))
+    assert client._ssl_context is None
+    assert "unencrypted" in caplog.text
 
 
 def test_connect_announces_everything():

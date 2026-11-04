@@ -10,6 +10,7 @@ import logging
 import logging.handlers
 import ssl
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ from typing import Any
 import paho.mqtt.client as mqtt_client
 
 from automation_agent import PROCESS
-from automation_agent.config import Config, Job, load_config
+from automation_agent.config import Config, Job, Mqtt, load_config
 from automation_agent.runner import JobResult, Runner, run_job
 from automation_agent.topics import (
     FAIL,
@@ -43,6 +44,8 @@ MQTT_SECRET = "automation/mqtt"
 LOG_BYTES = 1_000_000
 LOG_BACKUPS = 5
 QOS = 1
+RETRY_MIN_S = 5
+RETRY_MAX_S = 60
 
 
 class Agent:
@@ -137,8 +140,31 @@ def build_client(cfg: Config, cred: Credential) -> mqtt_client.Client:
     client.will_set(status_topic(cfg.mqtt), OFFLINE, qos=QOS, retain=True)
     client.reconnect_delay_set(min_delay=1, max_delay=60)
     if cfg.mqtt.tls:
-        client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
+        # Verifies the broker's certificate and that it matches the host name
+        client.tls_set(ca_certs=cfg.mqtt.ca_file, cert_reqs=ssl.CERT_REQUIRED)
+    else:
+        log.warning("MQTT TLS is off: the login and messages cross the network unencrypted")
     return client
+
+
+def connect_until_up(
+    client: Any, mqtt: Mqtt, wait: Callable[[float], None] = time.sleep
+) -> None:
+    """First connection: retry forever, logging why each try failed.
+
+    The MQTT library's own retry hides the reason, and a certificate problem
+    would then look like nothing happening.
+    """
+    delay = RETRY_MIN_S
+    while True:
+        try:
+            client.connect(mqtt.host, mqtt.port)
+            return
+        except OSError as e:
+            log.error("can't connect to the MQTT broker: %s: %s; retrying in %ds",
+                      type(e).__name__, e, delay)
+        wait(delay)
+        delay = min(delay * 2, RETRY_MAX_S)
 
 
 def main() -> int:
@@ -165,10 +191,10 @@ def main() -> int:
     client.on_disconnect = agent.on_disconnect
     client.on_message = agent.on_message
     agent.runner.start()
-    client.connect_async(cfg.mqtt.host, cfg.mqtt.port)
     log.info("agent started")
     try:
-        client.loop_forever(retry_first_connection=True)
+        connect_until_up(client, cfg.mqtt)
+        client.loop_forever()
     except KeyboardInterrupt:
         client.publish(status_topic(cfg.mqtt), OFFLINE, qos=QOS, retain=True).wait_for_publish(5)
         client.disconnect()

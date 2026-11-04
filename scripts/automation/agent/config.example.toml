@@ -3,10 +3,12 @@
 # Credential Manager as automation/mqtt, never here.
 
 [mqtt]
-host = "<broker address>"
-port = 1883                     # usually 1883, or 8883 with tls = true
-tls = false
+host = "<broker host name>"     # must match the name on the broker's certificate
+port = 8883
+tls = true                      # verifies the broker's certificate and host name
 topic_prefix = "automation"     # use a different one on a test machine
+# Only if your own CA signed the broker's certificate. Remove the leading "# ":
+# ca_file = "C:\\automation\\agent\\mqtt-ca.crt"
 
 # One block per job Home Assistant may run. Nothing else can be run.
 [[jobs]]
