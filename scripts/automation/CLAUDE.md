@@ -90,7 +90,7 @@ Use these from `automation_common` instead of writing your own:
 | `run` | `Run`: run folder, log with secrets masked, summary, webhook notification, and exit code |
 | `config` | `process_dir`, TOML loading, and validation helpers |
 | `secrets` | Credential Manager entries and encrypted secret files |
-| `browser` | `launch_edge`, `find_first`, `click_until`, `type_date`, tracing, and failure evidence |
+| `browser` | `launch_edge`, `find_first`, `click_until`, `type_date`, `capture_pdf`, tracing, and failure evidence |
 | `sheets` | `open_worksheet`: read a Google Sheet tab, append rows, or replace a column from a cell down |
 | `notify` | The webhook POST (`Run` calls it for you) |
 
@@ -156,6 +156,12 @@ Use these from `automation_common` instead of writing your own:
 - Never use fixed sleeps. Wait for elements, URLs, or `expect_download`.
 - Date inputs: `type_date` (click, select all, type key by key, Tab, read back).
 - Clicks: `click_until` (normal, then forced, then keyboard; verify after each).
+- PDFs: `capture_pdf`, never `expect_download` alone. A PDF shown inline fires no
+  download event, and sites can change how they send one. It makes one request, so
+  single-use links and POSTs work, and it needs no Edge policy or default-app setting.
+  Headless Edge treats PDFs differently, so also test with `AUTOMATION_TEST_HEADED=1`.
+  Playwright keeps downloads in a temporary folder, so Edge's downloads panel can show a
+  file that won't open while a job runs. That's expected.
 - Never start a Playwright trace before any sign-in is complete.
 - Sign-in and MFA stay in each process's own package, not `common/`: they're
   site-specific and the most likely part of a site to change. `automation_common`
