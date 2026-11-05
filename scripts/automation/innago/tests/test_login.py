@@ -41,6 +41,9 @@ FAST = Timeouts(total_s=8, field=2_000, after_submit=2_000, mfa=1_500, settle=30
     (f"{ID}/u/login/password?state=abc", Step.PASSWORD),
     (f"{ID}/u/mfa-email-challenge?state=abc", Step.MFA),
     (f"{ID}/u/passkey-enrollment?state=abc", Step.PASSKEY),
+    (f"{ID}/u/mfa-webauthn-platform-enrollment?state=abc", Step.PASSKEY),
+    (f"{ID}/u/mfa-webauthn-roaming-enrollment?state=abc", Step.PASSKEY),
+    (f"{ID}/u/mfa-webauthn-platform-challenge?state=abc", Step.MFA),
     (f"{ID}/authorize", Step.OTHER),
     ("about:blank", Step.OTHER),
 ])
@@ -61,6 +64,13 @@ PASSWORD_PAGE = """<form method="post"><input id="password" name="password" type
 PASSKEY_PAGE = """<h1>Create a passkey for faster sign-in</h1>
 <form method="post" action="/create"><button type="submit">Continue</button></form>
 <a href="{after}">Remind me later</a>"""
+# Mirrors the real prompt's wording. It never says "passkey"
+REAL_PASSKEY_PAGE = """<h1>Log In Faster on This Device</h1>
+<p>Trust this device? You can quickly and securely log in the next time using this
+device's fingerprint or face recognition.</p>
+<form method="post" action="/create"><button type="submit">Continue</button></form>
+<form method="post" action="/remind-later"><button type="submit">Remind me later</button></form>
+<form method="get" action="{after}"><button type="submit">Not on this device</button></form>"""
 STUCK_PASSKEY_PAGE = """<h1>Create a passkey</h1>
 <form method="post" action="/create"><button type="submit">Continue</button></form>"""
 MFA_PAGE = "<h1>Enter the code we sent you</h1><input name='code'>"
@@ -272,6 +282,8 @@ class FakeSite:
                     self._redirect(route, self.after_password or f"{APP}/dashboard")
             case ("/u/passkey-enrollment", _):
                 self._html(route, PASSKEY_PAGE.format(after=f"{APP}/dashboard"))
+            case ("/u/mfa-webauthn-platform-enrollment", _):
+                self._html(route, REAL_PASSKEY_PAGE.format(after=f"{APP}/dashboard"))
             case ("/u/passkey-stuck", _):
                 self._html(route, STUCK_PASSKEY_PAGE)
             case ("/u/mfa-email-challenge", _):
@@ -393,6 +405,16 @@ def test_a_hosted_passkey_prompt_is_skipped_and_never_accepted(open_site):
     sign_in(page, SITE, CRED, FAST)
     assert page.url == f"{APP}/dashboard"
     assert "/create" not in site.get_paths
+
+
+def test_the_real_passkey_prompt_is_declined_for_good(open_site):
+    # Its address starts like MFA's, and the job once waited there for a code that never comes
+    site = FakeSite(after_password=f"{ID}/u/mfa-webauthn-platform-enrollment?state=c")
+    page = open_site(site)
+    sign_in(page, SITE, CRED, FAST)
+    assert page.url.split("?")[0] == f"{APP}/dashboard"
+    assert "/create" not in site.get_paths
+    assert "/remind-later" not in site.get_paths
 
 
 def test_a_passkey_prompt_with_no_way_to_skip_fails(open_site):

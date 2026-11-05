@@ -4,8 +4,9 @@ A remembered browser profile can skip any of the steps, and MFA and the passkey 
 come and go, so nothing assumes an order. Each pass works out where the page is and
 handles that one step, until the page is signed in or the time runs out.
 
-The email and password steps have run on the real site. It hasn't shown a passkey prompt
-or MFA to the job yet, so those come from how this kind of hosted sign-in usually works.
+The email and password steps have run on the real site. The passkey prompt's address and
+buttons come from a screenshot of the real page, and the job has only declined it on a
+test site. The job has reached the real MFA page and waited, but no code has gone through.
 """
 
 import logging
@@ -28,7 +29,10 @@ log = logging.getLogger(__name__)
 EMAIL_FIELD = ["input#username", "input[name='username']", "input[type='email']"]
 PASSWORD_FIELD = ["input#password", "input[name='password']", "input[type='password']"]
 # Only ways to decline. Never add one that creates a passkey, such as "Continue" alone.
+# The first is the real site's, and it declines for good rather than asking again.
 PASSKEY_SKIP = [
+    ":is(button,a):text-matches('^not on this device$', 'i')",
+    "input[type='submit'][value='Not on this device' i]",
     ":is(button,a):text-matches('^(remind me later|not now|maybe later|skip|skip for now)$', 'i')",
     ":is(button,a):text-matches('^continue without', 'i')",
 ]
@@ -79,10 +83,11 @@ def classify(url: str, app_url: str) -> Step:
         return Step.PASSWORD
     if "/u/login" in path:
         return Step.EMAIL
+    # Before MFA: the real offer to use a fingerprint or face is at /u/mfa-webauthn-...-enrollment
+    if "/u/passkey" in path or ("webauthn" in path and "enrollment" in path):
+        return Step.PASSKEY
     if "/u/mfa" in path or path.startswith("/mfa"):
         return Step.MFA
-    if "/u/passkey" in path:
-        return Step.PASSKEY
     return Step.OTHER
 
 

@@ -60,7 +60,7 @@ Each step is worked out from the page, because any of them can be skipped:
 | Already signed in | Carries on, because the profile is still valid |
 | Email, then password | Fills each in once, from `innago/login` |
 | Rejected email or password | Fails right away. Never retried, so it can't lock the account |
-| Passkey prompt | Declines it, and fails if there's no way to decline. Never creates one |
+| Passkey prompt, like "Log In Faster on This Device" | Clicks `Not on this device`, and fails if there's no way to decline. Never creates one |
 | MFA | Waits 5 minutes for someone to finish it in the window, then fails |
 | CAPTCHA or bot check | Fails right away. Never worked around |
 | Anything else | Fails after 30 seconds on the same page |
