@@ -10,6 +10,7 @@ Latest tested version: 12.x
 > * Update new user process to include setting subtitle preference to Forced only
 > * Create prerequisite section (dns, caddy, etc)
 > * Disable realtime monitoring
+> * Test the latest stable version of Jellyfin
 
 ---
 
