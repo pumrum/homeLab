@@ -66,7 +66,7 @@ class Timeouts:
     total_s: float = 120  # the whole sign-in, not counting an MFA wait
     field: int = 15_000  # a field or button appearing
     after_submit: int = 30_000  # the page moving on after a submit
-    mfa: int = 300_000  # someone entering a code
+    mfa: int = 60_000  # someone entering a code; must leave room in the job's time limit
     settle: int = 3_000  # a passkey prompt appearing after sign-in
 
 
@@ -143,13 +143,13 @@ def _skip_passkey(page: Page, t: Timeouts, required: bool) -> bool:
 
 
 def _wait_for_mfa(page: Page, site: Site, t: Timeouts) -> None:
-    minutes = t.mfa / 60_000
-    log.warning("sign-in: the site wants an MFA code on %s; waiting up to %.0f minutes",
-                _path(page), minutes)
+    seconds = t.mfa // 1000
+    log.warning("sign-in: the site wants an MFA code on %s; waiting up to %d seconds",
+                _path(page), seconds)
     try:
         page.wait_for_url(lambda url: classify(url, site.app_url) is not Step.MFA, timeout=t.mfa)
     except PwTimeout:
-        raise LoginError(f"MFA was not completed within {minutes:.0f} minutes") from None
+        raise LoginError(f"MFA was not completed within {seconds} seconds") from None
 
 
 def sign_in(page: Page, site: Site, credential: Credential,

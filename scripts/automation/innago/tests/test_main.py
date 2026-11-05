@@ -212,7 +212,7 @@ def test_only_an_mfa_failure_is_named_in_the_notification(run):
     run.summary.record("login", "site", Status.FAILED, "the site did not accept the password")
     assert notification_message(run.summary) == "FAIL"
     run.summary.items.clear()
-    run.summary.record("login", "site", Status.FAILED, "MFA was not completed within 5 minutes")
+    run.summary.record("login", "site", Status.FAILED, "MFA was not completed within 60 seconds")
     assert notification_message(run.summary) == "FAIL: MFA needed"
 
 
