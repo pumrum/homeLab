@@ -11,9 +11,9 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
   a passkey prompt (always declined), MFA (a timed wait), and a CAPTCHA (fails).
   A rejected email or password is never sent again.
 - `innago-invoices` switches the list to `Not Grouped`, filters to the current month if
-  it doesn't show one invoice per listed unit, and sorts by unit. It opens each invoice,
-  clicks its Download button, saves the PDF with `capture_pdf`, which handles it opening
-  in a new tab, and names each one
+  it doesn't show one invoice per listed unit, and reads each row's unit and invoice
+  number. It opens each invoice's own page, clicks its Download button, saves the PDF
+  with `capture_pdf`, which handles it opening in a new tab, and names each one
   `<due date>_<unit>_<invoice number>-1.pdf` from the PDF's text. The naming logic
   comes from `scripts/innago_renameInvoices.py`, except that a unit or invoice number
   must now contain a digit, so labels like `Invoice Date` can't be taken for values.

@@ -18,9 +18,10 @@ TARGET = "data/invoices/2026-01/2026-01-01_{unit}_9000{unit}-1.pdf"
 class FakeSource:
     """Rows are PDF bytes, or an Exception to raise when that row is downloaded."""
 
-    def __init__(self, rows, open_error=None):
+    def __init__(self, rows, open_error=None, labels=None):
         self.rows = rows
         self.open_error = open_error
+        self.labels = labels
         self.evidence = []
         self.structure = []
 
@@ -28,6 +29,9 @@ class FakeSource:
         if self.open_error:
             raise self.open_error
         return len(self.rows)
+
+    def label(self, index):
+        return self.labels[index] if self.labels else f"row {index + 1}"
 
     def download(self, index, dest):
         row = self.rows[index]
@@ -121,6 +125,23 @@ def test_one_failed_download_does_not_stop_the_others(run, row, tmp_path):
     assert _status(run, "row 2") is Status.FAILED
     assert _status(run, "1002") is Status.FAILED  # the check for missing units still runs
     assert source.evidence == ["fail_01"]
+
+
+def test_a_failed_unit_from_the_list_is_reported_once_by_its_unit(run, row, tmp_path):
+    source = FakeSource([row("1001"), RuntimeError("button went away"), row("1003")],
+                        labels=list(UNITS))
+    download_stage(run, source, CFG, tmp_path, dump=False)
+    failures = [i for i in run.summary.items if i.status is Status.FAILED]
+    assert [i.item for i in failures] == ["1002"]
+    assert "button went away" in failures[0].detail
+
+
+def test_a_pdf_for_a_different_unit_than_its_row_is_not_saved(run, row, tmp_path):
+    source = FakeSource([row("1001"), row("1003"), row("1003")], labels=list(UNITS))
+    download_stage(run, source, CFG, tmp_path, dump=False)
+    detail = _items(run)[("invoice", "1002")].detail
+    assert "the list says unit 1002, but the PDF says 1003" in detail
+    assert _status(run, "1003") is Status.OK
 
 
 def test_a_pdf_that_cannot_be_named_is_kept(run, row, tmp_path):

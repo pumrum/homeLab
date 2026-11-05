@@ -92,8 +92,7 @@ LIST_PAGE = """<div class="filter-group"><div class="simple-fake-select"
   <button class="btn btn-primary" onclick="applyFilters()">Apply Filters</button>
 </div>
 <span class="invoice-counter" id="counter"></span>
-<table><thead><tr><th><span class="cursor-pointer" onclick="sortByUnit()">Unit</span></th></tr>
-</thead><tbody id="rows">__ROWS__</tbody></table>
+<table><tbody id="rows">__ROWS__</tbody></table>
 <script>
   let grouped = __GROUPED__, filteredOut = __FILTERED_OUT__;
   const fixedCounter = "__COUNTER__";
@@ -106,29 +105,11 @@ LIST_PAGE = """<div class="filter-group"><div class="simple-fake-select"
     document.getElementById('counter').textContent = fixedCounter || `${shown} of ${shown}`;
   }
   function chooseNotGrouped() {
-    grouped = false;
+    // Like the real site: the table reloads, reading "0 of 0" with no rows until it's back
     document.getElementById('group-label').textContent = 'Not Grouped';
     document.getElementById('group-menu').style.display = 'none';
-    refresh();
-  }
-  function sortByUnit() {
-    // Like the real site: the table is replaced by a placeholder with no rows or counter
-    // while it reloads, and then comes back sorted
-    const body = document.getElementById('rows');
-    const counter = document.getElementById('counter');
-    const reload = () => {
-      const rows = [...body.querySelectorAll('tr')];
-      rows.forEach(row => row.remove());
-      counter.style.display = 'none';
-      setTimeout(() => {
-        rows.sort((a, b) => a.getAttribute('data-unit').localeCompare(b.getAttribute('data-unit')));
-        rows.forEach(row => body.appendChild(row));
-        counter.style.display = '';
-        refresh();
-      }, 400);
-    };
-    const lag = __SORT_LAG_MS__;
-    if (lag) { setTimeout(reload, lag); } else { reload(); }
+    if (!fixedCounter) { document.getElementById('counter').textContent = '0 of 0'; }
+    setTimeout(() => { grouped = false; refresh(); }, 400);
   }
   function clearFilters() {
     // The real panel's behavior here is unknown, so this takes the harder path: it closes
@@ -149,18 +130,24 @@ LIST_PAGE = """<div class="filter-group"><div class="simple-fake-select"
   }
   refresh();
 </script>"""
-LIST_ROW = """<tr class="income-table-row" data-unit="100{n}"
-    onclick="location='/invoices/90000{n}/detail/90000{n}/false/false'">
-  <td class="dv-in-unit"><p>100{n}</p></td></tr>"""
-LEFT_PANE_ROW = """<tr class="income-table-row"
-    onclick="location='/invoices/90000{n}/detail/90000{n}/false/false'">
-  <td class="dv-in-due"><p>Jan 01, 2026</p></td></tr>"""
+LIST_ROW = """<tr class="income-table-row">
+  <td class="dv-in-id"><p>90000{n}</p></td><td class="dv-in-unit"><p>100{n}</p></td></tr>"""
 DETAIL_PAGE = """<div style="display:none">
   <button class="dropdown-item" onclick="location='/hidden-download'">Download</button>
   <button class="dropdown-item" onclick="location='/delete'">Delete</button></div>
-<table><tbody>{left_pane}</tbody></table>
+<div id="pop" style="display:{pop_display};position:fixed;left:150px;top:150px;width:300px;
+    height:200px;background:white;z-index:9"><a href="/edit">Edit Invoice</a></div>
+<script>
+  // A status badge's hover pop-up: open while the mouse stays parked, gone once it moves off
+  document.addEventListener('mousemove', e => {{
+    if (e.clientX < 150 || e.clientY < 150) {{
+      document.getElementById('pop').style.display = 'none';
+      window.popupClosed = true;
+    }}
+  }});
+</script>
 <div class="detail-sticky-header"><h3>Invoice: {heading}</h3></div>
-<button class="btn btn-innago-primary"
+<button class="btn btn-innago-primary" style="position:fixed;left:200px;top:200px"
   onclick="window.open('{base}/invoice-{n}.pdf')">Download</button>
 <button onclick="location='/remind'">Remind</button>
 <button onclick="location='/record-payment'">Record Payment</button>
@@ -221,7 +208,7 @@ class FakeSite:
 
     def __init__(self, signed_in=False, after_password=None, password_ok=True,
                  home="<h1>Dashboard</h1>", pdfs=(), counter=None, grouped=True,
-                 filtered_out=False, heading=None, sort_lag_ms=0):
+                 filtered_out=False, heading=None, hover_popup=False):
         self.signed_in = signed_in
         self.after_password = after_password  # the path shown between password and app
         self.password_ok = password_ok
@@ -231,7 +218,7 @@ class FakeSite:
         self.grouped = grouped
         self.filtered_out = filtered_out
         self.heading = heading
-        self.sort_lag_ms = sort_lag_ms
+        self.hover_popup = hover_popup
         self.posts = []
         self.get_paths = []
         self.server = None
@@ -290,15 +277,13 @@ class FakeSite:
             page = (LIST_PAGE.replace("__ROWS__", rows).replace("__GROUP_LABEL__", label)
                     .replace("__GROUPED__", "true" if self.grouped else "false")
                     .replace("__FILTERED_OUT__", "true" if self.filtered_out else "false")
-                    .replace("__SORT_LAG_MS__", str(self.sort_lag_ms))
                     .replace("__COUNTER__", self.counter or ""))
             self._html(route, page)
         elif "/detail/" in path:
             invoice_id = path.split("/detail/")[1].split("/")[0]
-            left_pane = "".join(LEFT_PANE_ROW.format(n=n) for n in range(1, count + 1))
             self._html(route, DETAIL_PAGE.format(
-                base=self.server.base, n=invoice_id[-1], left_pane=left_pane,
-                heading=self.heading or invoice_id))
+                base=self.server.base, n=invoice_id[-1], heading=self.heading or invoice_id,
+                pop_display="block" if self.hover_popup else "none"))
         else:
             self._html(route, self.home)
 
@@ -468,28 +453,41 @@ def _opened_list(open_site, pdfs, session_cookie=True, **site_options):
     return site, page, InvoiceList(page, f"{APP}/invoices", len(pdfs))
 
 
-@pytest.mark.parametrize("sort_lag_ms", [0, 200], ids=["reloads at once", "reloads a bit later"])
-def test_the_list_is_ungrouped_and_sorted_by_unit(open_site, pdf_of, sort_lag_ms):
-    _, page, source = _opened_list(open_site, [pdf_of(), pdf_of(), pdf_of()],
-                                   sort_lag_ms=sort_lag_ms)
-    assert source.open() == 3  # sorting reloads the table, which must not count as no rows
+def test_the_list_reads_every_invoice_by_unit_without_filtering(open_site, pdf_of):
+    # The table reloads after Not Grouped, and that mustn't look like a short list
+    _, page, source = _opened_list(open_site, [pdf_of(), pdf_of(), pdf_of()])
+    assert source.open() == 3
     assert page.locator("#group-label").inner_text() == "Not Grouped"
-    assert page.locator("td.dv-in-unit").all_inner_texts() == ["1001", "1002", "1003"]
+    assert page.evaluate("window.filtersCleared") is None
+    assert [source.label(index) for index in range(3)] == ["1001", "1002", "1003"]
+
+
+def test_each_invoice_opens_at_its_own_address(open_site, pdf_of, tmp_path):
+    _, page, source = _opened_list(open_site, [pdf_of(), pdf_of()])
+    source.open()
+    source.download(1, tmp_path / "invoice.pdf")
+    assert page.url == f"{APP}/invoices/900002/detail/900002/false/false"
+
+
+def test_the_address_is_built_with_or_without_a_trailing_slash():
+    wanted = f"{APP}/list/42/detail/42/false/false"
+    assert invoices_fetch.detail_url(f"{APP}/list", "42") == wanted
+    assert invoices_fetch.detail_url(f"{APP}/list/", "42") == wanted
+
+
+def test_a_mouse_left_over_a_status_badge_cannot_block_download(open_site, pdf_of, tmp_path):
+    # This failed a real run: a pop-up opened on hover and covered the Download button
+    pdfs = [pdf_of(), pdf_of()]
+    _, page, source = _opened_list(open_site, pdfs, hover_popup=True)
+    source.open()
+    source.download(0, tmp_path / "invoice.pdf")
+    assert (tmp_path / "invoice.pdf").read_bytes() == pdfs[0]
+    assert page.evaluate("window.popupClosed") is True
 
 
 def test_a_list_already_not_grouped_is_left_as_it_is(open_site, pdf_of):
     _, _, source = _opened_list(open_site, [pdf_of(), pdf_of()], grouped=False)
     assert source.open() == 2
-
-
-def test_a_list_already_sorted_is_not_clicked_again(open_site, pdf_of):
-    # One row is always in order. A click here would reload the table for nothing
-    _, page, source = _opened_list(open_site, [pdf_of()])
-    page.add_init_script("window.addEventListener('load', () => { "
-                         "const original = sortByUnit; window.sortCalls = 0; "
-                         "sortByUnit = () => { window.sortCalls++; original(); }; });")
-    assert source.open() == 1
-    assert page.evaluate("window.sortCalls") == 0
 
 
 def test_a_short_list_is_filtered_to_this_month_by_due_date(open_site, pdf_of):
@@ -654,12 +652,11 @@ def test_a_wrong_password_saves_evidence_and_no_secret(whole_run, pdf_of):
 
 def test_a_missing_invoice_fails_and_keeps_a_trace(whole_run, pdf_of):
     pdfs = _two_units(pdf_of)
-    pdfs[1] = pdf_of(unit="1001", number="90002222")  # a second one for 1001, none for 1002
+    pdfs[1] = pdf_of(unit="1001", number="90002222")  # the row for 1002 gets 1001's PDF
     assert whole_run.start(FakeSite(signed_in=True, pdfs=pdfs)) == 1
     run_dir = _run_dirs(whole_run.data)[0]
     report = (run_dir / "report.txt").read_text(encoding="utf-8")
-    assert "second invoice" in report
-    assert "no usable invoice" in report
+    assert "the list says unit 1002, but the PDF says 1001" in report
     assert (run_dir / "trace.zip").exists()
 
 

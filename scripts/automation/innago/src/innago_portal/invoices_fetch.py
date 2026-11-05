@@ -1,11 +1,10 @@
-"""Browser step: open the invoice list and get one invoice at a time.
+"""Browser step: read the invoice list, then get each invoice from its own page.
 
 The list opens grouped by property, with its invoice rows hidden. So it's switched to
-"Not Grouped", filtered to this month if it doesn't show every invoice, and sorted by
-unit. The first row opens a detail page with a left pane listing the same rows, and each
-later invoice is opened from there. Its Download button opens the PDF in a new tab, which
-capture_pdf saves. The selectors come from a --capture of the real site, except that the
-filter panel's were only seen hidden, so that path hasn't run on the real site.
+"Not Grouped", and filtered to this month if it doesn't show one invoice per unit. Each
+row's unit and invoice number are read from there. Every invoice has a fixed address built
+from its number, and its Download button opens the PDF in a new tab, which capture_pdf
+saves. The selectors come from runs against the real site.
 
 Download sits right beside Remind, Record Payment, Edit Invoice, and Delete, and hidden
 copies of all of them are in a dropdown. So the button must be visible and its text must
@@ -15,6 +14,7 @@ be exactly "Download", and nothing here ever matches the others.
 import datetime as dt
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from playwright.sync_api import Page, expect
@@ -28,12 +28,12 @@ PAGE_TIMEOUT_MS = 45_000
 DOWNLOAD_TIMEOUT_MS = 60_000
 SETTLE_TIMEOUT_MS = 15_000
 
-ROWS = ["tr.income-table-row"]
+ROWS = "tr.income-table-row"
+ROW_INVOICE_ID = "td.dv-in-id"
+ROW_UNIT = "td.dv-in-unit"
 COUNTER = ".invoice-counter"  # like "7 of 7"
 GROUPING = ".filter-group .simple-fake-select"
 NOT_GROUPED_OPTION = ".simple-fake-select-opt a:text-is('Not Grouped')"
-UNIT_HEADER = "th:has-text('Unit') span.cursor-pointer"
-UNIT_CELLS = "tr.income-table-row:visible td.dv-in-unit"
 DETAIL_HEADING = ".detail-sticky-header h3"
 DOWNLOAD_BUTTON = ["button.btn-innago-primary:text-is('Download')", "button:text-is('Download')"]
 
@@ -44,11 +44,21 @@ APPLY_FILTERS = "button:text-is('Apply Filters')"
 RANGE_CHECKBOXES = {"senton": False, "dueon": True, "paidon": False, "disbursedon": False}
 
 _COUNTS = re.compile(r"(\d+)\s+of\s+(\d+)")
-_DETAIL_ID = re.compile(r"/(\w+)/detail/")
+_INVOICE_ID = re.compile(r"^\w+$")  # it goes in an address
 
 
 class FetchError(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class ListedInvoice:
+    unit: str
+    invoice_id: str
+
+
+def detail_url(list_url: str, invoice_id: str) -> str:
+    return f"{list_url.rstrip('/')}/{invoice_id}/detail/{invoice_id}/false/false"
 
 
 def _labeled_select(label: str) -> str:
@@ -62,7 +72,8 @@ class InvoiceList:
         self._page = page
         self._url = url
         self._expected = expected
-        self._rows = page.locator(ROWS[0]).filter(visible=True)
+        self._rows = page.locator(ROWS).filter(visible=True)
+        self._invoices: list[ListedInvoice] = []
 
     def _show_not_grouped(self) -> None:
         grouping, _ = find_first([self._page], [GROUPING], PAGE_TIMEOUT_MS)
@@ -74,6 +85,13 @@ class InvoiceList:
         grouping.click()
         self._page.locator(NOT_GROUPED_OPTION).click()
         expect(grouping).to_contain_text("Not Grouped", timeout=SETTLE_TIMEOUT_MS)
+
+    def _wait_for_some_rows(self) -> None:
+        """The table reloads after each change, with no rows until it's back."""
+        try:
+            expect(self._rows).not_to_have_count(0, timeout=SETTLE_TIMEOUT_MS)
+        except AssertionError:
+            log.warning("invoice list: no rows after %ds", SETTLE_TIMEOUT_MS // 1000)
 
     def _settle(self) -> tuple[int, int] | None:
         """Wait for every row the page says it's showing. Returns its shown and total counts."""
@@ -115,64 +133,50 @@ class InvoiceList:
         except AssertionError:
             log.warning("invoice list: still %d row(s) after filtering", self._rows.count())
 
-    def _sort_by_unit(self) -> None:
-        """Only for a steady order: a failed sort is logged, because every PDF is checked anyway.
-
-        Sorting reloads the table, and its rows vanish while it does. So the order is read
-        before the click, and the click counts as done once the rows are back in that order.
-        """
-        cells = self._page.locator(UNIT_CELLS)
-        current = [text.strip() for text in cells.all_inner_texts()]
-        wanted = sorted(current)
-        if current == wanted:
-            return
-        self._page.locator(UNIT_HEADER).filter(visible=True).first.click()
-        try:
-            expect(cells).to_have_text(wanted, timeout=SETTLE_TIMEOUT_MS)
-        except AssertionError:
-            log.warning("invoice list: the rows didn't sort by unit; carrying on")
+    def _read_rows(self) -> list[ListedInvoice]:
+        invoices = []
+        for index in range(self._rows.count()):
+            row = self._rows.nth(index)
+            invoice_id = row.locator(ROW_INVOICE_ID).inner_text().strip()
+            if not _INVOICE_ID.match(invoice_id):
+                raise FetchError(f"row {index + 1} has no usable invoice number")
+            invoices.append(ListedInvoice(row.locator(ROW_UNIT).inner_text().strip().upper(),
+                                          invoice_id))
+        return sorted(invoices, key=lambda invoice: invoice.unit)
 
     def open(self, today: dt.date | None = None) -> int:
-        """Load the list, get every invoice showing, and return how many there are."""
+        """Load the list, read every invoice showing, and return how many there are."""
         self._page.goto(self._url, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
         self._show_not_grouped()
+        self._wait_for_some_rows()
         counts = self._settle()
         if self._rows.count() != self._expected:
             self._filter_to_this_month(today or dt.date.today())
+            self._wait_for_some_rows()
             counts = self._settle()
         if counts is not None and counts[0] < counts[1]:
             raise FetchError(f"the list shows only {counts[0]} of {counts[1]} invoices")
-        self._sort_by_unit()
-        self._settle()  # in case the sort failed while the table was still reloading
-        count = self._rows.count()
-        log.info("invoice list: %d row(s)", count)
-        return count
+        self._invoices = self._read_rows()
+        log.info("invoice list: %d invoice(s)", len(self._invoices))
+        return len(self._invoices)
 
-    def _open_invoice(self, index: int) -> str:
-        """Click a row in the list or the left pane, and wait until that invoice is showing.
-
-        The address changes before the page does, and Download would then get the previous
-        invoice. So this waits for the heading to show the new invoice's ID.
-        """
-        before = self._page.url
-        # The first cell, because hovering the status cell opens a pop-up with other actions
-        self._rows.nth(index).locator("td").first.click()
-        self._page.wait_for_url(lambda url: url != before and "/detail/" in url,
-                                timeout=PAGE_TIMEOUT_MS)
-        found = _DETAIL_ID.search(self._page.url)
-        if found is None:
-            raise FetchError(f"row {index + 1} opened a page without an invoice ID")
-        heading = self._page.locator(DETAIL_HEADING).filter(visible=True).first
-        expect(heading).to_contain_text(found[1], timeout=PAGE_TIMEOUT_MS)
-        return found[1]
+    def label(self, index: int) -> str:
+        """The unit the list gives for this row, for reporting and to check against its PDF."""
+        return self._invoices[index].unit or f"row {index + 1}"
 
     def download(self, index: int, dest: Path) -> None:
-        """Save one row's PDF to `dest`. The site's own file name is random, so it's ignored."""
-        invoice_id = self._open_invoice(index)
+        """Save one invoice's PDF to `dest`. The site's own file name is random, so it's ignored."""
+        invoice_id = self._invoices[index].invoice_id
+        self._page.goto(detail_url(self._url, invoice_id), wait_until="domcontentloaded",
+                        timeout=PAGE_TIMEOUT_MS)
+        heading = self._page.locator(DETAIL_HEADING).filter(visible=True).first
+        expect(heading).to_contain_text(invoice_id, timeout=PAGE_TIMEOUT_MS)
+        # A mouse left over a status badge opens a pop-up that can cover the button
+        self._page.mouse.move(0, 0)
         button, selector = find_first([self._page], DOWNLOAD_BUTTON, PAGE_TIMEOUT_MS)
         if button is None:
             raise FetchError(f"invoice {invoice_id} has no visible Download button")
-        log.info("row %d: downloading invoice %s via %s", index + 1, invoice_id, selector)
+        log.info("%s: downloading invoice %s via %s", self.label(index), invoice_id, selector)
         capture_pdf(self._page, button.click, dest, DOWNLOAD_TIMEOUT_MS)
 
     def save_evidence(self, run_dir: Path, prefix: str) -> None:

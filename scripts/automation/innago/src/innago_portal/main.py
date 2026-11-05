@@ -36,6 +36,7 @@ log = logging.getLogger(__name__)
 
 class InvoiceSource(Protocol):
     def open(self) -> int: ...
+    def label(self, index: int) -> str: ...
     def download(self, index: int, dest: Path) -> None: ...
     def save_evidence(self, run_dir: Path, prefix: str) -> None: ...
     def save_structure(self, run_dir: Path, prefix: str) -> None: ...
@@ -81,9 +82,10 @@ def _fail_units(run: Run, units: tuple[str, ...], detail: str) -> None:
 
 
 def process_row(run: Run, source: InvoiceSource, index: int, cfg: Config, data_dir: Path,
-                seen: set[str], dump: bool) -> None:
+                seen: set[str], failed: set[str], dump: bool) -> None:
     """Download, name, and save one invoice. Records the result; never raises."""
-    label = f"row {index + 1}"
+    listed_as = source.label(index)
+    label = listed_as
     step = "download"
     download = run.run_dir / "downloads" / f"invoice_{index + 1:02d}.pdf"
     try:
@@ -91,6 +93,8 @@ def process_row(run: Run, source: InvoiceSource, index: int, cfg: Config, data_d
         step = "read"
         text = pdf_text(download)
         invoice = parse_invoice(text)
+        if listed_as in cfg.invoices.units and invoice.unit != listed_as:
+            raise ValueError(f"the list says unit {listed_as}, but the PDF says {invoice.unit}")
         label = invoice.unit
         if invoice.unit not in cfg.invoices.units:
             raise ValueError(f"unit {invoice.unit} isn't in the config's list of units")
@@ -108,6 +112,7 @@ def process_row(run: Run, source: InvoiceSource, index: int, cfg: Config, data_d
             source.save_evidence(run.run_dir, run.next_failure_prefix())
         # Anything not saved stays in the run folder's downloads for a look
         run.summary.record("invoice", label, Status.FAILED, f"{step}: {_why(e)}")
+        failed.add(label)
         return
     status = Status.UNCHANGED if outcome is Outcome.UNCHANGED else Status.OK
     run.summary.record("invoice", label, status, f"{outcome} {invoice.file_name}")
@@ -128,10 +133,11 @@ def download_stage(run: Run, source: InvoiceSource, cfg: Config, data_dir: Path,
     if dump:
         _save_structure(run, source)
     seen: set[str] = set()
+    failed: set[str] = set()  # already reported, so they aren't reported again as missing
     for index in range(count):
-        process_row(run, source, index, cfg, data_dir, seen, dump)
+        process_row(run, source, index, cfg, data_dir, seen, failed, dump)
     for unit in units:
-        if unit not in seen:
+        if unit not in seen and unit not in failed:
             run.summary.record("invoice", unit, Status.FAILED,
                                "no usable invoice in the site's default view")
 

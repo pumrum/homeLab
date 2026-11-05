@@ -9,9 +9,9 @@ sign-in, one browser profile, and one config file, so a remembered device carrie
 
 ## innago-invoices
 
-Each run signs in, opens the invoice list, switches it to `Not Grouped`, sorts it by
-unit, and downloads every invoice, opening the first from the list and the rest from the
-detail page's left pane. Each file is saved as:
+Each run signs in, opens the invoice list, switches it to `Not Grouped`, and reads each
+row's unit and invoice number. It then opens each invoice's own page directly and clicks
+Download. Each file is saved as:
 
 ```text
 C:\automation\innago\data\invoices\<yyyy-MM>\<due date>_<unit>_<invoice number>-1.pdf
@@ -19,7 +19,7 @@ C:\automation\innago\data\invoices\<yyyy-MM>\<due date>_<unit>_<invoice number>-
 
 - **It takes the period the site shows.** It only chooses a month if the list doesn't
   show one invoice per listed unit. Then it clears the filters and filters to the current
-  month by due date alone. That path hasn't run on the real site yet.
+  month by due date alone.
 - **The name comes from the PDF.** The site gives each download a random name, which is
   ignored. The `-1` matches what `scripts/innago_mergeInvoices.py` expects. This job
   doesn't merge anything.
@@ -41,6 +41,7 @@ C:\automation\innago\data\invoices\<yyyy-MM>\<due date>_<unit>_<invoice number>-
 | The list shows fewer invoices than it has, like `5 of 7` | Every unit fails and nothing is saved |
 | A listed unit has no invoice in the view | That unit fails. The others still save |
 | A PDF is for a unit that isn't in the config | Not saved. That item fails |
+| A PDF's unit doesn't match the unit in its row | Not saved. That item fails |
 | A second invoice for the same unit | The first is saved, the second isn't. That item fails |
 | A PDF is missing a date, unit, or invoice number | Not saved. That item fails |
 | No PDF arrives after a click | That item fails, and the page is saved as evidence |
@@ -70,7 +71,7 @@ the wait. Run `--capture` to sign in by hand, after which the profile may be rem
 A passkey dialog from Windows itself, rather than from the page, can't be dismissed from
 here. It would use up the sign-in's time and fail with a screenshot.
 
-The invoice list's and detail page's selectors come from a `--capture` of the real site.
+The invoice list's and invoice pages' selectors come from runs against the real site.
 The sign-in's come from its first page and from how this kind of sign-in usually works,
 so everything past the email page still needs checking against a real sign-in.
 
