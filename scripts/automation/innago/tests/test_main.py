@@ -164,7 +164,7 @@ def test_signed_in_session_runs_the_downloads(run, row, tmp_path):
         yield "page"
 
     browser_stage(run, CFG, tmp_path, False, session,
-                  lambda page, url: FakeSource([row(u) for u in UNITS]))
+                  lambda page, url, expected: FakeSource([row(u) for u in UNITS]))
     assert _items(run)[("login", "site")].status is Status.OK
     assert run.summary.exit_code == 0
 

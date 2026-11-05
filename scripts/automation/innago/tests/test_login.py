@@ -5,6 +5,7 @@ Playwright answers the site's requests from here, and the PDFs come from a serve
 elsewhere. The classify tests run everywhere.
 """
 
+import datetime as dt
 import http.server
 import threading
 from types import SimpleNamespace
@@ -64,15 +65,89 @@ STUCK_PASSKEY_PAGE = """<h1>Create a passkey</h1>
 <form method="post" action="/create"><button type="submit">Continue</button></form>"""
 MFA_PAGE = "<h1>Enter the code we sent you</h1><input name='code'>"
 # Mirrors the real list and detail pages' structure, with made-up values
-LIST_PAGE = """<span class="invoice-counter">{counter}</span>
-<table><thead><tr><th>ID</th></tr></thead><tbody>{rows}</tbody></table>"""
+LIST_PAGE = """<div class="filter-group"><div class="simple-fake-select"
+    onclick="document.getElementById('group-menu').style.display = 'block'">
+  <p id="group-label">__GROUP_LABEL__</p></div>
+  <ul id="group-menu" class="simple-fake-select-opt" style="display:none">
+    <li><a href="#" onclick="chooseNotGrouped(); return false">Not Grouped</a></li>
+    <li><a href="#">Grouped by Property</a></li></ul></div>
+<in-icon id="filter-icon-tenant-list-mobile" style="display:inline-block"
+  onclick="document.getElementById('filter').style.display = 'block'">filter</in-icon>
+<div id="filter" style="display:none">
+  <button class="btn btn-link" onclick="clearFilters()">Clear Filters</button>
+  <div class="mb-3"><label>Date Range</label>
+    <select id="range"><option>Week</option><option>Month</option></select></div>
+  <div class="mb-3"><label>Select Month</label>
+    <select id="month"><option>October</option><option>November</option></select></div>
+  <div class="mb-3"><label>Select Year</label>
+    <select id="year"><option>2025</option><option>2026</option></select></div>
+  <div class="styled-checkbox"><input id="senton" type="checkbox" checked>
+    <label for="senton">Sent On</label></div>
+  <div class="styled-checkbox"><input id="dueon" type="checkbox">
+    <label for="dueon">Due On</label></div>
+  <div class="styled-checkbox"><input id="paidon" type="checkbox" checked>
+    <label for="paidon">Paid On</label></div>
+  <div class="styled-checkbox"><input id="disbursedon" type="checkbox">
+    <label for="disbursedon">Disbursed On</label></div>
+  <button class="btn btn-primary" onclick="applyFilters()">Apply Filters</button>
+</div>
+<span class="invoice-counter" id="counter"></span>
+<table><thead><tr><th><span class="cursor-pointer" onclick="sortByUnit()">Unit</span></th></tr>
+</thead><tbody id="rows">__ROWS__</tbody></table>
+<script>
+  let grouped = __GROUPED__, filteredOut = __FILTERED_OUT__;
+  const fixedCounter = "__COUNTER__";
+  function refresh() {
+    const rows = [...document.querySelectorAll('tr.income-table-row')];
+    rows.forEach((row, i) => {
+      row.style.display = grouped || (filteredOut && i > 0) ? 'none' : '';
+    });
+    const shown = filteredOut ? 1 : rows.length;
+    document.getElementById('counter').textContent = fixedCounter || `${shown} of ${shown}`;
+  }
+  function chooseNotGrouped() {
+    grouped = false;
+    document.getElementById('group-label').textContent = 'Not Grouped';
+    document.getElementById('group-menu').style.display = 'none';
+    refresh();
+  }
+  function sortByUnit() {
+    const body = document.getElementById('rows');
+    const rows = [...body.querySelectorAll('tr')];
+    rows.sort((a, b) => a.innerText.trim().localeCompare(b.innerText.trim()));
+    rows.forEach(row => body.appendChild(row));
+    refresh();
+  }
+  function clearFilters() {
+    // The real panel's behavior here is unknown, so this takes the harder path: it closes
+    document.getElementById('filter').style.display = 'none';
+    window.filtersCleared = true;
+  }
+  function applyFilters() {
+    const value = id => document.getElementById(id).value;
+    const on = id => document.getElementById(id).checked;
+    if (window.filtersCleared && value('range') === 'Month' && value('month') === 'November'
+        && value('year') === '2026' && on('dueon') && !on('senton') && !on('paidon')
+        && !on('disbursedon')) {
+      filteredOut = false;
+      window.filtersApplied = true;
+    }
+    document.getElementById('filter').style.display = 'none';
+    refresh();
+  }
+  refresh();
+</script>"""
 LIST_ROW = """<tr class="income-table-row"
     onclick="location='/invoices/90000{n}/detail/90000{n}/false/false'">
-  <td>Example Condo Association</td><td class="dv-in-id"><p>90000{n}</p></td>
   <td class="dv-in-unit"><p>100{n}</p></td></tr>"""
+LEFT_PANE_ROW = """<tr class="income-table-row"
+    onclick="location='/invoices/90000{n}/detail/90000{n}/false/false'">
+  <td class="dv-in-due"><p>Jan 01, 2026</p></td></tr>"""
 DETAIL_PAGE = """<div style="display:none">
   <button class="dropdown-item" onclick="location='/hidden-download'">Download</button>
   <button class="dropdown-item" onclick="location='/delete'">Delete</button></div>
+<table><tbody>{left_pane}</tbody></table>
+<div class="detail-sticky-header"><h3>Invoice: {heading}</h3></div>
 <button class="btn btn-innago-primary"
   onclick="window.open('{base}/invoice-{n}.pdf')">Download</button>
 <button onclick="location='/remind'">Remind</button>
@@ -133,13 +208,17 @@ class FakeSite:
     """A hosted sign-in and an app, answered by Playwright. Records what it's sent."""
 
     def __init__(self, signed_in=False, after_password=None, password_ok=True,
-                 home="<h1>Dashboard</h1>", pdfs=(), counter=None):
+                 home="<h1>Dashboard</h1>", pdfs=(), counter=None, grouped=True,
+                 filtered_out=False, heading=None):
         self.signed_in = signed_in
         self.after_password = after_password  # the path shown between password and app
         self.password_ok = password_ok
         self.home = home
         self.pdfs = list(pdfs)
         self.counter = counter
+        self.grouped = grouped
+        self.filtered_out = filtered_out
+        self.heading = heading
         self.posts = []
         self.get_paths = []
         self.server = None
@@ -190,14 +269,22 @@ class FakeSite:
                 self._html(route, "<h1>Other</h1>")
 
     def _app(self, route, path):
+        count = len(self.pdfs)
         if path == "/invoices":
-            rows = "".join(LIST_ROW.format(n=n + 1) for n in range(len(self.pdfs)))
-            count = len(self.pdfs)
-            self._html(route, LIST_PAGE.format(counter=self.counter or f"{count} of {count}",
-                                               rows=rows))
+            # Highest unit first, so a list that wasn't sorted gets the wrong PDF in each test
+            rows = "".join(LIST_ROW.format(n=n) for n in range(count, 0, -1))
+            label = "Grouped by Property" if self.grouped else "Not Grouped"
+            page = (LIST_PAGE.replace("__ROWS__", rows).replace("__GROUP_LABEL__", label)
+                    .replace("__GROUPED__", "true" if self.grouped else "false")
+                    .replace("__FILTERED_OUT__", "true" if self.filtered_out else "false")
+                    .replace("__COUNTER__", self.counter or ""))
+            self._html(route, page)
         elif "/detail/" in path:
-            n = path.split("/detail/")[1].split("/")[0][-1]
-            self._html(route, DETAIL_PAGE.format(base=self.server.base, n=n))
+            invoice_id = path.split("/detail/")[1].split("/")[0]
+            left_pane = "".join(LEFT_PANE_ROW.format(n=n) for n in range(1, count + 1))
+            self._html(route, DETAIL_PAGE.format(
+                base=self.server.base, n=invoice_id[-1], left_pane=left_pane,
+                heading=self.heading or invoice_id))
         else:
             self._html(route, self.home)
 
@@ -360,11 +447,45 @@ def test_the_observer_sees_each_step(open_site):
     assert steps == [Step.EMAIL, Step.PASSWORD, Step.SIGNED_IN]
 
 
-def _opened_list(open_site, pdfs, **options):
-    site = FakeSite(signed_in=True, pdfs=pdfs)
-    page = open_site(site, **options)
+def _opened_list(open_site, pdfs, session_cookie=True, **site_options):
+    site = FakeSite(signed_in=True, pdfs=pdfs, **site_options)
+    page = open_site(site, session_cookie=session_cookie)
     sign_in(page, SITE, CRED, FAST)
-    return site, page, InvoiceList(page, f"{APP}/invoices")
+    return site, page, InvoiceList(page, f"{APP}/invoices", len(pdfs))
+
+
+def test_the_list_is_ungrouped_and_sorted_by_unit(open_site, pdf_of):
+    _, page, source = _opened_list(open_site, [pdf_of(), pdf_of(), pdf_of()])
+    assert source.open() == 3
+    assert page.locator("#group-label").inner_text() == "Not Grouped"
+    assert page.locator("td.dv-in-unit").all_inner_texts() == ["1001", "1002", "1003"]
+
+
+def test_a_list_already_not_grouped_is_left_as_it_is(open_site, pdf_of):
+    _, _, source = _opened_list(open_site, [pdf_of(), pdf_of()], grouped=False)
+    assert source.open() == 2
+
+
+def test_a_short_list_is_filtered_to_this_month_by_due_date(open_site, pdf_of):
+    _, page, source = _opened_list(open_site, [pdf_of(), pdf_of()], filtered_out=True)
+    assert source.open(today=dt.date(2026, 11, 5)) == 2
+    assert page.evaluate("window.filtersApplied") is True  # only with every value right
+
+
+def test_a_list_still_short_after_filtering_reports_what_it_has(open_site, pdf_of):
+    # The wrong month for the fake site, so its filter doesn't bring the other row back
+    _, _, source = _opened_list(open_site, [pdf_of(), pdf_of()], filtered_out=True)
+    assert source.open(today=dt.date(2026, 10, 5)) == 1
+
+
+def test_a_download_never_runs_until_the_heading_shows_the_invoice(
+        open_site, pdf_server, pdf_of, tmp_path, monkeypatch):
+    monkeypatch.setattr(invoices_fetch, "PAGE_TIMEOUT_MS", 1_000)
+    _, _, source = _opened_list(open_site, [pdf_of(), pdf_of()], heading="a different invoice")
+    source.open()
+    with pytest.raises(AssertionError):
+        source.download(0, tmp_path / "invoice.pdf")
+    assert not [path for path in pdf_server.fetches if path.endswith(".pdf")]
 
 
 @pytest.mark.parametrize("attachment", [False, True], ids=["opens in a new tab", "attachment"])
@@ -384,19 +505,16 @@ def test_the_invoice_list_saves_each_pdf_however_it_opens(
 
 
 def test_a_partial_list_is_refused(open_site, pdf_of):
-    site = FakeSite(signed_in=True, pdfs=[pdf_of()], counter="1 of 7")
-    page = open_site(site)
-    sign_in(page, SITE, CRED, FAST)
+    _, _, source = _opened_list(open_site, [pdf_of()], counter="1 of 7")
     with pytest.raises(invoices_fetch.FetchError, match="only 1 of 7"):
-        InvoiceList(page, f"{APP}/invoices").open()
+        source.open()
 
 
-def test_a_row_count_that_never_matches_the_counter_fails(open_site, pdf_of):
-    site = FakeSite(signed_in=True, pdfs=[pdf_of()], counter="2 of 2")
-    page = open_site(site)
-    sign_in(page, SITE, CRED, FAST)
+def test_a_row_count_that_never_matches_the_counter_fails(open_site, pdf_of, monkeypatch):
+    monkeypatch.setattr(invoices_fetch, "SETTLE_TIMEOUT_MS", 1_000)
+    _, _, source = _opened_list(open_site, [pdf_of()], counter="2 of 2")
     with pytest.raises(AssertionError):
-        InvoiceList(page, f"{APP}/invoices").open()
+        source.open()
 
 
 def test_a_single_use_address_still_gives_the_pdf(open_site, pdf_server, pdf_of, tmp_path):

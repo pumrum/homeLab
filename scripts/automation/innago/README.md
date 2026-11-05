@@ -9,15 +9,17 @@ sign-in, one browser profile, and one config file, so a remembered device carrie
 
 ## innago-invoices
 
-Each run signs in, opens the invoice list, and downloads every invoice in the site's
-default view. Each file is saved as:
+Each run signs in, opens the invoice list, switches it to `Not Grouped`, sorts it by
+unit, and downloads every invoice, opening the first from the list and the rest from the
+detail page's left pane. Each file is saved as:
 
 ```text
 C:\automation\innago\data\invoices\<yyyy-MM>\<due date>_<unit>_<invoice number>-1.pdf
 ```
 
-- **It takes the period the site shows.** It doesn't choose a month itself, so a run
-  saves what the site shows at that moment.
+- **It takes the period the site shows.** It only chooses a month if the list doesn't
+  show one invoice per listed unit. Then it clears the filters and filters to the current
+  month by due date alone. That path hasn't run on the real site yet.
 - **The name comes from the PDF.** The site gives each download a random name, which is
   ignored. The `-1` matches what `scripts/innago_mergeInvoices.py` expects. This job
   doesn't merge anything.
@@ -27,7 +29,7 @@ C:\automation\innago\data\invoices\<yyyy-MM>\<due date>_<unit>_<invoice number>-
   replaces the saved file, and the old copy goes to the run folder under `replaced\`.
 - **It only opens invoices and clicks Download.** Remind, Record Payment, Edit Invoice,
   and Delete sit right beside that button, so it must be visible and labeled exactly
-  `Download`. It first checks that the invoice it opened is the one in the row.
+  `Download`. It first waits for the page's heading to show the invoice being opened.
 - **It needs no PDF settings in Edge.** The site opens each invoice in a new tab, and
   the job keeps a copy of the PDF as it arrives. While it runs, Edge's downloads panel
   may show a file that won't open, which is expected.

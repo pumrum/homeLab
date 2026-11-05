@@ -42,7 +42,7 @@ class InvoiceSource(Protocol):
 
 
 OpenSession = Callable[..., AbstractContextManager[Page]]
-OpenSource = Callable[[Page, str], InvoiceSource]
+OpenSource = Callable[[Page, str, int], InvoiceSource]
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -166,7 +166,8 @@ def browser_stage(run: Run, cfg: Config, data_dir: Path, dump: bool,
                           make_observer=_dump_observer(run) if dump else None) as page:
             run.summary.record("login", "site", Status.OK)
             reached = True
-            download_stage(run, open_source(page, cfg.invoices.page_url), cfg, data_dir, dump)
+            source = open_source(page, cfg.invoices.page_url, len(cfg.invoices.units))
+            download_stage(run, source, cfg, data_dir, dump)
     except Exception as e:  # noqa: BLE001 - record and let the summary report it
         run.summary.record("browser" if reached else "login", "site", Status.FAILED, _why(e))
         if not reached:
