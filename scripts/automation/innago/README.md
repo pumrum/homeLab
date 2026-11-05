@@ -71,9 +71,9 @@ the wait. Run `--capture` to sign in by hand, after which the profile may be rem
 A passkey dialog from Windows itself, rather than from the page, can't be dismissed from
 here. It would use up the sign-in's time and fail with a screenshot.
 
-The invoice list's and invoice pages' selectors come from runs against the real site.
-The sign-in's come from its first page and from how this kind of sign-in usually works,
-so everything past the email page still needs checking against a real sign-in.
+The email, password, invoice list, and invoice page steps have all run on the real site.
+The site hasn't shown a passkey prompt or MFA to the job yet, so those two steps come from
+how this kind of sign-in usually works, and have only run against a test site.
 
 ## Set up each machine
 

@@ -4,8 +4,8 @@ A remembered browser profile can skip any of the steps, and MFA and the passkey 
 come and go, so nothing assumes an order. Each pass works out where the page is and
 handles that one step, until the page is signed in or the time runs out.
 
-The step paths come from reading the first page and from how this kind of hosted
-sign-in usually works. Everything past the email page is unverified on the real site.
+The email and password steps have run on the real site. It hasn't shown a passkey prompt
+or MFA to the job yet, so those come from how this kind of hosted sign-in usually works.
 """
 
 import logging

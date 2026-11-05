@@ -23,4 +23,5 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
   and keeps the old copy in the run folder.
 - `--dump` saves page structure and reports the names, saving nothing under `data`.
 - `--capture` saves page structure while a person signs in and clicks around.
-- Sign-in selectors past the email page aren't yet checked against the real site.
+- The passkey and MFA steps aren't yet checked against the real site, which hasn't shown
+  them to the job. Everything else has run there.
