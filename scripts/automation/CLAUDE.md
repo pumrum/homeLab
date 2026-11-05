@@ -183,6 +183,10 @@ Use these from `automation_common` instead of writing your own:
   synthetic fixtures only (e.g. a made-up HTML page mirroring the real
   structure). No test touches the network or a real site.
 - Don't run anything against real sites unless asked.
+- In CI, a PR only runs the unit tests if it changes a non-doc file in this tree or
+  `.github/workflows/checks.yml`. A doc-only PR skips them, while `pre-commit` still
+  runs on every PR. A merge to `main` always runs both. `Checks` doesn't run on a pushed
+  branch until it has a PR, so run the tests locally before relying on it.
 
 ## Versions, branches, and releases
 
