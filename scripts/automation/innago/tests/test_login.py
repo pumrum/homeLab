@@ -63,13 +63,23 @@ PASSKEY_PAGE = """<h1>Create a passkey for faster sign-in</h1>
 STUCK_PASSKEY_PAGE = """<h1>Create a passkey</h1>
 <form method="post" action="/create"><button type="submit">Continue</button></form>"""
 MFA_PAGE = "<h1>Enter the code we sent you</h1><input name='code'>"
-LIST_PAGE = """<table><tbody>
-<tr><td>Unit 1001</td><td>
-<button onclick="window.open('{base}/invoice-1.pdf')">Download Invoice</button></td></tr>
-<tr><td>Unit 1002</td><td><a href="{base}/invoice-2.pdf" target="_blank">Download</a></td></tr>
-<tr style="display:none"><td>hidden copy</td><td><button>Download</button></td></tr>
-<tr><td>A note without a download button</td></tr>
-</tbody></table><button onclick="location='/pay'">Make Payment</button>"""
+# Mirrors the real list and detail pages' structure, with made-up values
+LIST_PAGE = """<span class="invoice-counter">{counter}</span>
+<table><thead><tr><th>ID</th></tr></thead><tbody>{rows}</tbody></table>"""
+LIST_ROW = """<tr class="income-table-row"
+    onclick="location='/invoices/90000{n}/detail/90000{n}/false/false'">
+  <td>Example Condo Association</td><td class="dv-in-id"><p>90000{n}</p></td>
+  <td class="dv-in-unit"><p>100{n}</p></td></tr>"""
+DETAIL_PAGE = """<div style="display:none">
+  <button class="dropdown-item" onclick="location='/hidden-download'">Download</button>
+  <button class="dropdown-item" onclick="location='/delete'">Delete</button></div>
+<button class="btn btn-innago-primary"
+  onclick="window.open('{base}/invoice-{n}.pdf')">Download</button>
+<button onclick="location='/remind'">Remind</button>
+<button onclick="location='/record-payment'">Record Payment</button>
+<button onclick="location='/edit'">Edit Invoice</button>
+<button onclick="location='/delete'">Delete</button>"""
+OTHER_ACTIONS = ("/hidden-download", "/delete", "/remind", "/record-payment", "/edit")
 SESSION_COOKIE = {"name": "session", "value": "made-up"}
 
 
@@ -123,12 +133,13 @@ class FakeSite:
     """A hosted sign-in and an app, answered by Playwright. Records what it's sent."""
 
     def __init__(self, signed_in=False, after_password=None, password_ok=True,
-                 home="<h1>Dashboard</h1>", pdfs=()):
+                 home="<h1>Dashboard</h1>", pdfs=(), counter=None):
         self.signed_in = signed_in
         self.after_password = after_password  # the path shown between password and app
         self.password_ok = password_ok
         self.home = home
         self.pdfs = list(pdfs)
+        self.counter = counter
         self.posts = []
         self.get_paths = []
         self.server = None
@@ -180,7 +191,13 @@ class FakeSite:
 
     def _app(self, route, path):
         if path == "/invoices":
-            self._html(route, LIST_PAGE.format(base=self.server.base))
+            rows = "".join(LIST_ROW.format(n=n + 1) for n in range(len(self.pdfs)))
+            count = len(self.pdfs)
+            self._html(route, LIST_PAGE.format(counter=self.counter or f"{count} of {count}",
+                                               rows=rows))
+        elif "/detail/" in path:
+            n = path.split("/detail/")[1].split("/")[0][-1]
+            self._html(route, DETAIL_PAGE.format(base=self.server.base, n=n))
         else:
             self._html(route, self.home)
 
@@ -356,14 +373,30 @@ def test_the_invoice_list_saves_each_pdf_however_it_opens(
     pdf_server.attachment = attachment
     pdfs = [pdf_of(unit="1001"), pdf_of(unit="1002")]
     site, page, source = _opened_list(open_site, pdfs)
-    assert source.open() == 2  # not the hidden copy, the note, or the payment button
+    assert source.open() == 2
     for index, expected in enumerate(pdfs):
         dest = tmp_path / f"invoice_{index}.pdf"
         source.download(index, dest)
         assert dest.read_bytes() == expected
         if not attachment:  # with one, Edge may open its downloads tab a moment later
             assert page.context.pages == [page]
-    assert "/pay" not in site.get_paths
+    assert not set(OTHER_ACTIONS) & set(site.get_paths)  # only Download was ever clicked
+
+
+def test_a_partial_list_is_refused(open_site, pdf_of):
+    site = FakeSite(signed_in=True, pdfs=[pdf_of()], counter="1 of 7")
+    page = open_site(site)
+    sign_in(page, SITE, CRED, FAST)
+    with pytest.raises(invoices_fetch.FetchError, match="only 1 of 7"):
+        InvoiceList(page, f"{APP}/invoices").open()
+
+
+def test_a_row_count_that_never_matches_the_counter_fails(open_site, pdf_of):
+    site = FakeSite(signed_in=True, pdfs=[pdf_of()], counter="2 of 2")
+    page = open_site(site)
+    sign_in(page, SITE, CRED, FAST)
+    with pytest.raises(AssertionError):
+        InvoiceList(page, f"{APP}/invoices").open()
 
 
 def test_a_single_use_address_still_gives_the_pdf(open_site, pdf_server, pdf_of, tmp_path):

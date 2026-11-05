@@ -39,17 +39,26 @@ LIST_PAGE = b"""<!doctype html><title>list</title>
 <a id="needs_session" href="/private.pdf" target="_blank">a</a>
 <a id="sign_in_page" href="/signin" target="_blank">a</a>
 <a id="missing" href="/missing.pdf" target="_blank">a</a>
+<button id="api_then_new_tab" onclick="fetch('http://localhost:' + location.port + '/api/generate',
+  {method: 'POST', headers: {Authorization: 'Bearer made-up', 'Content-Type': 'application/json'},
+   body: '{}'}).then(r => r.json()).then(j => window.open(j.url))">a</button>
 <button id="nothing">a</button>
 <button id="built_in_page" onclick="window.open(URL.createObjectURL(new Blob(
   ['%PDF-1.4'], {type: 'application/pdf'})))">a</button>"""
 
 ATTACHMENT = {"Content-Disposition": 'attachment; filename="0a1b-random.pdf"'}
+CORS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+}
 
 
 class Site:
     def __init__(self):
         self.hits = {}
         self.post_bodies = []
+        self.api_auth = []
         site = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -62,11 +71,20 @@ class Site:
                 self.end_headers()
                 self.wfile.write(body)
 
+            def do_OPTIONS(self):
+                self._send(204, b"", "text/plain", CORS)
+
             def do_POST(self):
                 path = urlsplit(self.path).path
                 site.hits[path] = site.hits.get(path, 0) + 1
                 length = int(self.headers.get("Content-Length") or 0)
                 site.post_bodies.append(self.rfile.read(length))
+                if path == "/api/generate":
+                    site.api_auth.append(self.headers.get("Authorization"))
+                    pdf_url = f"http://localhost:{site.server.server_port}/temp/generated.pdf"
+                    body = f'{{"url": "{pdf_url}"}}'.encode()
+                    self._send(200, body, "application/json", CORS)
+                    return
                 self._send(200, PDF, headers=ATTACHMENT if "attachment" in path else None)
 
             def do_GET(self):
@@ -148,12 +166,22 @@ def _capture(page, control, dest, timeout_ms=5_000):
     ("post_attachment", "/post-attachment"),
     ("post_new_tab", "/post-inline"),
     ("needs_session", "/private.pdf"),
+    ("api_then_new_tab", "/temp/generated.pdf"),
 ])
 def test_saves_the_exact_pdf_with_one_request(page, site, tmp_path, control, path):
     dest = tmp_path / "invoice.pdf"
     _capture(page, control, dest)
     assert dest.read_bytes() == PDF
     assert site.hits[path] == 1
+
+
+def test_a_cross_origin_api_call_still_works_while_capturing(page, site, tmp_path):
+    # The shape of a site whose app calls an API host that builds the PDF, then opens it
+    _capture(page, "api_then_new_tab", tmp_path / "invoice.pdf")
+    assert (tmp_path / "invoice.pdf").read_bytes() == PDF
+    assert site.hits["/api/generate"] == 1
+    assert site.api_auth == ["Bearer made-up"]
+    assert page.context.pages == [page]
 
 
 def test_a_post_keeps_its_form_data(page, site, tmp_path):

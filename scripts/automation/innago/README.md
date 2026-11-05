@@ -25,7 +25,9 @@ C:\automation\innago\data\invoices\<yyyy-MM>\<due date>_<unit>_<invoice number>-
   site builds a new PDF for each download, so bytes can't be compared, but text can.
   Same text is `unchanged`. Different text, such as an invoice that's now paid or late,
   replaces the saved file, and the old copy goes to the run folder under `replaced\`.
-- **It only clicks download controls.** It can't send or pay anything.
+- **It only opens invoices and clicks Download.** Remind, Record Payment, Edit Invoice,
+  and Delete sit right beside that button, so it must be visible and labeled exactly
+  `Download`. It first checks that the invoice it opened is the one in the row.
 - **It needs no PDF settings in Edge.** The site opens each invoice in a new tab, and
   the job keeps a copy of the PDF as it arrives. While it runs, Edge's downloads panel
   may show a file that won't open, which is expected.
@@ -34,6 +36,7 @@ C:\automation\innago\data\invoices\<yyyy-MM>\<due date>_<unit>_<invoice number>-
 
 | Situation | Result |
 | --- | --- |
+| The list shows fewer invoices than it has, like `5 of 7` | Every unit fails and nothing is saved |
 | A listed unit has no invoice in the view | That unit fails. The others still save |
 | A PDF is for a unit that isn't in the config | Not saved. That item fails |
 | A second invoice for the same unit | The first is saved, the second isn't. That item fails |
@@ -65,9 +68,9 @@ the wait. Run `--capture` to sign in by hand, after which the profile may be rem
 A passkey dialog from Windows itself, rather than from the page, can't be dismissed from
 here. It would use up the sign-in's time and fail with a screenshot.
 
-The sign-in's selectors and step names come from the site's first page and from how
-this kind of sign-in usually works. Everything past the email page needs checking with
-`--capture`, and so does the invoice list.
+The invoice list's and detail page's selectors come from a `--capture` of the real site.
+The sign-in's come from its first page and from how this kind of sign-in usually works,
+so everything past the email page still needs checking against a real sign-in.
 
 ## Set up each machine
 
