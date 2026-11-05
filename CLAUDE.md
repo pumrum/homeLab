@@ -28,6 +28,19 @@ Global rules for the whole repo. Work under `scripts/automation/` also follows
   explicitly told otherwise. In data files, write no thousands separators and
   no currency symbols.
 
+## Working with the maintainer
+
+- When you have several questions, print the full list first, then ask them one
+  at a time in a logical order, starting with the one that shapes the most
+  decisions. Wait for each answer before asking the next.
+- End every command block meant for pasting with a blank line inside the code
+  fence, so every command runs and returns to a blank prompt. Never end one with
+  a comment line, which stays at the prompt. This relies on Windows Terminal's
+  `trimPaste` setting being off on the machine being pasted into. A command that
+  prompts for input must not take a stray blank line as its answer.
+- When a step has the maintainer edit a file, open it in Notepad++:
+  `& "C:\Program Files\Notepad++\notepad++.exe" <file>`.
+
 ## The repo is public
 
 - Never commit, print, or log real values: account numbers, credentials,

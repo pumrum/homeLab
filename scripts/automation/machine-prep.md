@@ -374,6 +374,24 @@ Then, in Settings:
     starts** (no policy exists for this one).
 - System > Notifications: **Do not disturb** on, no exceptions.
 
+**Edge settings don't all reach the jobs.** A job's browser isn't the Edge you open
+from the Start menu. It runs under Playwright with its own profile, in
+`C:\automation\<process>\profiles\`, so the two can behave differently:
+
+- Policies from A5 apply to every Edge on the machine, including a job's browser.
+- Anything set on Edge's Settings pages applies only to the profile it was set in. To
+  have it in a job's browser, set it there too, once per process.
+- Playwright also controls some behavior itself, such as where downloads go. A setting
+  can work in the Start menu Edge and still not change what a job does.
+
+So check any Edge setting in a job's own browser, not just the Start menu one.
+
+In Windows Terminal, press `Ctrl+,` and go to **Interaction**. Turn off the setting
+that trims trailing white-space on paste (`trimPaste` in its `settings.json`), then
+click **Save**. With it on, a pasted one-line command waits for you to press Enter.
+Leave the multi-line paste warning on, because it's what lets you check a command
+before it runs.
+
 **Verify:** sign out and back in; no notifications, tips, or setup screens appear.
 
 ### B2. Tools
@@ -558,7 +576,7 @@ Edge stable channel kept up to date, and the paths `C:\src\homeLab` and
 | A8 Bot user | Skip | You develop as yourself |
 | A9 Working folders | Same paths | Create `C:\src` and `C:\automation`; no `icacls` needed, your account owns them |
 | A10 Automatic sign-in | Skip | |
-| B1 Quiet profile | Partly | Only turn off the python.exe and python3.exe app execution aliases |
+| B1 Quiet profile | Partly | Only turn off the python.exe and python3.exe app execution aliases and Windows Terminal's paste trimming |
 | B2 Tools | Same, plus more | Also install `gh` (GitHub CLI), Claude Code, and run `pre-commit install` in the repo |
 | B3 Repo | Different | Authenticated clone with push rights (`gh auth login`); set `user.name` and your GitHub no-reply `user.email`; work on feature branches. Still `uv sync` in `$ws` after switching branches |
 | B4 Config and secrets | Same locations | Same `config.toml` path. Secrets in your own Credential Manager. Use separate Gmail tokens and SSH key for this machine, so revoking one never breaks the robot. Never copy browser profiles between machines |
