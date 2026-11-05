@@ -118,30 +118,27 @@ uv run python -c "import keyring; keyring.delete_password('invoices/ssh-key', '<
 ```
 
 **2. Record the server's host key.** The job refuses a server whose key isn't in this
-file. Copy the key from the server itself, because `ssh-keyscan` on Windows can fail
-with `unsupported KEX method` and write nothing. On the server, print the key and its
-fingerprint:
+file. This scan uses `ssh` because `ssh-keyscan` on Windows can fail with
+`unsupported KEX method` and write nothing. `ssh` saves the key before it tries to sign
+in, and it offers no credentials, so expect `Permanently added` and then
+`Permission denied`. Use the same host name or address as `host` in `config.toml`, and
+leave out `-p` if the port is 22.
 
-```bash
-cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub
+```powershell
+New-Item -ItemType Directory C:\automation\invoices -Force | Out-Null
+ssh -p <port> -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o HostKeyAlgorithms=ssh-ed25519 -o PreferredAuthentications=none -o UserKnownHostsFile=C:\automation\invoices\known_hosts <sftp user>@<host>
+ssh-keygen -lf C:\automation\invoices\known_hosts
 ```
+
+On the server, get the same fingerprint directly. The two must match, because this is
+what proves that the scan reached the right server:
 
 ```bash
 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 ```
 
-On the machine, paste the printed key after the host. Use the same host name or address
-as `host` in `config.toml`. If the port isn't 22, write the host as `[<host>]:<port>`.
-
-```powershell
-New-Item -ItemType Directory C:\automation\invoices -Force | Out-Null
-'<host> ssh-ed25519 AAAA...' | Set-Content -Encoding ascii C:\automation\invoices\known_hosts
-ssh-keygen -lf C:\automation\invoices\known_hosts
-```
-
-The two fingerprints must match, which shows the key was copied correctly.
-
-If the server's key ever changes, the job fails until you repeat this step.
+If the server's key ever changes, delete `known_hosts` and repeat this step. The job
+fails until you do.
 
 **3. Share the sheet.** Share the Google Sheet with the service account as an
 **Editor**, and see the repo's [README](../README.md) for the shared key. A test
