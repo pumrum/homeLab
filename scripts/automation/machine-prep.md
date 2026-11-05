@@ -374,6 +374,18 @@ Then, in Settings:
     starts** (no policy exists for this one).
 - System > Notifications: **Do not disturb** on, no exceptions.
 
+**Edge settings don't all reach the jobs.** A job's browser isn't the Edge you open
+from the Start menu. It runs under Playwright with its own profile, in
+`C:\automation\<process>\profiles\`, so the two can behave differently:
+
+- Policies from A5 apply to every Edge on the machine, including a job's browser.
+- Anything set on Edge's Settings pages applies only to the profile it was set in. To
+  have it in a job's browser, set it there too, once per process.
+- Playwright also controls some behavior itself, such as where downloads go. A setting
+  can work in the Start menu Edge and still not change what a job does.
+
+So check any Edge setting in a job's own browser, not just the Start menu one.
+
 In Windows Terminal, press `Ctrl+,` and go to **Interaction**. Turn off the setting
 that trims trailing white-space on paste (`trimPaste` in its `settings.json`), then
 click **Save**. With it on, a pasted one-line command waits for you to press Enter.

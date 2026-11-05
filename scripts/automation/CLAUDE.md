@@ -151,6 +151,10 @@ Use these from `automation_common` instead of writing your own:
   (`channel="msedge"`), headed, `launch_persistent_context` with a profile
   under `profiles\`, `chromium_sandbox=True`, `accept_downloads=True`.
   Don't add flags that weaken security.
+- A job's browser and the Start menu Edge aren't in sync. Policies reach both, but a
+  Settings page change applies only to its own profile, and Playwright controls some
+  behavior itself. When a step changes an Edge setting, say which browser it applies
+  to, and test it in the job's browser.
 - Selectors are lists of candidates, most specific first; `find_first` uses
   the first VISIBLE match (pages hold hidden copies of controls).
 - Never use fixed sleeps. Wait for elements, URLs, or `expect_download`.
