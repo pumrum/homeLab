@@ -1,0 +1,4 @@
+# The real config lives in C:\automation\invoices\config.toml. Never commit a
+# copy that lands here (config.example.toml stays tracked).
+config.toml
+known_hosts

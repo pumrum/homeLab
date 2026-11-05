@@ -1,4 +1,5 @@
-"""Google Sheets with a service account: read a worksheet, append rows.
+"""Google Sheets with a service account: read a worksheet, append rows, or
+replace one column from a given cell down.
 
 The service account key is the encrypted secret file
 `automation/google-service-account` (see secrets.py; import it with
@@ -13,7 +14,8 @@ from collections.abc import Callable, Sequence
 from typing import Any, Protocol
 
 import gspread
-from gspread.utils import DateTimeOption, ValueInputOption, ValueRenderOption
+from gspread.exceptions import IncorrectCellLabel
+from gspread.utils import DateTimeOption, ValueInputOption, ValueRenderOption, a1_to_rowcol
 
 from automation_common.secrets import SecretMasker, read_secret_file
 
@@ -33,6 +35,42 @@ class Worksheet(Protocol):
     def read_rows(self, columns: str) -> list[list[Any]]: ...
 
     def append_rows(self, rows: Sequence[Sequence[Any]]) -> None: ...
+
+    def replace_from_cell(self, start_cell: str, lines: Sequence[str]) -> None: ...
+
+
+def replace_requests(
+    sheet_id: int, row_count: int, start_cell: str, lines: Sequence[str]
+) -> list[dict[str, Any]]:
+    """The API requests that replace one column from `start_cell` to the tab's bottom.
+
+    Cells above `start_cell` and in other columns aren't part of the range. Each
+    line becomes a literal text value, like paste values: nothing is reinterpreted
+    as a number, date, or formula. Only values change, not cell formatting. Cells in
+    the range that `lines` doesn't reach are cleared. The tab grows if it's too short.
+    """
+    try:
+        row, col = a1_to_rowcol(start_cell)
+    except IncorrectCellLabel:
+        raise SheetError(f'"{start_cell}" is not a cell like B5') from None
+    needed = row - 1 + len(lines)
+    requests: list[dict[str, Any]] = []
+    if needed > row_count:
+        requests.append({"appendDimension": {
+            "sheetId": sheet_id, "dimension": "ROWS", "length": needed - row_count,
+        }})
+    requests.append({"updateCells": {
+        "range": {
+            "sheetId": sheet_id,
+            "startRowIndex": row - 1,
+            "endRowIndex": max(row_count, needed),
+            "startColumnIndex": col - 1,
+            "endColumnIndex": col,
+        },
+        "rows": [{"values": [{"userEnteredValue": {"stringValue": line}}]} for line in lines],
+        "fields": "userEnteredValue",
+    }})
+    return requests
 
 
 def load_service_account(
@@ -62,6 +100,7 @@ class GoogleWorksheet:
 
     def __init__(self, ws: gspread.Worksheet) -> None:
         self._ws = ws
+        self._row_count = ws.row_count  # kept current, since a replace can grow the tab
 
     def read_rows(self, columns: str) -> list[list[Any]]:
         """All rows in `columns` (e.g. "A:D"): numbers as numbers, dates as serial numbers."""
@@ -84,6 +123,19 @@ class GoogleWorksheet:
             )
         except gspread.exceptions.APIError as e:
             raise _api_error("appending to", e) from None
+
+    def replace_from_cell(self, start_cell: str, lines: Sequence[str]) -> None:
+        """Replace one column from `start_cell` down (see replace_requests).
+
+        It's a single request, so Google applies all of it or none of it: a failure
+        leaves the old values in place.
+        """
+        requests = replace_requests(self._ws.id, self._row_count, start_cell, lines)
+        try:
+            self._ws.spreadsheet.batch_update({"requests": requests})
+        except gspread.exceptions.APIError as e:
+            raise _api_error("writing to", e) from None
+        self._row_count = requests[-1]["updateCells"]["range"]["endRowIndex"]
 
 
 def _api_error(action: str, e: gspread.exceptions.APIError) -> SheetError:

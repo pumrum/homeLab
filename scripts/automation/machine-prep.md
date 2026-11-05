@@ -441,7 +441,7 @@ notepad "$data\config.toml"                                       # replace ever
 | Passwords, API tokens, webhook URL | Windows Credential Manager (bot user) | Only the entries the process's README lists (some need none). Control Panel > Credential Manager > Windows Credentials > **Add a generic credential**: address = entry name (`<process>/<name>`, or `automation/<name>` for shared ones), user name, password = the secret |
 | Home Assistant webhook (optional, shared) | Windows Credential Manager (bot user) | Generic credential `automation/home-assistant-webhook`, password = the webhook URL. If it exists, every run POSTs a title and a PASS/FAIL message there |
 | Large keys (e.g. Google service account) | DPAPI-encrypted file `%USERPROFILE%\.<prefix>\<name>.dpapi` (bot user only) | Only if a process needs one; its README says which. `cd $ws; uv run python tools\import_secret_file.py <prefix>/<name> <file>`, then delete the original download. The shared Google key is `automation/google-service-account` |
-| SFTP key | `%USERPROFILE%\.ssh\` | Only if a process needs one. Generate on this machine with `ssh-keygen -t ed25519`; never copy a key in |
+| SFTP key | Windows Credential Manager (bot user), as `<process>/ssh-key` | Only if a process needs one; its README has the commands. Generate on this machine with `ssh-keygen -t ed25519`, store it, then delete the file, so it's never on disk; never copy a key in. `keyring` stores two bytes per character, so the 2,560-byte limit means at most 1,280 characters |
 
 `data\`, `runs\`, and `profiles\` under `$data` are created by the app. Never
 copy browser profiles from another machine. A site that asks for verification

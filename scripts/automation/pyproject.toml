@@ -4,7 +4,7 @@
 name = "automation"
 version = "0.0.0"
 requires-python = ">=3.13,<3.14"
-dependencies = ["automation-agent", "automation-common", "fidelity-nav"]
+dependencies = ["automation-agent", "automation-common", "fidelity-nav", "invoices-sync"]
 
 [dependency-groups]
 dev = ["pytest>=8.3", "ruff>=0.9"]
@@ -13,15 +13,16 @@ dev = ["pytest>=8.3", "ruff>=0.9"]
 package = false
 
 [tool.uv.workspace]
-members = ["agent", "common", "fidelity"]
+members = ["agent", "common", "fidelity", "invoices"]
 
 [tool.uv.sources]
 automation-agent = { workspace = true }
 automation-common = { workspace = true }
 fidelity-nav = { workspace = true }
+invoices-sync = { workspace = true }
 
 [tool.pytest.ini_options]
-testpaths = ["agent/tests", "common/tests", "fidelity/tests"]
+testpaths = ["agent/tests", "common/tests", "fidelity/tests", "invoices/tests"]
 addopts = "--import-mode=importlib"
 
 [tool.ruff]
@@ -32,7 +33,7 @@ target-version = "py313"
 select = ["E", "F", "W", "I", "UP", "B", "T20"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["automation_agent", "automation_common", "fidelity_nav"]
+known-first-party = ["automation_agent", "automation_common", "fidelity_nav", "invoices_sync"]
 
 [tool.ruff.lint.per-file-ignores]
 # CLI tool for people (print is fine); embeds FakeBank's HTML/JS as long lines

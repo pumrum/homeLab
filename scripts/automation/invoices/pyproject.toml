@@ -1,0 +1,19 @@
+[project]
+name = "invoices-sync"
+version = "0.1.0"
+description = "Copy each entity's invoice list from an SFTP server to its block on a Google Sheet tab"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "automation-common",
+    "paramiko>=4",
+]
+
+[project.scripts]
+invoices-sync = "invoices_sync.main:main"
+
+[tool.uv.sources]
+automation-common = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
