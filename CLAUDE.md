@@ -28,6 +28,14 @@ Global rules for the whole repo. Work under `scripts/automation/` also follows
   explicitly told otherwise. In data files, write no thousands separators and
   no currency symbols.
 
+## Working with the maintainer
+
+- When you have several questions, print the full list first, then ask them one
+  at a time in a logical order, starting with the one that shapes the most
+  decisions. Wait for each answer before asking the next.
+- End every command block meant for pasting with an extra blank line inside the
+  code fence, so the last command runs without another Enter.
+
 ## The repo is public
 
 - Never commit, print, or log real values: account numbers, credentials,
