@@ -112,11 +112,23 @@ LIST_PAGE = """<div class="filter-group"><div class="simple-fake-select"
     refresh();
   }
   function sortByUnit() {
+    // Like the real site: the table is replaced by a placeholder with no rows or counter
+    // while it reloads, and then comes back sorted
     const body = document.getElementById('rows');
-    const rows = [...body.querySelectorAll('tr')];
-    rows.sort((a, b) => a.innerText.trim().localeCompare(b.innerText.trim()));
-    rows.forEach(row => body.appendChild(row));
-    refresh();
+    const counter = document.getElementById('counter');
+    const reload = () => {
+      const rows = [...body.querySelectorAll('tr')];
+      rows.forEach(row => row.remove());
+      counter.style.display = 'none';
+      setTimeout(() => {
+        rows.sort((a, b) => a.getAttribute('data-unit').localeCompare(b.getAttribute('data-unit')));
+        rows.forEach(row => body.appendChild(row));
+        counter.style.display = '';
+        refresh();
+      }, 400);
+    };
+    const lag = __SORT_LAG_MS__;
+    if (lag) { setTimeout(reload, lag); } else { reload(); }
   }
   function clearFilters() {
     // The real panel's behavior here is unknown, so this takes the harder path: it closes
@@ -137,7 +149,7 @@ LIST_PAGE = """<div class="filter-group"><div class="simple-fake-select"
   }
   refresh();
 </script>"""
-LIST_ROW = """<tr class="income-table-row"
+LIST_ROW = """<tr class="income-table-row" data-unit="100{n}"
     onclick="location='/invoices/90000{n}/detail/90000{n}/false/false'">
   <td class="dv-in-unit"><p>100{n}</p></td></tr>"""
 LEFT_PANE_ROW = """<tr class="income-table-row"
@@ -209,7 +221,7 @@ class FakeSite:
 
     def __init__(self, signed_in=False, after_password=None, password_ok=True,
                  home="<h1>Dashboard</h1>", pdfs=(), counter=None, grouped=True,
-                 filtered_out=False, heading=None):
+                 filtered_out=False, heading=None, sort_lag_ms=0):
         self.signed_in = signed_in
         self.after_password = after_password  # the path shown between password and app
         self.password_ok = password_ok
@@ -219,6 +231,7 @@ class FakeSite:
         self.grouped = grouped
         self.filtered_out = filtered_out
         self.heading = heading
+        self.sort_lag_ms = sort_lag_ms
         self.posts = []
         self.get_paths = []
         self.server = None
@@ -277,6 +290,7 @@ class FakeSite:
             page = (LIST_PAGE.replace("__ROWS__", rows).replace("__GROUP_LABEL__", label)
                     .replace("__GROUPED__", "true" if self.grouped else "false")
                     .replace("__FILTERED_OUT__", "true" if self.filtered_out else "false")
+                    .replace("__SORT_LAG_MS__", str(self.sort_lag_ms))
                     .replace("__COUNTER__", self.counter or ""))
             self._html(route, page)
         elif "/detail/" in path:
@@ -454,9 +468,11 @@ def _opened_list(open_site, pdfs, session_cookie=True, **site_options):
     return site, page, InvoiceList(page, f"{APP}/invoices", len(pdfs))
 
 
-def test_the_list_is_ungrouped_and_sorted_by_unit(open_site, pdf_of):
-    _, page, source = _opened_list(open_site, [pdf_of(), pdf_of(), pdf_of()])
-    assert source.open() == 3
+@pytest.mark.parametrize("sort_lag_ms", [0, 200], ids=["reloads at once", "reloads a bit later"])
+def test_the_list_is_ungrouped_and_sorted_by_unit(open_site, pdf_of, sort_lag_ms):
+    _, page, source = _opened_list(open_site, [pdf_of(), pdf_of(), pdf_of()],
+                                   sort_lag_ms=sort_lag_ms)
+    assert source.open() == 3  # sorting reloads the table, which must not count as no rows
     assert page.locator("#group-label").inner_text() == "Not Grouped"
     assert page.locator("td.dv-in-unit").all_inner_texts() == ["1001", "1002", "1003"]
 
@@ -464,6 +480,16 @@ def test_the_list_is_ungrouped_and_sorted_by_unit(open_site, pdf_of):
 def test_a_list_already_not_grouped_is_left_as_it_is(open_site, pdf_of):
     _, _, source = _opened_list(open_site, [pdf_of(), pdf_of()], grouped=False)
     assert source.open() == 2
+
+
+def test_a_list_already_sorted_is_not_clicked_again(open_site, pdf_of):
+    # One row is always in order. A click here would reload the table for nothing
+    _, page, source = _opened_list(open_site, [pdf_of()])
+    page.add_init_script("window.addEventListener('load', () => { "
+                         "const original = sortByUnit; window.sortCalls = 0; "
+                         "sortByUnit = () => { window.sortCalls++; original(); }; });")
+    assert source.open() == 1
+    assert page.evaluate("window.sortCalls") == 0
 
 
 def test_a_short_list_is_filtered_to_this_month_by_due_date(open_site, pdf_of):

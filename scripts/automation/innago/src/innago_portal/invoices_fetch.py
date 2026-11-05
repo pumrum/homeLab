@@ -116,10 +116,17 @@ class InvoiceList:
             log.warning("invoice list: still %d row(s) after filtering", self._rows.count())
 
     def _sort_by_unit(self) -> None:
-        """Only for a steady order: a failed sort is logged, because every PDF is checked anyway."""
-        self._page.locator(UNIT_HEADER).filter(visible=True).first.click()
+        """Only for a steady order: a failed sort is logged, because every PDF is checked anyway.
+
+        Sorting reloads the table, and its rows vanish while it does. So the order is read
+        before the click, and the click counts as done once the rows are back in that order.
+        """
         cells = self._page.locator(UNIT_CELLS)
-        wanted = sorted(text.strip() for text in cells.all_inner_texts())
+        current = [text.strip() for text in cells.all_inner_texts()]
+        wanted = sorted(current)
+        if current == wanted:
+            return
+        self._page.locator(UNIT_HEADER).filter(visible=True).first.click()
         try:
             expect(cells).to_have_text(wanted, timeout=SETTLE_TIMEOUT_MS)
         except AssertionError:
@@ -136,6 +143,7 @@ class InvoiceList:
         if counts is not None and counts[0] < counts[1]:
             raise FetchError(f"the list shows only {counts[0]} of {counts[1]} invoices")
         self._sort_by_unit()
+        self._settle()  # in case the sort failed while the table was still reloading
         count = self._rows.count()
         log.info("invoice list: %d row(s)", count)
         return count
