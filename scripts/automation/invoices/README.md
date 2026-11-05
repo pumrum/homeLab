@@ -118,22 +118,28 @@ uv run python -c "import keyring; keyring.delete_password('invoices/ssh-key', '<
 ```
 
 **2. Record the server's host key.** The job refuses a server whose key isn't in this
-file. Use the same host name or address as `host` in `config.toml`. Leave out the
-`-p` option if the port is 22, and for any other port the entry is written as
-`[host]:port`, which `ssh-keyscan` does for you.
+file. Copy the key from the server itself, because `ssh-keyscan` on Windows can fail
+with `unsupported KEX method` and write nothing. On the server, print the key and its
+fingerprint:
 
-```powershell
-New-Item -ItemType Directory C:\automation\invoices -Force | Out-Null
-ssh-keyscan -t ed25519 -p <port> <host> | Set-Content -Encoding ascii C:\automation\invoices\known_hosts
-ssh-keygen -lf C:\automation\invoices\known_hosts
+```bash
+cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub
 ```
-
-On the server, get the same fingerprint directly. The two must match, because this is
-what proves that `ssh-keyscan` reached the right server:
 
 ```bash
 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 ```
+
+On the machine, paste the printed key after the host. Use the same host name or address
+as `host` in `config.toml`. If the port isn't 22, write the host as `[<host>]:<port>`.
+
+```powershell
+New-Item -ItemType Directory C:\automation\invoices -Force | Out-Null
+'<host> ssh-ed25519 AAAA...' | Set-Content -Encoding ascii C:\automation\invoices\known_hosts
+ssh-keygen -lf C:\automation\invoices\known_hosts
+```
+
+The two fingerprints must match, which shows the key was copied correctly.
 
 If the server's key ever changes, the job fails until you repeat this step.
 
