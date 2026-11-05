@@ -1,0 +1,14 @@
+# innago-portal configuration. Copy to C:\automation\innago\config.toml and replace
+# the placeholders. Every text value is quoted. The sign-in goes in Credential Manager
+# as innago/login, never here. The run fails with a clear message until no placeholder
+# is left.
+
+# Used by every command in this package.
+[site]
+login_url = "https://<address the site's Login link points to>"
+app_url = "https://<any address you see once signed in>"   # only its host name is used
+
+# Used by innago-invoices.
+[invoices]
+page_url = "https://<page that lists the invoices>"
+units = ["<unit>", "<unit>"]                               # every unit that must have an invoice
