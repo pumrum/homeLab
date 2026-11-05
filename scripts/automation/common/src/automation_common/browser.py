@@ -260,13 +260,30 @@ def capture_pdf(page: Page, click: Callable[[], None], dest: Path,
         for tab in tabs_before:
             tab.remove_listener("download", on_download)
         for tab in ctx.pages:
-            # Closing Edge's own downloads tab hangs forever, so it stays until the browser closes
-            if tab not in tabs_before and not tab.url.startswith("edge:"):
-                tab.close()
+            if tab not in tabs_before:
+                close_tab(tab)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(body)
     if page.url != start_url:
         page.goto(start_url, wait_until="domcontentloaded")
+
+
+def close_tab(tab: Page, wait_ms: int = 2_000) -> None:
+    """Close a tab without ever hanging. Never raises.
+
+    A normal close waits forever on Edge's own downloads tab, and that tab can't be told
+    apart in time: its address stays blank for a moment after it opens. So this doesn't
+    wait on the close itself, and it gives up on a tab that stays open. A tab left behind
+    is harmless, and it goes when the browser closes.
+    """
+    try:
+        if tab.is_closed() or tab.url.startswith("edge:"):
+            return
+        tab.close(run_before_unload=True)
+        if not tab.is_closed():
+            tab.wait_for_event("close", timeout=wait_ms)
+    except PwError as e:
+        log.debug("close_tab: leaving a tab open: %s", str(e).splitlines()[0])
 
 
 def _read_download(downloads: list[Download], dest: Path) -> bytes:

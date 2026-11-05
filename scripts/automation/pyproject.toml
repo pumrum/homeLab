@@ -7,7 +7,11 @@ requires-python = ">=3.13,<3.14"
 dependencies = ["automation-agent", "automation-common", "fidelity-nav", "innago-portal", "invoices-sync"]
 
 [dependency-groups]
-dev = ["pytest>=8.3", "ruff>=0.9"]
+dev = [
+    "pytest>=8.3",
+    "pytest-timeout>=2.3",
+    "ruff>=0.9",
+]
 
 [tool.uv]
 package = false
@@ -25,6 +29,9 @@ invoices-sync = { workspace = true }
 [tool.pytest.ini_options]
 testpaths = ["agent/tests", "common/tests", "fidelity/tests", "innago/tests", "invoices/tests"]
 addopts = "--import-mode=importlib"
+# A hung test fails with a stack trace, instead of holding up CI for hours
+timeout = 120
+timeout_method = "thread"
 
 [tool.ruff]
 line-length = 100

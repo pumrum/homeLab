@@ -9,13 +9,14 @@ PDFs differently, and the jobs run headed. To check the real behavior, open wind
 import http.server
 import os
 import threading
+import time
 from urllib.parse import urlsplit
 
 import pytest
 from playwright.sync_api import Error as PwError
 from playwright.sync_api import sync_playwright
 
-from automation_common.browser import PdfCaptureError, capture_pdf
+from automation_common.browser import PdfCaptureError, capture_pdf, close_tab
 
 PDF = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n"
 HEADED = bool(os.environ.get("AUTOMATION_TEST_HEADED"))
@@ -220,6 +221,30 @@ def test_requests_after_the_capture_are_left_alone(page, site, tmp_path):
     assert page.title() == "list"
     # A routed page would keep answering through capture_pdf's handler
     assert page.context.pages == [page]
+
+
+def test_closing_edges_downloads_tab_does_not_hang(page, tmp_path, monkeypatch):
+    # A normal close waits forever on this tab, which stopped a CI run for 40 minutes
+    _capture(page, "octet_stream", tmp_path / "invoice.pdf")
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and len(page.context.pages) == 1:
+        page.wait_for_timeout(50)
+    extra = [tab for tab in page.context.pages if tab != page]
+    if not extra:
+        pytest.skip("this Edge didn't open a downloads tab")
+    # Its address is blank for a moment after it opens, so it can look like any other tab
+    monkeypatch.setattr(type(extra[0]), "url", property(lambda self: ""))
+    started = time.monotonic()
+    close_tab(extra[0], wait_ms=500)
+    assert time.monotonic() - started < 5
+
+
+def test_close_tab_closes_an_ordinary_tab(page, site):
+    tab = page.context.new_page()
+    tab.goto(site.base + "/")
+    close_tab(tab)
+    assert tab.is_closed()
+    close_tab(tab)  # closing it again is harmless
 
 
 def test_a_failed_click_cleans_up_and_raises(page, tmp_path):
