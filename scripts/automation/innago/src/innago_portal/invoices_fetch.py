@@ -14,9 +14,11 @@ be exactly "Download", and nothing here ever matches the others.
 import datetime as dt
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from playwright.sync_api import Error as PwError
 from playwright.sync_api import Page, expect
 from playwright.sync_api import TimeoutError as PwTimeout
 
@@ -27,10 +29,10 @@ log = logging.getLogger(__name__)
 PAGE_TIMEOUT_MS = 45_000
 DOWNLOAD_TIMEOUT_MS = 60_000
 SETTLE_TIMEOUT_MS = 15_000
+STEADY_SECONDS = 3
+POLL_MS = 100
 
 ROWS = "tr.income-table-row"
-ROW_INVOICE_ID = "td.dv-in-id"
-ROW_UNIT = "td.dv-in-unit"
 COUNTER = ".invoice-counter"  # like "7 of 7"
 GROUPING = ".filter-group .simple-fake-select"
 NOT_GROUPED_OPTION = ".simple-fake-select-opt a:text-is('Not Grouped')"
@@ -45,6 +47,8 @@ RANGE_CHECKBOXES = {"senton": False, "dueon": True, "paidon": False, "disbursedo
 
 _COUNTS = re.compile(r"(\d+)\s+of\s+(\d+)")
 _INVOICE_ID = re.compile(r"^\w+$")  # it goes in an address
+_READ_ROWS_JS = """rows => rows.map(row => ["td.dv-in-unit", "td.dv-in-id"].map(
+    cell => (row.querySelector(cell)?.innerText || "").trim()))"""
 
 
 class FetchError(Exception):
@@ -86,24 +90,6 @@ class InvoiceList:
         self._page.locator(NOT_GROUPED_OPTION).click()
         expect(grouping).to_contain_text("Not Grouped", timeout=SETTLE_TIMEOUT_MS)
 
-    def _wait_for_some_rows(self) -> None:
-        """The table reloads after each change, with no rows until it's back."""
-        try:
-            expect(self._rows).not_to_have_count(0, timeout=SETTLE_TIMEOUT_MS)
-        except AssertionError:
-            log.warning("invoice list: no rows after %ds", SETTLE_TIMEOUT_MS // 1000)
-
-    def _settle(self) -> tuple[int, int] | None:
-        """Wait for every row the page says it's showing. Returns its shown and total counts."""
-        counter, _ = find_first([self._page], [COUNTER], SETTLE_TIMEOUT_MS)
-        counts = _COUNTS.search(counter.inner_text()) if counter is not None else None
-        if counts is None:
-            log.warning("invoice list: no row counter found, so the list can't be checked")
-            return None
-        shown, total = int(counts[1]), int(counts[2])
-        expect(self._rows).to_have_count(shown, timeout=SETTLE_TIMEOUT_MS)
-        return shown, total
-
     def _filter_to_this_month(self, today: dt.date) -> None:
         """The panel's Clear Filters, then this month by due date only, then Apply Filters."""
         page = self._page
@@ -134,29 +120,61 @@ class InvoiceList:
             log.warning("invoice list: still %d row(s) after filtering", self._rows.count())
 
     def _read_rows(self) -> list[ListedInvoice]:
-        invoices = []
-        for index in range(self._rows.count()):
-            row = self._rows.nth(index)
-            invoice_id = row.locator(ROW_INVOICE_ID).inner_text().strip()
-            if not _INVOICE_ID.match(invoice_id):
-                raise FetchError(f"row {index + 1} has no usable invoice number")
-            invoices.append(ListedInvoice(row.locator(ROW_UNIT).inner_text().strip().upper(),
-                                          invoice_id))
-        return sorted(invoices, key=lambda invoice: invoice.unit)
+        """Read every visible row in one step, because the table can vanish between two steps."""
+        try:
+            cells = self._rows.evaluate_all(_READ_ROWS_JS)
+        except PwError:
+            return []  # the page was mid-update, so look again
+        return [ListedInvoice(unit.upper(), invoice_id) for unit, invoice_id in cells]
+
+    def _read_when_ready(self) -> list[ListedInvoice]:
+        """Read the rows, allowing for the table reloading after each change.
+
+        While it reloads, its rows come and go and its counter can be wrong, so no one look at
+        it can be trusted. The invoice numbers are all that's needed, so a full set of them is
+        accepted at once. A short list only counts once it has stayed the same for a while,
+        and an empty one only once the wait is over.
+        """
+        deadline = time.monotonic() + SETTLE_TIMEOUT_MS / 1000
+        last: list[ListedInvoice] | None = None
+        steady_since = time.monotonic()
+        while True:
+            invoices = self._read_rows()
+            now = time.monotonic()
+            if len(invoices) == self._expected and all(i.invoice_id for i in invoices):
+                return invoices
+            if invoices != last:
+                last, steady_since = invoices, now
+            if invoices and now - steady_since >= STEADY_SECONDS:
+                return invoices
+            if now >= deadline:
+                return invoices
+            self._page.wait_for_timeout(POLL_MS)
+
+    def _refuse_partial_list(self, invoices: list[ListedInvoice]) -> None:
+        """Only when the counter agrees with the rows read, since it's unreliable mid-reload."""
+        counter, _ = find_first([self._page], [COUNTER], SETTLE_TIMEOUT_MS)
+        counts = _COUNTS.search(counter.inner_text()) if counter is not None else None
+        if counts is None:
+            log.warning("invoice list: no row counter found, so the list can't be checked")
+            return
+        shown, total = int(counts[1]), int(counts[2])
+        if shown == len(invoices) and shown < total:
+            raise FetchError(f"the list shows only {shown} of {total} invoices")
 
     def open(self, today: dt.date | None = None) -> int:
         """Load the list, read every invoice showing, and return how many there are."""
         self._page.goto(self._url, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
         self._show_not_grouped()
-        self._wait_for_some_rows()
-        counts = self._settle()
-        if self._rows.count() != self._expected:
+        invoices = self._read_when_ready()
+        if len(invoices) != self._expected:
             self._filter_to_this_month(today or dt.date.today())
-            self._wait_for_some_rows()
-            counts = self._settle()
-        if counts is not None and counts[0] < counts[1]:
-            raise FetchError(f"the list shows only {counts[0]} of {counts[1]} invoices")
-        self._invoices = self._read_rows()
+            invoices = self._read_when_ready()
+        self._refuse_partial_list(invoices)
+        for index, invoice in enumerate(invoices, start=1):
+            if not _INVOICE_ID.match(invoice.invoice_id):
+                raise FetchError(f"row {index} has no usable invoice number")
+        self._invoices = sorted(invoices, key=lambda invoice: invoice.unit)
         log.info("invoice list: %d invoice(s)", len(self._invoices))
         return len(self._invoices)
 
