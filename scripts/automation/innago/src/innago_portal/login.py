@@ -4,8 +4,9 @@ A remembered browser profile can skip any of the steps, and MFA and the passkey 
 come and go, so nothing assumes an order. Each pass works out where the page is and
 handles that one step, until the page is signed in or the time runs out.
 
-The email and password steps have run on the real site. It hasn't shown a passkey prompt
-or MFA to the job yet, so those come from how this kind of hosted sign-in usually works.
+The email and password steps have run on the real site. The passkey prompt's address and
+buttons come from a screenshot of the real page, and the job has only declined it on a
+test site. The job has reached the real MFA page and waited, but no code has gone through.
 """
 
 import logging
@@ -28,7 +29,10 @@ log = logging.getLogger(__name__)
 EMAIL_FIELD = ["input#username", "input[name='username']", "input[type='email']"]
 PASSWORD_FIELD = ["input#password", "input[name='password']", "input[type='password']"]
 # Only ways to decline. Never add one that creates a passkey, such as "Continue" alone.
+# The first is the real site's, and it declines for good rather than asking again.
 PASSKEY_SKIP = [
+    ":is(button,a):text-matches('^not on this device$', 'i')",
+    "input[type='submit'][value='Not on this device' i]",
     ":is(button,a):text-matches('^(remind me later|not now|maybe later|skip|skip for now)$', 'i')",
     ":is(button,a):text-matches('^continue without', 'i')",
 ]
@@ -62,7 +66,7 @@ class Timeouts:
     total_s: float = 120  # the whole sign-in, not counting an MFA wait
     field: int = 15_000  # a field or button appearing
     after_submit: int = 30_000  # the page moving on after a submit
-    mfa: int = 300_000  # someone entering a code
+    mfa: int = 60_000  # someone entering a code; must leave room in the job's time limit
     settle: int = 3_000  # a passkey prompt appearing after sign-in
 
 
@@ -79,10 +83,11 @@ def classify(url: str, app_url: str) -> Step:
         return Step.PASSWORD
     if "/u/login" in path:
         return Step.EMAIL
+    # Before MFA: the real offer to use a fingerprint or face is at /u/mfa-webauthn-...-enrollment
+    if "/u/passkey" in path or ("webauthn" in path and "enrollment" in path):
+        return Step.PASSKEY
     if "/u/mfa" in path or path.startswith("/mfa"):
         return Step.MFA
-    if "/u/passkey" in path:
-        return Step.PASSKEY
     return Step.OTHER
 
 
@@ -138,12 +143,13 @@ def _skip_passkey(page: Page, t: Timeouts, required: bool) -> bool:
 
 
 def _wait_for_mfa(page: Page, site: Site, t: Timeouts) -> None:
-    minutes = t.mfa / 60_000
-    log.warning("sign-in: the site wants an MFA code; waiting up to %.0f minutes", minutes)
+    seconds = t.mfa // 1000
+    log.warning("sign-in: the site wants an MFA code on %s; waiting up to %d seconds",
+                _path(page), seconds)
     try:
         page.wait_for_url(lambda url: classify(url, site.app_url) is not Step.MFA, timeout=t.mfa)
     except PwTimeout:
-        raise LoginError(f"MFA was not completed within {minutes:.0f} minutes") from None
+        raise LoginError(f"MFA was not completed within {seconds} seconds") from None
 
 
 def sign_in(page: Page, site: Site, credential: Credential,

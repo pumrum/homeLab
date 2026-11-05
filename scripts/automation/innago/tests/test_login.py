@@ -41,6 +41,9 @@ FAST = Timeouts(total_s=8, field=2_000, after_submit=2_000, mfa=1_500, settle=30
     (f"{ID}/u/login/password?state=abc", Step.PASSWORD),
     (f"{ID}/u/mfa-email-challenge?state=abc", Step.MFA),
     (f"{ID}/u/passkey-enrollment?state=abc", Step.PASSKEY),
+    (f"{ID}/u/mfa-webauthn-platform-enrollment?state=abc", Step.PASSKEY),
+    (f"{ID}/u/mfa-webauthn-roaming-enrollment?state=abc", Step.PASSKEY),
+    (f"{ID}/u/mfa-webauthn-platform-challenge?state=abc", Step.MFA),
     (f"{ID}/authorize", Step.OTHER),
     ("about:blank", Step.OTHER),
 ])
@@ -61,6 +64,13 @@ PASSWORD_PAGE = """<form method="post"><input id="password" name="password" type
 PASSKEY_PAGE = """<h1>Create a passkey for faster sign-in</h1>
 <form method="post" action="/create"><button type="submit">Continue</button></form>
 <a href="{after}">Remind me later</a>"""
+# Mirrors the real prompt's wording. It never says "passkey"
+REAL_PASSKEY_PAGE = """<h1>Log In Faster on This Device</h1>
+<p>Trust this device? You can quickly and securely log in the next time using this
+device's fingerprint or face recognition.</p>
+<form method="post" action="/create"><button type="submit">Continue</button></form>
+<form method="post" action="/remind-later"><button type="submit">Remind me later</button></form>
+<form method="get" action="{after}"><button type="submit">Not on this device</button></form>"""
 STUCK_PASSKEY_PAGE = """<h1>Create a passkey</h1>
 <form method="post" action="/create"><button type="submit">Continue</button></form>"""
 MFA_PAGE = "<h1>Enter the code we sent you</h1><input name='code'>"
@@ -272,6 +282,8 @@ class FakeSite:
                     self._redirect(route, self.after_password or f"{APP}/dashboard")
             case ("/u/passkey-enrollment", _):
                 self._html(route, PASSKEY_PAGE.format(after=f"{APP}/dashboard"))
+            case ("/u/mfa-webauthn-platform-enrollment", _):
+                self._html(route, REAL_PASSKEY_PAGE.format(after=f"{APP}/dashboard"))
             case ("/u/passkey-stuck", _):
                 self._html(route, STUCK_PASSKEY_PAGE)
             case ("/u/mfa-email-challenge", _):
@@ -393,6 +405,16 @@ def test_a_hosted_passkey_prompt_is_skipped_and_never_accepted(open_site):
     sign_in(page, SITE, CRED, FAST)
     assert page.url == f"{APP}/dashboard"
     assert "/create" not in site.get_paths
+
+
+def test_the_real_passkey_prompt_is_declined_for_good(open_site):
+    # Its address starts like MFA's, and the job once waited there for a code that never comes
+    site = FakeSite(after_password=f"{ID}/u/mfa-webauthn-platform-enrollment?state=c")
+    page = open_site(site)
+    sign_in(page, SITE, CRED, FAST)
+    assert page.url.split("?")[0] == f"{APP}/dashboard"
+    assert "/create" not in site.get_paths
+    assert "/remind-later" not in site.get_paths
 
 
 def test_a_passkey_prompt_with_no_way_to_skip_fails(open_site):
@@ -603,13 +625,15 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch):
             return ctx
         return launch_edge
 
+    notes = []
+
     def start(site, *args):
         site.use(pdf_server)
         monkeypatch.setattr(session, "launch_edge", launch(site))
         monkeypatch.setattr(capture_module, "launch_edge", launch(site))
         monkeypatch.setattr(login_module, "Timeouts", lambda: FAST)
         monkeypatch.setattr(invoices_fetch, "PAGE_TIMEOUT_MS", 2_000)
-        return main(list(args), notifier=lambda note, masker: True)
+        return main(list(args), notifier=lambda note, masker: notes.append(note) or True)
 
     monkeypatch.setenv("AUTOMATION_DATA_ROOT", str(tmp_path))
     monkeypatch.setattr(keyring, "get_credential", lambda name, user: SimpleNamespace(
@@ -617,7 +641,7 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch):
     data = tmp_path / "innago"
     data.mkdir()
     (data / "config.toml").write_text(CONFIG, encoding="utf-8")
-    return SimpleNamespace(start=start, data=data)
+    return SimpleNamespace(start=start, data=data, notes=notes)
 
 
 def _run_dirs(data):
@@ -647,6 +671,42 @@ def test_a_normal_run_saves_and_a_second_run_finds_no_change(whole_run, pdf_of):
     assert whole_run.start(FakeSite(signed_in=True, pdfs=_two_units(pdf_of))) == 0
     assert "UNCHANGED" in (_run_dirs(whole_run.data)[-1] / "report.txt").read_text(encoding="utf-8")
     assert len(list(saved.iterdir())) == 2
+
+
+def test_mfa_fails_the_run_says_so_and_saves_where_it_stopped(whole_run, pdf_of):
+    site = FakeSite(after_password=f"{ID}/u/mfa-email-challenge?state=c", pdfs=_two_units(pdf_of))
+    assert whole_run.start(site) == 1
+    assert whole_run.notes == [{"title": "innago-invoices", "message": "FAIL: MFA needed"}]
+    run_dir = _run_dirs(whole_run.data)[0]
+    assert (run_dir / "fail_01.png").exists()
+    assert "/u/mfa-email-challenge" in (run_dir / "fail_01_page.txt").read_text(encoding="utf-8")
+    assert "/u/mfa-email-challenge" in (run_dir / "run.log").read_text(encoding="utf-8")
+
+
+def test_the_real_passkey_prompt_doesnt_stop_a_run(whole_run, pdf_of):
+    site = FakeSite(after_password=f"{ID}/u/mfa-webauthn-platform-enrollment?state=c",
+                    pdfs=_two_units(pdf_of))
+    assert whole_run.start(site) == 0
+    assert whole_run.notes == [{"title": "innago-invoices", "message": "PASS"}]
+    assert "/create" not in site.get_paths
+
+
+def test_a_sign_in_stuck_on_an_unknown_page_saves_where_it_stopped(whole_run, pdf_of):
+    site = FakeSite(after_password=f"{ID}/u/something-new?state=c", pdfs=_two_units(pdf_of))
+    assert whole_run.start(site) == 1
+    assert whole_run.notes[0]["message"] == "FAIL"
+    run_dir = _run_dirs(whole_run.data)[0]
+    assert "/u/something-new" in (run_dir / "fail_01_page.txt").read_text(encoding="utf-8")
+    assert (run_dir / "fail_01.png").exists()
+
+
+def test_a_pdf_that_never_arrives_saves_where_it_stopped(whole_run, pdf_of, monkeypatch):
+    monkeypatch.setattr(invoices_fetch, "DOWNLOAD_TIMEOUT_MS", 1_000)
+    site = FakeSite(signed_in=True, pdfs=[b"not a pdf", b"not a pdf"])
+    assert whole_run.start(site) == 1
+    run_dir = _run_dirs(whole_run.data)[0]
+    assert (run_dir / "fail_01.png").exists()
+    assert "no PDF arrived" in (run_dir / "report.txt").read_text(encoding="utf-8")
 
 
 def test_a_wrong_password_saves_evidence_and_no_secret(whole_run, pdf_of):

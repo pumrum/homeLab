@@ -19,7 +19,7 @@ from playwright.sync_api import Page
 from automation_common.browser import save_page_evidence
 from automation_common.config import ConfigError, process_dir
 from automation_common.notify import send_notification
-from automation_common.run import Notifier, Run, Status
+from automation_common.run import Notifier, Run, Status, Summary, pass_fail
 from innago_portal import PROCESS
 from innago_portal.capture import capture
 from innago_portal.config import Config, load_config
@@ -132,6 +132,9 @@ def download_stage(run: Run, source: InvoiceSource, cfg: Config, data_dir: Path,
         return
     if dump:
         _save_structure(run, source)
+    if count != len(units):  # the rows below can't show why, so keep what the list looks like
+        log.warning("invoice list: %d invoice(s) for %d unit(s)", count, len(units))
+        source.save_evidence(run.run_dir, run.next_failure_prefix())
     seen: set[str] = set()
     failed: set[str] = set()  # already reported, so they aren't reported again as missing
     for index in range(count):
@@ -180,10 +183,19 @@ def browser_stage(run: Run, cfg: Config, data_dir: Path, dump: bool,
             _fail_units(run, cfg.invoices.units, "not processed: sign-in failed")
 
 
+def notification_message(summary: Summary) -> str:
+    """PASS or FAIL, naming MFA when that's what stopped the run, since it takes a person."""
+    if any(item.stage == "login" and item.status is Status.FAILED and "MFA" in item.detail
+           for item in summary.items):
+        return "FAIL: MFA needed"
+    return pass_fail(summary)
+
+
 def main(argv: list[str] | None = None, *, notifier: Notifier = send_notification) -> int:
     args = parse_args(argv)
     data_dir = process_dir(PROCESS)
-    with Run.start(PROCESS, data_dir, notifier=notifier, title=COMMAND) as run:
+    with Run.start(PROCESS, data_dir, notifier=notifier, title=COMMAND,
+                   message=notification_message) as run:
         cfg = load_stage(run, data_dir)
         if cfg is not None:
             if args.capture:

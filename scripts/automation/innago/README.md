@@ -60,13 +60,16 @@ Each step is worked out from the page, because any of them can be skipped:
 | Already signed in | Carries on, because the profile is still valid |
 | Email, then password | Fills each in once, from `innago/login` |
 | Rejected email or password | Fails right away. Never retried, so it can't lock the account |
-| Passkey prompt | Declines it, and fails if there's no way to decline. Never creates one |
-| MFA | Waits 5 minutes for someone to finish it in the window, then fails |
+| Passkey prompt, like "Log In Faster on This Device" | Clicks `Not on this device`, and fails if there's no way to decline. Never creates one |
+| MFA | Waits 1 minute for someone to finish it in the window, then fails. The notification says `FAIL: MFA needed` |
 | CAPTCHA or bot check | Fails right away. Never worked around |
 | Anything else | Fails after 30 seconds on the same page |
 
 Nobody can type a code on the robot's locked screen, so an MFA prompt there fails after
 the wait. Run `--capture` to sign in by hand, after which the profile may be remembered.
+
+A normal run takes about 2 minutes. The agent's limit stops a job instantly, and a job stopped
+that way saves no report or evidence. So keep the limit well above the MFA wait.
 
 A passkey dialog from Windows itself, rather than from the page, can't be dismissed from
 here. It would use up the sign-in's time and fail with a screenshot.
@@ -118,7 +121,7 @@ schedule. Add this to `C:\automation\agent\config.toml` and restart the agent:
 [[jobs]]
 name = "innago-invoices"
 command = "innago-invoices"
-timeout_minutes = 15
+timeout_minutes = 5
 ```
 
 ## Add another command
