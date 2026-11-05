@@ -33,10 +33,11 @@ Global rules for the whole repo. Work under `scripts/automation/` also follows
 - When you have several questions, print the full list first, then ask them one
   at a time in a logical order, starting with the one that shapes the most
   decisions. Wait for each answer before asking the next.
-- End every command block meant for pasting with a comment line, such as
-  `# end of block`, so the last real command runs without another Enter. A
-  trailing blank line doesn't work, because copying trims it. Leave the comment
-  out of any block that prompts for input, where it would be read as the answer.
+- End every command block meant for pasting with a blank line inside the code
+  fence, so every command runs and returns to a blank prompt. Never end one with
+  a comment line, which stays at the prompt. This relies on Windows Terminal's
+  `trimPaste` setting being off on the machine being pasted into. A command that
+  prompts for input must not take a stray blank line as its answer.
 
 ## The repo is public
 
