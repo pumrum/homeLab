@@ -94,10 +94,6 @@ Use these from `automation_common` instead of writing your own:
 | `sheets` | `open_worksheet`: read a Google Sheet tab, append rows, or replace a column from a cell down |
 | `notify` | The webhook POST (`Run` calls it for you) |
 
-When copying a data file to a sheet, compare the two and append what's missing,
-so the next run catches up after a failed write. A process with a `sheet.py`
-shows how.
-
 ## Workspace and packaging
 
 - Python 3.13, uv. One uv workspace rooted here with a single committed `uv.lock`.
