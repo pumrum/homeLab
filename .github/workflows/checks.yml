@@ -1,7 +1,7 @@
 # Runs pre-commit on every file, then the automation unit tests. No secrets
 # are used and nothing contacts a real site: tests use synthetic fixtures only.
-# A PR only runs the tests if it changes automation code or this workflow, because
-# they take minutes. A merge to main always runs them, so nothing goes untested for long.
+# A PR or a merge only runs the tests if it changes automation code or this workflow,
+# because they take minutes. pre-commit always runs.
 name: Checks
 
 on:
@@ -27,11 +27,12 @@ jobs:
       - name: Decide whether the tests need to run
         id: changes
         env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha }}
+          # The PR's base, or for a merge, what main was before it
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           tests=true
-          if [ "$EVENT" = "pull_request" ]; then
+          # With nothing to compare against (a push that created main), the tests run
+          if [ -n "$BASE" ] && [ "$BASE" != "0000000000000000000000000000000000000000" ]; then
             # On its own line, so an error here fails the job instead of skipping the tests
             changed=$(git diff --name-only "$BASE" HEAD)
             matches=$(echo "$changed" | grep -E '^(scripts/automation/|\.github/workflows/checks\.yml$)' | grep -vE '\.md$' || true)
