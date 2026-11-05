@@ -10,7 +10,7 @@ import logging
 import time
 from pathlib import Path
 
-from playwright.sync_api import BrowserContext, Download, Page, sync_playwright
+from playwright.sync_api import BrowserContext, Download, Page, Response, sync_playwright
 from playwright.sync_api import Error as PwError
 
 from automation_common.browser import DOM_OUTLINE_JS, first_page, launch_edge, save_page_evidence
@@ -32,6 +32,13 @@ def _fingerprint(page: Page) -> str:
 def _on_download(download: Download) -> None:
     # Answers how the PDF arrives. The name and address aren't logged, and it isn't kept
     log.info("capture: the site started a file download (not kept)")
+
+
+def _on_response(response: Response) -> None:
+    # Shows how the real site delivers a PDF. Its address is private, so it isn't logged
+    if "pdf" in response.headers.get("content-type", "").lower():
+        log.info("capture: the site sent a PDF (%s, status %d)",
+                 response.request.method, response.status)
 
 
 def _watch(ctx: BrowserContext, run_dir: Path, deadline: float) -> int:
@@ -68,6 +75,7 @@ def capture(run: Run, site: Site, profile: Path) -> None:
                 "The time limit is %d minutes.", CAPTURE_MINUTES)
     with sync_playwright() as pw:
         ctx = launch_edge(pw, profile)
+        ctx.on("response", _on_response)
         try:
             first_page(ctx).goto(site.login_url, wait_until="domcontentloaded")
             count = _watch(ctx, run.run_dir, time.monotonic() + CAPTURE_MINUTES * 60)

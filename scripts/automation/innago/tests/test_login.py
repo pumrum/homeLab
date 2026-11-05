@@ -1,9 +1,12 @@
 """The sign-in flow in real Edge against a fake site.
 
-Playwright answers every request from here, so nothing reaches a network. It runs on
-machines with Edge, and is skipped elsewhere. The classify tests run everywhere.
+Playwright answers the site's requests from here, and the PDFs come from a server on
+127.0.0.1, so nothing leaves this machine. It runs on machines with Edge, and is skipped
+elsewhere. The classify tests run everywhere.
 """
 
+import http.server
+import threading
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
@@ -12,6 +15,7 @@ import pytest
 from playwright.sync_api import Error as PwError
 from playwright.sync_api import sync_playwright
 
+from automation_common.browser import PdfCaptureError
 from automation_common.secrets import Credential
 from innago_portal import capture as capture_module
 from innago_portal import invoices_fetch, session
@@ -60,11 +64,59 @@ STUCK_PASSKEY_PAGE = """<h1>Create a passkey</h1>
 <form method="post" action="/create"><button type="submit">Continue</button></form>"""
 MFA_PAGE = "<h1>Enter the code we sent you</h1><input name='code'>"
 LIST_PAGE = """<table><tbody>
-<tr><td>Unit 1001</td><td><button onclick="location='/download/1'">Download</button></td></tr>
-<tr><td>Unit 1002</td><td><a href="/download/2">Download</a></td></tr>
+<tr><td>Unit 1001</td><td>
+<button onclick="window.open('{base}/invoice-1.pdf')">Download Invoice</button></td></tr>
+<tr><td>Unit 1002</td><td><a href="{base}/invoice-2.pdf" target="_blank">Download</a></td></tr>
 <tr style="display:none"><td>hidden copy</td><td><button>Download</button></td></tr>
 <tr><td>A note without a download button</td></tr>
 </tbody></table><button onclick="location='/pay'">Make Payment</button>"""
+SESSION_COOKIE = {"name": "session", "value": "made-up"}
+
+
+class PdfServer:
+    """Serves PDFs on 127.0.0.1 to a signed-in session only, as the real site's address does.
+
+    A local server, not a Playwright route, so the PDFs come over a real connection.
+    """
+
+    def __init__(self):
+        self.files = {}
+        self.attachment = False
+        self.single_use = False
+        self.fetches = []
+        owner = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                owner.fetches.append(self.path)
+                if SESSION_COOKIE["name"] not in self.headers.get("Cookie", ""):
+                    return self._reply(401, b"sign in first")
+                if self.path not in owner.files:
+                    return self._reply(404, b"not found")
+                if owner.single_use and owner.fetches.count(self.path) > 1:
+                    return self._reply(403, b"link already used")
+                return self._reply(200, owner.files[self.path])
+
+            def _reply(self, status, body):
+                kind = "application/pdf" if status == 200 else "text/plain"
+                self.send_response(status)
+                self.send_header("Content-Type", kind)
+                self.send_header("Content-Length", str(len(body)))
+                if owner.attachment:
+                    self.send_header("Content-Disposition", 'attachment; filename="0a1b.pdf"')
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.base = f"http://127.0.0.1:{self._server.server_port}"
+        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self._server.shutdown()
+        self._server.server_close()
 
 
 class FakeSite:
@@ -79,6 +131,11 @@ class FakeSite:
         self.pdfs = list(pdfs)
         self.posts = []
         self.get_paths = []
+        self.server = None
+
+    def use(self, server):
+        self.server = server
+        server.files = {f"/invoice-{n}.pdf": pdf for n, pdf in enumerate(self.pdfs, start=1)}
 
     def _html(self, route, body):
         route.fulfill(status=200, content_type="text/html", body=f"<!doctype html>{body}")
@@ -89,6 +146,8 @@ class FakeSite:
 
     def handle(self, route):
         request = route.request
+        if self.server and request.url.startswith(self.server.base):
+            return route.continue_()
         path = urlsplit(request.url).path
         self.get_paths.append(path)
         if request.method == "POST":
@@ -121,11 +180,7 @@ class FakeSite:
 
     def _app(self, route, path):
         if path == "/invoices":
-            self._html(route, LIST_PAGE)
-        elif path.startswith("/download/"):
-            route.fulfill(
-                status=200, content_type="application/pdf", body=self.pdfs[int(path[-1]) - 1],
-                headers={"content-disposition": 'attachment; filename="0a1b2c3d-random.pdf"'})
+            self._html(route, LIST_PAGE.format(base=self.server.base))
         else:
             self._html(route, self.home)
 
@@ -156,13 +211,23 @@ def browser(needs_edge):
 
 
 @pytest.fixture
-def open_site(browser):
+def pdf_server():
+    server = PdfServer()
+    yield server
+    server.close()
+
+
+@pytest.fixture
+def open_site(browser, pdf_server):
     contexts = []
 
-    def opened(site):
+    def opened(site, session_cookie=True):
         ctx = browser.new_context(accept_downloads=True)
         contexts.append(ctx)
+        site.use(pdf_server)
         ctx.route("**/*", site.handle)
+        if session_cookie:
+            ctx.add_cookies([SESSION_COOKIE | {"url": pdf_server.base}])
         return ctx.new_page()
     yield opened
     for ctx in contexts:
@@ -278,19 +343,54 @@ def test_the_observer_sees_each_step(open_site):
     assert steps == [Step.EMAIL, Step.PASSWORD, Step.SIGNED_IN]
 
 
-def test_the_invoice_list_downloads_rows_and_ignores_the_site_file_name(
-        open_site, pdf_of, tmp_path):
-    pdfs = [pdf_of(unit="1001"), pdf_of(unit="1002")]
+def _opened_list(open_site, pdfs, **options):
     site = FakeSite(signed_in=True, pdfs=pdfs)
-    page = open_site(site)
+    page = open_site(site, **options)
     sign_in(page, SITE, CRED, FAST)
-    source = InvoiceList(page, f"{APP}/invoices")
+    return site, page, InvoiceList(page, f"{APP}/invoices")
+
+
+@pytest.mark.parametrize("attachment", [False, True], ids=["opens in a new tab", "attachment"])
+def test_the_invoice_list_saves_each_pdf_however_it_opens(
+        open_site, pdf_server, pdf_of, tmp_path, attachment):
+    pdf_server.attachment = attachment
+    pdfs = [pdf_of(unit="1001"), pdf_of(unit="1002")]
+    site, page, source = _opened_list(open_site, pdfs)
     assert source.open() == 2  # not the hidden copy, the note, or the payment button
     for index, expected in enumerate(pdfs):
         dest = tmp_path / f"invoice_{index}.pdf"
         source.download(index, dest)
         assert dest.read_bytes() == expected
+        if not attachment:  # with one, Edge may open its downloads tab a moment later
+            assert page.context.pages == [page]
     assert "/pay" not in site.get_paths
+
+
+def test_a_single_use_address_still_gives_the_pdf(open_site, pdf_server, pdf_of, tmp_path):
+    pdf_server.single_use = True
+    pdfs = [pdf_of(unit="1001"), pdf_of(unit="1002")]
+    _, _, source = _opened_list(open_site, pdfs)
+    source.open()
+    source.download(0, tmp_path / "invoice.pdf")
+    assert (tmp_path / "invoice.pdf").read_bytes() == pdfs[0]
+    assert pdf_server.fetches.count("/invoice-1.pdf") == 1
+
+
+@pytest.mark.parametrize("setup", [{"session_cookie": False}, {"not_a_pdf": True}],
+                         ids=["no session", "not a PDF"])
+def test_no_pdf_fails_clearly_and_keeps_its_address_private(
+        open_site, pdf_server, pdf_of, tmp_path, monkeypatch, setup):
+    monkeypatch.setattr(invoices_fetch, "DOWNLOAD_TIMEOUT_MS", 1_500)
+    pdfs = [b"<html>a sign-in page</html>" if setup.get("not_a_pdf") else pdf_of(), pdf_of()]
+    options = {"session_cookie": setup.get("session_cookie", True)}
+    _, page, source = _opened_list(open_site, pdfs, **options)
+    source.open()
+    dest = tmp_path / "invoice.pdf"
+    with pytest.raises(PdfCaptureError, match="no PDF arrived") as caught:
+        source.download(0, dest)
+    assert pdf_server.base not in str(caught.value)
+    assert not dest.exists()
+    assert page.context.pages == [page]
 
 
 # ---------------------------------------------- whole runs, with a real browser profile
@@ -305,18 +405,20 @@ units = ["1001", "1002"]
 
 
 @pytest.fixture
-def whole_run(needs_edge, tmp_path, monkeypatch):
+def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch):
     """Everything real but the network, the window, and the stored credential."""
     def launch(site):
         def launch_edge(pw, profile):
             ctx = pw.chromium.launch_persistent_context(
                 user_data_dir=str(profile), channel="msedge", headless=True, accept_downloads=True)
             ctx.route("**/*", site.handle)
+            ctx.add_cookies([SESSION_COOKIE | {"url": pdf_server.base}])
             ctx.set_default_timeout(3_000)
             return ctx
         return launch_edge
 
     def start(site, *args):
+        site.use(pdf_server)
         monkeypatch.setattr(session, "launch_edge", launch(site))
         monkeypatch.setattr(capture_module, "launch_edge", launch(site))
         monkeypatch.setattr(login_module, "Timeouts", lambda: FAST)

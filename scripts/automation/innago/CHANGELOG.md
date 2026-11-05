@@ -10,8 +10,9 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
 - First version. A shared sign-in handles a remembered profile, email and password,
   a passkey prompt (always declined), MFA (a timed wait), and a CAPTCHA (fails).
   A rejected email or password is never sent again.
-- `innago-invoices` downloads every invoice in the site's default view and names each
-  one `<due date>_<unit>_<invoice number>-1.pdf` from the PDF's text. The naming logic
+- `innago-invoices` gets every invoice in the site's default view with `capture_pdf`,
+  which handles the site opening PDFs in a new tab, and names each one
+  `<due date>_<unit>_<invoice number>-1.pdf` from the PDF's text. The naming logic
   comes from `scripts/innago_renameInvoices.py`, except that a unit or invoice number
   must now contain a digit, so labels like `Invoice Date` can't be taken for values.
 - A run fails if a listed unit has no invoice, a PDF is for an unknown unit, or a unit

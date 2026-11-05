@@ -26,6 +26,9 @@ C:\automation\innago\data\invoices\<yyyy-MM>\<due date>_<unit>_<invoice number>-
   Same text is `unchanged`. Different text, such as an invoice that's now paid or late,
   replaces the saved file, and the old copy goes to the run folder under `replaced\`.
 - **It only clicks download controls.** It can't send or pay anything.
+- **It needs no PDF settings in Edge.** The site opens each invoice in a new tab, and
+  the job keeps a copy of the PDF as it arrives. While it runs, Edge's downloads panel
+  may show a file that won't open, which is expected.
 
 ### What a run does when something's wrong
 
@@ -35,7 +38,7 @@ C:\automation\innago\data\invoices\<yyyy-MM>\<due date>_<unit>_<invoice number>-
 | A PDF is for a unit that isn't in the config | Not saved. That item fails |
 | A second invoice for the same unit | The first is saved, the second isn't. That item fails |
 | A PDF is missing a date, unit, or invoice number | Not saved. That item fails |
-| A download fails | That item fails, and the page is saved as evidence |
+| No PDF arrives after a click | That item fails, and the page is saved as evidence |
 | Sign-in fails | Every unit fails and nothing is downloaded |
 
 Anything not saved stays in the run folder under `downloads\`. Any failure means exit

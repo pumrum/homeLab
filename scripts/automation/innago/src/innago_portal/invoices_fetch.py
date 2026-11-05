@@ -1,4 +1,7 @@
-"""Browser step: open the invoice list and download one invoice at a time.
+"""Browser step: open the invoice list and get one invoice at a time.
+
+The site's download control opens the PDF in a new tab instead of downloading it, so
+each one is captured with automation_common.browser.capture_pdf.
 
 The selectors are candidates until they're checked against a --capture or --dump of
 the real page. Only controls labeled as downloads are ever clicked, so this can't send
@@ -10,7 +13,7 @@ from pathlib import Path
 
 from playwright.sync_api import Locator, Page
 
-from automation_common.browser import find_first, save_page_evidence
+from automation_common.browser import capture_pdf, find_first, save_page_evidence
 
 log = logging.getLogger(__name__)
 
@@ -60,15 +63,12 @@ class InvoiceList:
         return len(self._rows)
 
     def download(self, index: int, dest: Path) -> None:
-        """Download one row's PDF to `dest`. The site's own file name is random, so it's ignored."""
+        """Save one row's PDF to `dest`. The site's own file name is random, so it's ignored."""
         button, selector = find_first([self._rows[index]], DOWNLOAD_BUTTON, PAGE_TIMEOUT_MS)
         if button is None:
             raise FetchError(f"row {index + 1} has no download button")
-        log.info("downloading row %d via %s", index + 1, selector)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with self._page.expect_download(timeout=DOWNLOAD_TIMEOUT_MS) as download:
-            button.click()
-        download.value.save_as(dest)
+        log.info("getting row %d via %s", index + 1, selector)
+        capture_pdf(self._page, button.click, dest, DOWNLOAD_TIMEOUT_MS)
 
     def save_evidence(self, run_dir: Path, prefix: str) -> None:
         """After a failure: save the page's outline and a screenshot. Never raises."""
