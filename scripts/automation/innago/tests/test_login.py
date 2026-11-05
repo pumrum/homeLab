@@ -625,13 +625,15 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch):
             return ctx
         return launch_edge
 
+    notes = []
+
     def start(site, *args):
         site.use(pdf_server)
         monkeypatch.setattr(session, "launch_edge", launch(site))
         monkeypatch.setattr(capture_module, "launch_edge", launch(site))
         monkeypatch.setattr(login_module, "Timeouts", lambda: FAST)
         monkeypatch.setattr(invoices_fetch, "PAGE_TIMEOUT_MS", 2_000)
-        return main(list(args), notifier=lambda note, masker: True)
+        return main(list(args), notifier=lambda note, masker: notes.append(note) or True)
 
     monkeypatch.setenv("AUTOMATION_DATA_ROOT", str(tmp_path))
     monkeypatch.setattr(keyring, "get_credential", lambda name, user: SimpleNamespace(
@@ -639,7 +641,7 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch):
     data = tmp_path / "innago"
     data.mkdir()
     (data / "config.toml").write_text(CONFIG, encoding="utf-8")
-    return SimpleNamespace(start=start, data=data)
+    return SimpleNamespace(start=start, data=data, notes=notes)
 
 
 def _run_dirs(data):
@@ -669,6 +671,42 @@ def test_a_normal_run_saves_and_a_second_run_finds_no_change(whole_run, pdf_of):
     assert whole_run.start(FakeSite(signed_in=True, pdfs=_two_units(pdf_of))) == 0
     assert "UNCHANGED" in (_run_dirs(whole_run.data)[-1] / "report.txt").read_text(encoding="utf-8")
     assert len(list(saved.iterdir())) == 2
+
+
+def test_mfa_fails_the_run_says_so_and_saves_where_it_stopped(whole_run, pdf_of):
+    site = FakeSite(after_password=f"{ID}/u/mfa-email-challenge?state=c", pdfs=_two_units(pdf_of))
+    assert whole_run.start(site) == 1
+    assert whole_run.notes == [{"title": "innago-invoices", "message": "FAIL: MFA needed"}]
+    run_dir = _run_dirs(whole_run.data)[0]
+    assert (run_dir / "fail_01.png").exists()
+    assert "/u/mfa-email-challenge" in (run_dir / "fail_01_page.txt").read_text(encoding="utf-8")
+    assert "/u/mfa-email-challenge" in (run_dir / "run.log").read_text(encoding="utf-8")
+
+
+def test_the_real_passkey_prompt_doesnt_stop_a_run(whole_run, pdf_of):
+    site = FakeSite(after_password=f"{ID}/u/mfa-webauthn-platform-enrollment?state=c",
+                    pdfs=_two_units(pdf_of))
+    assert whole_run.start(site) == 0
+    assert whole_run.notes == [{"title": "innago-invoices", "message": "PASS"}]
+    assert "/create" not in site.get_paths
+
+
+def test_a_sign_in_stuck_on_an_unknown_page_saves_where_it_stopped(whole_run, pdf_of):
+    site = FakeSite(after_password=f"{ID}/u/something-new?state=c", pdfs=_two_units(pdf_of))
+    assert whole_run.start(site) == 1
+    assert whole_run.notes[0]["message"] == "FAIL"
+    run_dir = _run_dirs(whole_run.data)[0]
+    assert "/u/something-new" in (run_dir / "fail_01_page.txt").read_text(encoding="utf-8")
+    assert (run_dir / "fail_01.png").exists()
+
+
+def test_a_pdf_that_never_arrives_saves_where_it_stopped(whole_run, pdf_of, monkeypatch):
+    monkeypatch.setattr(invoices_fetch, "DOWNLOAD_TIMEOUT_MS", 1_000)
+    site = FakeSite(signed_in=True, pdfs=[b"not a pdf", b"not a pdf"])
+    assert whole_run.start(site) == 1
+    run_dir = _run_dirs(whole_run.data)[0]
+    assert (run_dir / "fail_01.png").exists()
+    assert "no PDF arrived" in (run_dir / "report.txt").read_text(encoding="utf-8")
 
 
 def test_a_wrong_password_saves_evidence_and_no_secret(whole_run, pdf_of):

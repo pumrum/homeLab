@@ -7,7 +7,13 @@ import pytest
 from automation_common.run import Run, Status
 from innago_portal.config import Config, Invoices, Site
 from innago_portal.login import LoginError
-from innago_portal.main import browser_stage, download_stage, load_stage, main
+from innago_portal.main import (
+    browser_stage,
+    download_stage,
+    load_stage,
+    main,
+    notification_message,
+)
 
 SITE = Site("https://sign-in.example.invalid/login", "https://app.example.invalid/")
 UNITS = ("1001", "1002", "1003")
@@ -94,9 +100,17 @@ def test_a_missing_unit_fails_the_run(run, row, tmp_path):
     assert run.summary.exit_code == 1
 
 
-def test_an_empty_list_fails_every_unit(run, tmp_path):
-    download_stage(run, FakeSource([]), CFG, tmp_path, dump=False)
+def test_an_empty_list_fails_every_unit_and_saves_what_it_saw(run, tmp_path):
+    source = FakeSource([])
+    download_stage(run, source, CFG, tmp_path, dump=False)
     assert [i.status for i in run.summary.items] == [Status.FAILED] * 3
+    assert source.evidence == ["fail_01"]
+
+
+def test_a_full_list_saves_no_evidence(run, row, tmp_path):
+    source = FakeSource([row(u) for u in UNITS])
+    download_stage(run, source, CFG, tmp_path, dump=False)
+    assert source.evidence == []
 
 
 def test_a_unit_outside_the_config_is_not_saved(run, row, tmp_path):
@@ -188,6 +202,18 @@ def test_signed_in_session_runs_the_downloads(run, row, tmp_path):
                   lambda page, url, expected: FakeSource([row(u) for u in UNITS]))
     assert _items(run)[("login", "site")].status is Status.OK
     assert run.summary.exit_code == 0
+
+
+def test_only_an_mfa_failure_is_named_in_the_notification(run):
+    assert notification_message(run.summary) == "FAIL"  # nothing ran
+    run.summary.record("login", "site", Status.OK)
+    assert notification_message(run.summary) == "PASS"
+    run.summary.items.clear()
+    run.summary.record("login", "site", Status.FAILED, "the site did not accept the password")
+    assert notification_message(run.summary) == "FAIL"
+    run.summary.items.clear()
+    run.summary.record("login", "site", Status.FAILED, "MFA was not completed within 5 minutes")
+    assert notification_message(run.summary) == "FAIL: MFA needed"
 
 
 def test_missing_config_fails_with_a_clear_message(run, tmp_path):

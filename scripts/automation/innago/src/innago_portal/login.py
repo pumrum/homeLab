@@ -144,7 +144,8 @@ def _skip_passkey(page: Page, t: Timeouts, required: bool) -> bool:
 
 def _wait_for_mfa(page: Page, site: Site, t: Timeouts) -> None:
     minutes = t.mfa / 60_000
-    log.warning("sign-in: the site wants an MFA code; waiting up to %.0f minutes", minutes)
+    log.warning("sign-in: the site wants an MFA code on %s; waiting up to %.0f minutes",
+                _path(page), minutes)
     try:
         page.wait_for_url(lambda url: classify(url, site.app_url) is not Step.MFA, timeout=t.mfa)
     except PwTimeout:
