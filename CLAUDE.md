@@ -38,6 +38,8 @@ Global rules for the whole repo. Work under `scripts/automation/` also follows
   a comment line, which stays at the prompt. This relies on Windows Terminal's
   `trimPaste` setting being off on the machine being pasted into. A command that
   prompts for input must not take a stray blank line as its answer.
+- When a step has the maintainer edit a file, open it in Notepad++:
+  `& "C:\Program Files\Notepad++\notepad++.exe" <file>`.
 
 ## The repo is public
 
