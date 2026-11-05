@@ -1,9 +1,12 @@
 # Runs pre-commit on every file, then the automation unit tests. No secrets
 # are used and nothing contacts a real site: tests use synthetic fixtures only.
+# A PR only runs the tests if it changes automation code or this workflow, because
+# they take minutes. A merge to main always runs them, so nothing goes untested for long.
 name: Checks
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -21,9 +24,26 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: pre-commit (all files)
         run: uvx pre-commit run --all-files --show-diff-on-failure
+      - name: Decide whether the tests need to run
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          tests=true
+          if [ "$EVENT" = "pull_request" ]; then
+            # On its own line, so an error here fails the job instead of skipping the tests
+            changed=$(git diff --name-only "$BASE" HEAD)
+            matches=$(echo "$changed" | grep -E '^(scripts/automation/|\.github/workflows/checks\.yml$)' | grep -vE '\.md$' || true)
+            if [ -z "$matches" ]; then tests=false; fi
+          fi
+          echo "tests=$tests" >> "$GITHUB_OUTPUT"
+          echo "Run the tests: $tests"
       - name: Install automation workspace
+        if: steps.changes.outputs.tests == 'true'
         working-directory: scripts/automation
         run: uv sync --locked
       - name: Unit tests
+        if: steps.changes.outputs.tests == 'true'
         working-directory: scripts/automation
         run: uv run pytest
