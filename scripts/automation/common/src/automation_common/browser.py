@@ -7,6 +7,7 @@ Learned on a real bank site and kept on purpose:
   - type dates key by key, then Tab out, then read the value back
   - never use fixed sleeps: wait for elements, URLs, or downloads
   - on failure save a screenshot and a shadow-DOM-piercing page outline
+  - save PDFs with capture_pdf, because only an attachment fires a download event
 """
 
 import logging
@@ -15,7 +16,7 @@ from collections.abc import Callable, Sequence
 from functools import reduce
 from pathlib import Path
 
-from playwright.sync_api import BrowserContext, Locator, Page, Playwright
+from playwright.sync_api import BrowserContext, Download, Locator, Page, Playwright, Route
 from playwright.sync_api import Error as PwError
 from playwright.sync_api import TimeoutError as PwTimeout
 
@@ -189,6 +190,100 @@ def save_page_evidence(page: Page, run_dir: Path, prefix: str) -> list[Path]:
     outline.write_text(text, encoding="utf-8")
     saved.append(outline)
     return saved
+
+
+class PdfCaptureError(Exception):
+    """No PDF arrived. The message never holds the address, which may be private."""
+
+
+# Never a PDF, and fetching these again would slow the page for nothing
+_NOT_PDF_TYPES = {"image", "stylesheet", "font", "media", "script", "manifest", "websocket",
+                  "eventsource", "ping", "texttrack"}
+
+
+def capture_pdf(page: Page, click: Callable[[], None], dest: Path,
+                timeout_ms: int = 60_000) -> None:
+    """Save the PDF that `click` makes the site send, however the site sends it.
+
+    Sites show a PDF inline, in a new tab, from script, or as an attachment, and only
+    an attachment fires Playwright's download event. So this sits in the middle of the
+    requests while the click runs, keeps a copy of any PDF in a response, and passes the
+    response on. The browser's one request is the only one made, so a single-use link
+    or a POST still works. The download event is the fallback.
+
+    Afterward, any tab the click opened is closed and `page` is back on its address.
+    A PDF that's built inside the page never crosses the network, so it can't be seen.
+    Raises PdfCaptureError if nothing starting with %PDF arrives in time.
+    """
+    ctx = page.context
+    start_url = page.url
+    tabs_before = list(ctx.pages)
+    bodies: list[bytes] = []
+    downloads: list[Download] = []
+
+    def on_download(download: Download) -> None:
+        downloads.append(download)
+
+    def on_page(tab: Page) -> None:
+        tab.on("download", on_download)
+
+    def on_route(route: Route) -> None:
+        if route.request.resource_type in _NOT_PDF_TYPES:
+            route.fallback()
+            return
+        try:
+            response = route.fetch()
+            if response.ok and response.body().startswith(b"%PDF"):
+                bodies.append(response.body())
+            route.fulfill(response=response)
+        except PwError as e:
+            # A closed tab or a failed fetch: let the browser handle this request itself
+            log.debug("capture_pdf: passing a request through: %s", str(e).splitlines()[0])
+            try:
+                route.fallback()
+            except PwError:
+                pass
+
+    for tab in tabs_before:
+        tab.on("download", on_download)
+    ctx.on("page", on_page)
+    ctx.route("**/*", on_route)
+    try:
+        click()
+        deadline = time.monotonic() + timeout_ms / 1000
+        while not bodies and not downloads and time.monotonic() < deadline:
+            page.wait_for_timeout(100)  # lets the handlers above run
+        body = bodies[0] if bodies else _read_download(downloads, dest)
+    finally:
+        ctx.unroute("**/*", on_route)
+        ctx.remove_listener("page", on_page)
+        for tab in tabs_before:
+            tab.remove_listener("download", on_download)
+        for tab in ctx.pages:
+            # Closing Edge's own downloads tab hangs forever, so it stays until the browser closes
+            if tab not in tabs_before and not tab.url.startswith("edge:"):
+                tab.close()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(body)
+    if page.url != start_url:
+        page.goto(start_url, wait_until="domcontentloaded")
+
+
+def _read_download(downloads: list[Download], dest: Path) -> bytes:
+    if not downloads:
+        raise PdfCaptureError("no PDF arrived after the click")
+    partial = dest.with_name(dest.name + ".partial")
+    partial.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        downloads[0].save_as(partial)
+        body = partial.read_bytes()
+    except PwError as e:
+        raise PdfCaptureError(f"the download failed ({type(e).__name__})") from None
+    finally:
+        partial.unlink(missing_ok=True)
+    if not body.startswith(b"%PDF"):
+        raise PdfCaptureError("the download isn't a PDF")
+    return body
 
 
 def start_trace(ctx: BrowserContext) -> None:
