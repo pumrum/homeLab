@@ -59,16 +59,18 @@ the reason in `report.txt` and `run.log`. A failure after sign-in also saves
 | The form stays gone with no app yet | Treated as MFA. Sends the push and waits up to 5 minutes |
 | The app | Signed in |
 
-**MFA works on the locked robot.** The site emails a link, which can be opened on any device.
-When the push arrives, open the email and the link. The job's browser moves on by itself. The
-site currently remembers a device after one successful sign-in, so this should be rare.
+**MFA during a job is untested.** The site emails a link. When the push arrives, open the email
+and the link. The job's browser should move on by itself, but no unattended run has reached MFA
+yet. If it doesn't, the run ends with `FAIL: MFA needed`. Sign in with `--capture` at the desktop
+(step 3 below), then run the job again. The site currently remembers a device after one
+successful sign-in, so this should be rare.
 
 Allow enough time in the agent's limit, which stops a job instantly and with no evidence. Each
 entity can wait 5 minutes, plus a minute or two for its work.
 
-The fields come from the real sign-in page, and the account menu and statement menus from
-screenshots, but none of this has run there. The MFA page has never been seen, so anything that
-isn't the form or the app counts as MFA.
+Sign-in, sign-out, the statement menus, and saving have all run on the real site, including
+unattended. MFA during a job and a failed sign-out haven't. The code doesn't know the MFA page's
+structure, so anything that isn't the form or the app counts as MFA.
 
 ## Set up each machine
 
@@ -93,14 +95,15 @@ Copy-Item buildium\config.example.toml C:\automation\buildium\config.toml
 Add one `[[entities]]` block per entity. `statement_name` must match the name in the statement's
 header, though case and extra spaces don't matter.
 
-**3. Sign in once per entity,** so the job's browser profile is remembered. A sign-in in Edge
-from the Start menu doesn't count, because the job has its own profile:
+**3. Sign in by hand,** so the job's browser profile is remembered. A sign-in in Edge from the
+Start menu doesn't count, because the job has its own profile:
 
 ```powershell
 uv run buildium-statements --capture
 ```
 
-Sign in, sign out, and repeat for each entity, then close the window.
+Sign in, finish MFA if the site asks for it, and sign out. Repeat for each entity, then close the
+window. On the test workstation, MFA on the first entity covered the others.
 
 ## Run
 

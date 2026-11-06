@@ -21,4 +21,5 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
 - `--dump` saves page structure and reports the names, saving nothing under `data`.
 - `--capture` saves page structure while a person signs in and clicks around.
 - `--entity` runs one entity, for testing.
-- None of the browser steps have run on the real site yet.
+- Tested on the real site, including an unattended run. MFA during a job and a failed sign-out
+  haven't been tested there.

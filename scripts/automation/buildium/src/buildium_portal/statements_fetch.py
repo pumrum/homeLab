@@ -4,8 +4,8 @@ Rental owner, then Rental owner ledger, then Statement, then one exact menu item
 sits on the same page, and the Statement menu has other periods right beside this one, so
 every label here is matched exactly and nothing falls back to something similar.
 
-The labels come from screenshots of the real site. The structure around them hasn't been
-seen, so the selectors are candidates to update from a --dump run.
+These steps have run on the real site. If the site changes, update the selectors from a
+--dump run.
 """
 
 import logging

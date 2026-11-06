@@ -4,9 +4,9 @@ All entities share one browser profile, so the site's memory of the device carri
 but only one can be signed in at a time. A run may also find a session left by a run that
 was stopped. So signing in always starts by signing out whoever is there.
 
-The email and password fields come from reading the real sign-in page. The account menu
-comes from a screenshot. The MFA page hasn't been seen, so it's anything that isn't the
-sign-in form or the app once the page has settled. None of this has run on the real site.
+This has run on the real site, except for MFA during a job and a failed sign-out. The MFA
+page's structure isn't known, so it's anything that isn't the sign-in form or the app once
+the page has settled.
 
 The page loads reCAPTCHA all the time, with a badge, so only a visible challenge counts as
 a person-check. It's never worked around.
