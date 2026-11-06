@@ -22,7 +22,7 @@ from automation_common.notify import send_notification
 from automation_common.run import Notifier, Run, Status, Summary, pass_fail
 from buildium_portal import PROCESS
 from buildium_portal.capture import capture
-from buildium_portal.config import Config, Entity, load_config
+from buildium_portal.config import NOTIFICATIONS, Config, Entity, load_config
 from buildium_portal.login import SignOutError
 from buildium_portal.parse import (
     check_statement,
@@ -65,6 +65,7 @@ def load_stage(run: Run, data_dir: Path) -> Config | None:
     except ConfigError as e:
         run.summary.record("config", "config.toml", Status.FAILED, str(e))
         return None
+    run.notifications = cfg.notifications
     # Private: never in logs. The neutral keys stay readable, since the report needs them
     run.masker.add(cfg.site.login_url)
     run.masker.add(cfg.statements.system)
@@ -129,13 +130,12 @@ def statement_stage(run: Run, page: Page, cfg: Config, entity: Entity, period_en
 
 
 def process_entity(run: Run, ctx: BrowserContext, cfg: Config, entity: Entity,
-                   period_end: dt.date, data_dir: Path, dump: bool, notifier: Notifier) -> None:
+                   period_end: dt.date, data_dir: Path, dump: bool) -> None:
     """Sign in, get the statement, and sign out. Only a failed sign-out raises."""
     observer = _dump_observer(run, ctx, entity) if dump else _ignore
     reached = False
     try:
-        with signed_in_page(run, ctx, cfg.site, entity, notifier=notifier,
-                            observer=observer) as page:
+        with signed_in_page(run, ctx, cfg.site, entity, observer=observer) as page:
             reached = True
             run.summary.record("login", entity.key, Status.OK)
             statement_stage(run, page, cfg, entity, period_end, data_dir, dump, observer)
@@ -149,7 +149,7 @@ def process_entity(run: Run, ctx: BrowserContext, cfg: Config, entity: Entity,
 
 
 def browser_stage(run: Run, cfg: Config, entities: tuple[Entity, ...], period_end: dt.date,
-                  data_dir: Path, dump: bool, notifier: Notifier) -> None:
+                  data_dir: Path, dump: bool) -> None:
     """One browser for all entities, one at a time. A failed sign-out stops the rest."""
     remaining = list(entities)
     current = "site"
@@ -158,7 +158,7 @@ def browser_stage(run: Run, cfg: Config, entities: tuple[Entity, ...], period_en
             while remaining:
                 entity = remaining.pop(0)
                 current = entity.key
-                process_entity(run, ctx, cfg, entity, period_end, data_dir, dump, notifier)
+                process_entity(run, ctx, cfg, entity, period_end, data_dir, dump)
     except SignOutError as e:
         stage = "sign-out"
         run.summary.record(stage, current, Status.FAILED, _why(e))
@@ -172,11 +172,11 @@ def browser_stage(run: Run, cfg: Config, entities: tuple[Entity, ...], period_en
                            f"not processed: {stage} failed")
 
 
-def notification_message(summary: Summary) -> str:
-    """PASS or FAIL, naming MFA when that's what stopped the run, since it takes a person."""
+def final_event(summary: Summary) -> str:
+    """Pass or fail, naming MFA when that's what stopped the run, since it takes a person."""
     if any(item.stage == "login" and item.status is Status.FAILED and "MFA" in item.detail
            for item in summary.items):
-        return "FAIL: MFA needed"
+        return "mfa_failed"
     return pass_fail(summary)
 
 
@@ -184,8 +184,8 @@ def main(argv: list[str] | None = None, *, notifier: Notifier = send_notificatio
          today: dt.date | None = None) -> int:
     args = parse_args(argv)
     data_dir = process_dir(PROCESS)
-    with Run.start(PROCESS, data_dir, notifier=notifier, title=COMMAND,
-                   message=notification_message) as run:
+    with Run.start(PROCESS, data_dir, notifier=notifier, command=COMMAND,
+                   notifications=NOTIFICATIONS, event=final_event) as run:
         cfg = load_stage(run, data_dir)
         if cfg is not None:
             if args.capture:
@@ -195,5 +195,5 @@ def main(argv: list[str] | None = None, *, notifier: Notifier = send_notificatio
                 period_end = previous_period_end(today or dt.date.today())
                 log.info("expecting statements for the period ending %s", period_end)
                 if entities:
-                    browser_stage(run, cfg, entities, period_end, data_dir, args.dump, notifier)
+                    browser_stage(run, cfg, entities, period_end, data_dir, args.dump)
     return run.exit_code

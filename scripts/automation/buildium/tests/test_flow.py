@@ -485,15 +485,33 @@ def test_a_second_run_overwrites_the_first(whole_run, pdf_of):
     assert _saved(whole_run.data) == [ONE_FILE, TWO_FILE]
 
 
-def test_mfa_sends_a_push_naming_only_the_key_and_saves_a_screenshot(whole_run):
+def test_mfa_sends_a_push_naming_the_abbreviation_and_saves_a_screenshot(whole_run):
     site = FakeSite(mfa={"one@example.invalid"})
     assert whole_run.start(site) == 1
     assert whole_run.notes[0] == {"title": "buildium-statements",
-                                  "message": "entity1: MFA link needed"}
+                                  "message": "ONELLC: MFA link needed"}
     assert whole_run.notes[-1]["message"] == "FAIL: MFA needed"
     run_dir = _run_dir(whole_run.data)
     assert (run_dir / "fail_01.png").exists()
     assert MFA in (run_dir / "fail_01_page.txt").read_text(encoding="utf-8")
+    # The push reaches a person's phone, but the abbreviation stays out of the run folder
+    assert "ONELLC" not in _written(whole_run.data)
+
+
+def test_the_config_sets_the_words_of_every_push(whole_run):
+    with (whole_run.data / "config.toml").open("a", encoding="utf-8") as config:
+        config.write('''
+[notifications.mfa_needed]
+title = "{abbreviation} needs you"
+message = "Open the link for {key}"
+[notifications.mfa_failed]
+message = "{failed} of {total} failed"
+''')
+    assert whole_run.start(FakeSite(mfa={"one@example.invalid"})) == 1
+    assert whole_run.notes[0] == {"title": "ONELLC needs you",
+                                  "message": "Open the link for entity1"}
+    assert whole_run.notes[-1]["title"] == "buildium-statements"
+    assert whole_run.notes[-1]["message"].endswith("failed")
 
 
 def test_an_mfa_failure_doesnt_stop_the_next_entity(whole_run):

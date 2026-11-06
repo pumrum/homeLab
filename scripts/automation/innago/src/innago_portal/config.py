@@ -2,15 +2,21 @@
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 from automation_common.config import ConfigError, load_toml, reject_unknown_keys, require_str
+from automation_common.notify import STANDARD_NOTIFICATIONS, Template, parse_notifications
 
 _UNIT = re.compile(r"^[A-Za-z0-9_-]+$")
 _PLACEHOLDERS = ("...", "<", ">")
+
+NOTIFICATIONS = {
+    **STANDARD_NOTIFICATIONS,
+    "mfa_failed": Template("{command}", "FAIL: MFA needed"),
+}
 
 
 @dataclass(frozen=True)
@@ -31,6 +37,7 @@ class Invoices:
 class Config:
     site: Site
     invoices: Invoices
+    notifications: Mapping[str, Template] = field(default_factory=lambda: NOTIFICATIONS)
 
 
 def _table(doc: Mapping[str, Any], key: str) -> Mapping[str, Any]:
@@ -71,13 +78,14 @@ def _units(table: Mapping[str, Any], where: str) -> tuple[str, ...]:
 
 def parse_config(doc: Mapping[str, Any]) -> Config:
     """Validate an already-parsed TOML document."""
-    reject_unknown_keys(doc, {"site", "invoices"}, "config")
+    reject_unknown_keys(doc, {"site", "invoices", "notifications"}, "config")
     site, invoices = _table(doc, "site"), _table(doc, "invoices")
     reject_unknown_keys(site, {"login_url", "app_url"}, "[site]")
     reject_unknown_keys(invoices, {"page_url", "units"}, "[invoices]")
     return Config(
         Site(_url(site, "login_url", "[site]"), _url(site, "app_url", "[site]")),
         Invoices(_url(invoices, "page_url", "[invoices]"), _units(invoices, "[invoices]")),
+        parse_notifications(doc, NOTIFICATIONS),
     )
 
 

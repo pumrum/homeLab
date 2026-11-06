@@ -11,7 +11,8 @@ the listener at sign-in.
   used beyond the word `run`, so nothing on the broker can run other commands.
 - One job runs at a time. A press while that job is running or waiting is ignored.
 - Jobs send their own PASS or FAIL notification as usual. If a job hangs past its
-  limit or can't start, the agent stops it and sends the FAIL instead.
+  limit or can't start, the agent stops it and sends the FAIL instead. The
+  `[notifications.job_failed]` block in its config can change those words.
 - If the robot is off or the agent is down when a schedule fires, that run is
   **missed**, not caught up. The sensor shows unavailable; see the optional alert.
 
@@ -228,8 +229,9 @@ or so, and the device shows as unavailable until the agent is back.
   when you set it up: `git branch --show-current`.
 - **It's refused while a job is running or waiting.** The press is logged, and you
   press it again afterward. A schedule that fires during the update is missed.
-- **It sends a notification,** titled `agent update`, with `PASS` or `FAIL`. Details
-  are in `C:\automation\agent\logs\update.log`.
+- **It sends a notification,** titled `agent update`, with `PASS` or `FAIL`, unless the
+  `[notifications.update_pass]` and `[notifications.update_fail]` blocks change the words.
+  Details are in `C:\automation\agent\logs\update.log`.
 - **If the pull or sync fails,** the helper goes back to the previous commit if it
   had moved, syncs again, and restarts the agent, which sends the `FAIL`.
 - **If the new code stops the agent from starting or connecting,** nothing can report

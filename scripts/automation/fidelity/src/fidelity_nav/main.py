@@ -52,6 +52,7 @@ def load_stage(run: Run, data_dir: Path) -> Config | None:
     except ConfigError as e:
         run.summary.record("config", "config.toml", Status.FAILED, str(e))
         return None
+    run.notifications = cfg.notifications
     if cfg.sheet is not None:
         run.masker.add(cfg.sheet.spreadsheet_id)  # private: never in logs
     log.info("config OK: %d fund(s): %s; sheet %s", len(cfg.funds),

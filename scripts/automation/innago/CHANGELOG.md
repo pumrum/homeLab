@@ -5,6 +5,9 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
 
 ## Unreleased
 
+- The push notifications' words can now be set in `config.toml`, as optional
+  `[notifications.<event>]` blocks with `{variables}`. With no blocks, nothing changes.
+
 ## 0.1.0 (unreleased)
 
 - First version. A shared sign-in handles a remembered profile, email and password,

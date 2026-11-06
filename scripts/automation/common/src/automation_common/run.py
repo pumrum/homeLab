@@ -10,23 +10,25 @@ is configured, and closes the log. An unexpected exception is recorded as a
 failed item, not re-raised, so the exit code still reflects it.
 
 The notification is only `{"title": ..., "message": ...}`: by default the
-process name and PASS or FAIL. A process can pass its own to Run.start(),
-e.g. `message=lambda s: f"{s.counts()['ok']} funds updated"`. The full
-summary stays in the run folder.
+command's name (or the process's) and PASS or FAIL. The words are templates: once
+the config has loaded, set `run.notifications` to its [notifications.<event>] tables.
+Pass `event=` to Run.start() to choose something other than "pass" or "fail" at the
+end, and call `run.notify(event, ...)` for a push during the run. The full summary
+stays in the run folder.
 """
 
 import datetime as dt
 import json
 import logging
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Self
 
-from automation_common.notify import send_notification
+from automation_common.notify import STANDARD_NOTIFICATIONS, Template, send_notification
 from automation_common.secrets import SecretMasker
 
 log = logging.getLogger(__name__)
@@ -124,12 +126,12 @@ def make_run_dir(runs_dir: Path, now: dt.datetime) -> Path:
 
 
 Notifier = Callable[[dict[str, str], SecretMasker], bool]
-MessageFn = Callable[[Summary], str]
+EventFn = Callable[[Summary], str]
 
 
 def pass_fail(summary: Summary) -> str:
-    """Default notification message: PASS or FAIL."""
-    return "PASS" if summary.exit_code == 0 else "FAIL"
+    """Default event for the end of a run: "pass" or "fail"."""
+    return "pass" if summary.exit_code == 0 else "fail"
 
 
 class Run:
@@ -141,16 +143,18 @@ class Run:
         run_dir: Path,
         now: dt.datetime,
         notifier: Notifier,
-        title: str,
-        message: MessageFn,
+        command: str,
+        notifications: Mapping[str, Template],
+        event: EventFn,
     ) -> None:
         self.process = process
         self.run_dir = run_dir
         self.masker = SecretMasker()
         self.summary = Summary(process, run_dir.name, now)
         self.exit_code = 1
-        self.title = title
-        self.message = message
+        self.command = command
+        self.notifications = notifications
+        self.event = event
         self._notifier = notifier
         self._failures = 0
         self._handlers: list[logging.Handler] = []
@@ -162,13 +166,14 @@ class Run:
         data_dir: Path,
         now: dt.datetime | None = None,
         notifier: Notifier = send_notification,
-        title: str | None = None,
-        message: MessageFn = pass_fail,
+        command: str | None = None,
+        notifications: Mapping[str, Template] = STANDARD_NOTIFICATIONS,
+        event: EventFn = pass_fail,
     ) -> Self:
-        """Start a run. `title` defaults to the process name, `message` to PASS/FAIL."""
+        """Start a run. `notifications` is what it sends until a loaded config replaces it."""
         now = now or dt.datetime.now().astimezone()
         run = cls(process, make_run_dir(data_dir / "runs", now), now, notifier,
-                  title or process, message)
+                  command or process, notifications, event)
         run._setup_logging()
         log.info("%s run %s started; run folder %s", process, run.run_dir.name, run.run_dir)
         return run
@@ -196,19 +201,34 @@ class Run:
             h.close()
         self._handlers.clear()
 
-    def _message_text(self) -> str:
-        """The process's message, or PASS/FAIL if its function fails."""
+    def notification(self, event: str, **values: object) -> dict[str, str]:
+        """An event's words, filled in with this run's values and any given here."""
+        run_values = {
+            "process": self.process,
+            "command": self.command,
+            "run_id": self.summary.run_id,
+            "total": len(self.summary.items),
+            **self.summary.counts(),
+        }
+        return self.notifications[event].render(**(run_values | values))
+
+    def notify(self, event: str, **values: object) -> bool:
+        """Send an event's notification now. A failed send never raises."""
+        return self._notifier(self.notification(event, **values), self.masker)
+
+    def _final_notification(self) -> dict[str, str]:
+        """The process's chosen event, or plain pass or fail if choosing it fails."""
         try:
-            return str(self.message(self.summary))
-        except Exception:  # noqa: BLE001 - a bad message must not lose the summary
-            log.exception("building the notification message failed; using PASS/FAIL")
-            return pass_fail(self.summary)
+            return self.notification(self.event(self.summary))
+        except Exception:  # noqa: BLE001 - a bad choice must not lose the summary
+            log.exception("building the notification failed; using pass or fail")
+            return self.notification(pass_fail(self.summary))
 
     def finish(self) -> int:
         """Write the summary and report, notify, close the log. Returns the exit code."""
         try:
             self.summary.finished_at = dt.datetime.now().astimezone()
-            notification = {"title": self.title, "message": self._message_text()}
+            notification = self._final_notification()
             data = notification | self.summary.to_dict()
             (self.run_dir / "summary.json").write_text(
                 self.masker.mask(json.dumps(data, indent=2)), encoding="utf-8"

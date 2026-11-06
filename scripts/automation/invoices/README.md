@@ -24,8 +24,8 @@ and pastes each file into that entity's block on a Google Sheet tab.
 | One block's write fails | That entity fails and the others still run. Run it again to fix it |
 | A copy can't be saved to the run folder | The run fails, but the sheet write still happens |
 
-Any failure means exit code 1 and a `FAIL` notification. The notification only ever
-says `PASS` or `FAIL`. Results for each entity are in the newest
+Any failure means exit code 1 and a `FAIL` notification. The notification says `PASS`
+or `FAIL` unless `[notifications.<event>]` blocks in `config.toml` change the words. Results for each entity are in the newest
 `C:\automation\invoices\runs\<timestamp>\` folder, in `report.txt` and `run.log`,
 with each downloaded file under `files\`.
 

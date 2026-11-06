@@ -22,7 +22,7 @@ from automation_common.notify import send_notification
 from automation_common.run import Notifier, Run, Status, Summary, pass_fail
 from innago_portal import PROCESS
 from innago_portal.capture import capture
-from innago_portal.config import Config, load_config
+from innago_portal.config import NOTIFICATIONS, Config, load_config
 from innago_portal.invoices_fetch import InvoiceList
 from innago_portal.login import Observer, Step
 from innago_portal.parse import parse_invoice, pdf_text
@@ -69,6 +69,7 @@ def load_stage(run: Run, data_dir: Path) -> Config | None:
     except ConfigError as e:
         run.summary.record("config", "config.toml", Status.FAILED, str(e))
         return None
+    run.notifications = cfg.notifications
     # Private: never in logs. The unit numbers stay readable, since the report needs them
     for url in (cfg.site.login_url, cfg.site.app_url, cfg.invoices.page_url):
         run.masker.add(url)
@@ -183,19 +184,19 @@ def browser_stage(run: Run, cfg: Config, data_dir: Path, dump: bool,
             _fail_units(run, cfg.invoices.units, "not processed: sign-in failed")
 
 
-def notification_message(summary: Summary) -> str:
-    """PASS or FAIL, naming MFA when that's what stopped the run, since it takes a person."""
+def final_event(summary: Summary) -> str:
+    """Pass or fail, naming MFA when that's what stopped the run, since it takes a person."""
     if any(item.stage == "login" and item.status is Status.FAILED and "MFA" in item.detail
            for item in summary.items):
-        return "FAIL: MFA needed"
+        return "mfa_failed"
     return pass_fail(summary)
 
 
 def main(argv: list[str] | None = None, *, notifier: Notifier = send_notification) -> int:
     args = parse_args(argv)
     data_dir = process_dir(PROCESS)
-    with Run.start(PROCESS, data_dir, notifier=notifier, title=COMMAND,
-                   message=notification_message) as run:
+    with Run.start(PROCESS, data_dir, notifier=notifier, command=COMMAND,
+                   notifications=NOTIFICATIONS, event=final_event) as run:
         cfg = load_stage(run, data_dir)
         if cfg is not None:
             if args.capture:

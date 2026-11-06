@@ -5,6 +5,9 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
 
 ## Unreleased
 
+- The push notifications' words can now be set in `config.toml`, as optional
+  `[notifications.<event>]` blocks with `{variables}`. With no blocks, nothing changes.
+
 ## 0.1.0 (unreleased)
 
 - First version: downloads one list file per enabled entity over SFTP and pastes

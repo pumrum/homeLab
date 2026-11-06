@@ -5,6 +5,10 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
 
 ## Unreleased
 
+- The MFA push now names the entity's abbreviation instead of its key.
+- The push notifications' words can now be set in `config.toml`, as optional
+  `[notifications.<event>]` blocks with `{variables}`.
+
 ## 0.1.0 (unreleased)
 
 - First version. A shared sign-in signs out any session still open, enters the email and

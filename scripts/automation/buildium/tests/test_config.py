@@ -23,6 +23,20 @@ def _changed(change):
     return doc
 
 
+def test_mfa_words_default_to_the_abbreviation_and_can_change():
+    note = parse_config(VALID).notifications["mfa_needed"].render(abbreviation="ABC", key="k")
+    assert note["message"] == "ABC: MFA link needed"
+    doc = VALID | {"notifications": {"mfa_needed": {"message": "{key} and {abbreviation}"}}}
+    note = parse_config(doc).notifications["mfa_needed"].render(abbreviation="ABC", key="k")
+    assert note["message"] == "k and ABC"
+
+
+def test_only_the_mfa_push_can_name_an_entity():
+    doc = VALID | {"notifications": {"fail": {"message": "{abbreviation}"}}}
+    with pytest.raises(ConfigError, match="abbreviation"):
+        parse_config(doc)
+
+
 def test_a_valid_config_loads():
     cfg = parse_config(VALID)
     assert cfg.site.login_url == VALID["site"]["login_url"]

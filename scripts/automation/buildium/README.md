@@ -35,7 +35,7 @@ A run on November 5, 2026 saves `2026-10\2026-10-31_<system>_Ledger_<abbreviatio
 
 | Situation | Result |
 | --- | --- |
-| The site asks for MFA | A push names the entity's key, then it waits 5 minutes. See below |
+| The site asks for MFA | A push names the entity's abbreviation, then it waits 5 minutes. See below |
 | MFA isn't finished in time | That entity fails. The next one still runs. The final notification says `FAIL: MFA needed` |
 | Rejected email or password | That entity fails after 30 seconds. Never retried, so it can't lock the account |
 | CAPTCHA challenge showing | That entity fails right away. Never worked around |
@@ -49,6 +49,12 @@ A run on November 5, 2026 saves `2026-10\2026-10-31_<system>_Ledger_<abbreviatio
 the reason in `report.txt` and `run.log`. A failure after sign-in also saves
 `trace_<key>.zip`. Any failure means exit code 1 and a `FAIL` notification titled
 `buildium-statements`.
+
+These are the default words. `[notifications.<event>]` blocks in `config.toml` change them:
+`pass`, `fail`, and `mfa_failed` at the end of a run, and `mfa_needed` during it. Only
+`mfa_needed` can use `{abbreviation}` and `{key}`, so the rest never name an entity. An
+abbreviation goes to Home Assistant and your phone in that push, and stays masked in the run
+folder. See `config.example.toml`.
 
 ## How sign-in works
 
@@ -140,6 +146,6 @@ timeout_minutes = 30
 2. Use `session.open_browser` once, and `session.signed_in_page` for each entity. They handle
    the profile, credential, MFA push, trace, sign-out, and failure evidence. Don't sign in any
    other way. Stop the run on `SignOutError`.
-3. Pass `title="<command>"` to `Run.start`, so its notifications name the command.
+3. Pass `command="<command>"` to `Run.start`, so its notifications name the command.
 4. Add its settings as a new section in `config.py`. `[site]` and `[[entities]]` are already
    shared.

@@ -5,6 +5,8 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
 
 ## Unreleased
 
+- The push notifications' words can now be set in `config.toml`, as optional
+  `[notifications.<event>]` blocks with `{variables}`. With no blocks, nothing changes.
 - Scheduled by Home Assistant through automation-agent instead of Task Scheduler.
 - Accepts a config saved with a byte-order mark, through the shared loader. A file
   that isn't UTF-8 now gets a clear error.

@@ -20,3 +20,14 @@ code = "<entity>"                           # lowercase; used in the run's repor
 enabled = true                              # false skips it and leaves its block alone
 file = "inv_<entity>.txt"                   # the file's name in the folder above
 start_cell = "<cell>"                       # the first data cell, below any header, like B5
+
+# Optional: the push notifications' words. Leave a block or line out to keep what's shown
+# here. Any of these can go in {braces}: {command}, {process}, {run_id}, {ok}, {unchanged},
+# {failed}, and {total}. Keep them short, since they're read on a watch.
+[notifications.pass]
+title = "{command}"
+message = "PASS"
+
+[notifications.fail]
+title = "{command}"
+message = "FAIL"

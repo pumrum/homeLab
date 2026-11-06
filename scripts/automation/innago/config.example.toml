@@ -12,3 +12,19 @@ app_url = "https://<any address you see once signed in>"   # only its host name 
 [invoices]
 page_url = "https://<page that lists the invoices>"
 units = ["<unit>", "<unit>"]                               # every unit that must have an invoice
+
+# Optional: the push notifications' words. Leave a block or line out to keep what's shown
+# here. Any of these can go in {braces}: {command}, {process}, {run_id}, {ok}, {unchanged},
+# {failed}, and {total}. Keep them short, since they're read on a watch.
+[notifications.pass]
+title = "{command}"
+message = "PASS"
+
+[notifications.fail]
+title = "{command}"
+message = "FAIL"
+
+# When a sign-in stopped at MFA, so a person has to act, instead of [notifications.fail].
+[notifications.mfa_failed]
+title = "{command}"
+message = "FAIL: MFA needed"
