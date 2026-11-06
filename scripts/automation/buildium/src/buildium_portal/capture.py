@@ -1,7 +1,7 @@
 """--capture: a person signs in and clicks around while the page structure is saved.
 
-For learning the real site and for the first sign-in of each entity in the job's browser
-profile, and never run by a job. It types nothing and starts no trace. It saves an outline
+For learning the real site and for signing in by hand if a job's MFA doesn't go through,
+and never run by a job. It types nothing and starts no trace. It saves an outline
 and a screenshot each time the page settles into something new, until the window closes or
 the time runs out.
 """
