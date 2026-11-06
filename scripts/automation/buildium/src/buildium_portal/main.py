@@ -16,10 +16,10 @@ from pathlib import Path
 
 from playwright.sync_api import BrowserContext, Page
 
-from automation_common.browser import first_page, save_page_evidence
+from automation_common.browser import save_page_evidence
 from automation_common.config import ConfigError, process_dir
 from automation_common.notify import send_notification
-from automation_common.run import Notifier, Run, Status, Summary, pass_fail
+from automation_common.run import Notifier, Run, Status
 from buildium_portal import PROCESS
 from buildium_portal.capture import capture
 from buildium_portal.config import NOTIFICATIONS, Config, Entity, load_config
@@ -33,6 +33,7 @@ from buildium_portal.parse import (
     statement_folder,
 )
 from buildium_portal.session import open_browser, profile_dir, signed_in_page
+from buildium_portal.stages import chosen_entities, dump_observer, final_event, why
 from buildium_portal.statements_fetch import fetch_statement
 from buildium_portal.store import save_statement
 
@@ -53,12 +54,6 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
-def _why(e: Exception) -> str:
-    """One short line for the summary. The run masks private values when it's written."""
-    first_line = (str(e).splitlines() or [""])[0][:200]
-    return f"{type(e).__name__}: {first_line}"
-
-
 def load_stage(run: Run, data_dir: Path) -> Config | None:
     try:
         cfg = load_config(data_dir / "config.toml")
@@ -77,31 +72,8 @@ def load_stage(run: Run, data_dir: Path) -> Config | None:
     return cfg
 
 
-def chosen_entities(run: Run, cfg: Config, key: str | None) -> tuple[Entity, ...]:
-    if key is None:
-        return cfg.entities
-    chosen = tuple(entity for entity in cfg.entities if entity.key == key)
-    if not chosen:
-        run.summary.record("config", key, Status.FAILED, "no entity with this key in the config")
-    return chosen
-
-
 def _ignore(_: str) -> None:
     pass
-
-
-def _dump_observer(run: Run, ctx: BrowserContext, entity: Entity) -> Callable[[str], None]:
-    """--dump: save a page's structure at each named step. Best effort, and nothing typed."""
-    def observe(step: str) -> None:
-        try:
-            page = first_page(ctx)
-            prefix = f"dump_{entity.key}_{step}"
-            save_page_evidence(page, run.run_dir, prefix)
-            (run.run_dir / f"{prefix}.html").write_text(page.content(), encoding="utf-8")
-            log.info("dump: saved the %s page for %s", step, entity.key)
-        except Exception as e:  # noqa: BLE001 - --dump's copies must never stop the run
-            log.warning("dump: saving the %s page failed: %s", step, _why(e))
-    return observe
 
 
 def statement_stage(run: Run, page: Page, cfg: Config, entity: Entity, period_end: dt.date,
@@ -124,7 +96,7 @@ def statement_stage(run: Run, page: Page, cfg: Config, entity: Entity, period_en
     except Exception as e:  # noqa: BLE001 - one entity's failure must not stop the others
         save_page_evidence(page, run.run_dir, run.next_failure_prefix())
         # Anything not saved stays in the run folder's downloads for a look
-        run.summary.record("statement", entity.key, Status.FAILED, f"{step}: {_why(e)}")
+        run.summary.record("statement", entity.key, Status.FAILED, f"{step}: {why(e)}")
         return
     run.summary.record("statement", entity.key, Status.OK, f"saved {file_name}")
 
@@ -132,7 +104,7 @@ def statement_stage(run: Run, page: Page, cfg: Config, entity: Entity, period_en
 def process_entity(run: Run, ctx: BrowserContext, cfg: Config, entity: Entity,
                    period_end: dt.date, data_dir: Path, dump: bool) -> None:
     """Sign in, get the statement, and sign out. Only a failed sign-out raises."""
-    observer = _dump_observer(run, ctx, entity) if dump else _ignore
+    observer = dump_observer(run, ctx, entity) if dump else _ignore
     reached = False
     try:
         with signed_in_page(run, ctx, cfg.site, entity, observer=observer) as page:
@@ -142,7 +114,7 @@ def process_entity(run: Run, ctx: BrowserContext, cfg: Config, entity: Entity,
     except SignOutError:
         raise
     except Exception as e:  # noqa: BLE001 - a sign-in failure stops only this entity
-        run.summary.record("browser" if reached else "login", entity.key, Status.FAILED, _why(e))
+        run.summary.record("browser" if reached else "login", entity.key, Status.FAILED, why(e))
         if not reached:
             run.summary.record("statement", entity.key, Status.FAILED,
                                "not processed: sign-in failed")
@@ -161,23 +133,15 @@ def browser_stage(run: Run, cfg: Config, entities: tuple[Entity, ...], period_en
                 process_entity(run, ctx, cfg, entity, period_end, data_dir, dump)
     except SignOutError as e:
         stage = "sign-out"
-        run.summary.record(stage, current, Status.FAILED, _why(e))
+        run.summary.record(stage, current, Status.FAILED, why(e))
     except Exception as e:  # noqa: BLE001 - record and let the summary report it
         stage = "browser"
-        run.summary.record(stage, current, Status.FAILED, _why(e))
+        run.summary.record(stage, current, Status.FAILED, why(e))
     else:
         return
     for entity in remaining:
         run.summary.record("statement", entity.key, Status.FAILED,
                            f"not processed: {stage} failed")
-
-
-def final_event(summary: Summary) -> str:
-    """Pass or fail, naming MFA when that's what stopped the run, since it takes a person."""
-    if any(item.stage == "login" and item.status is Status.FAILED and "MFA" in item.detail
-           for item in summary.items):
-        return "mfa_failed"
-    return pass_fail(summary)
 
 
 def main(argv: list[str] | None = None, *, notifier: Notifier = send_notification,
