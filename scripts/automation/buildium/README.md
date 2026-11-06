@@ -8,6 +8,36 @@ The site's address, the entity names, and their abbreviations are only in the pr
 | Command | What it does |
 | --- | --- |
 | `buildium-statements` | Downloads each entity's rental owner statement for the last period |
+| `buildium-gl` | Exports each entity's general ledger. Under construction: `--dump` only, and it writes to no sheet yet |
+
+The commands run separately, each with its own job and schedule. They share a browser profile,
+but the agent runs one job at a time, so scheduled runs can't collide. Don't start one by hand
+while the other is running.
+
+## buildium-gl
+
+For each entity in the config, one at a time, `--dump` signs in, opens the General Ledger report,
+sets a custom date range from 1/1/1999 to today, exports **Cash** and then **Accrual** as CSV, and
+signs out. The first failure stops the run, and the remaining entities are recorded as not
+processed. Nothing is written under `data`, or to any sheet.
+
+```powershell
+uv run buildium-gl --dump                   # every entity
+uv run buildium-gl --dump --entity entity1  # only one entity
+```
+
+Each run folder holds:
+
+| File | Holds | Safe to share? |
+| --- | --- | --- |
+| `report.txt`, `run.log` | Results, with each export's size and time | Yes |
+| `gl_profile_<key>_<method>.txt` | The export's structure, with values reduced to shapes such as `-9,999.99` | Yes |
+| `downloads\<key>_<method>.csv` | The raw export | No, it holds real data |
+| `dump_<key>_<step>_page.txt`, `.png`, `.html` | The page at each step | No, it holds real names and addresses |
+
+**Not yet run on the real site:** the report's address, date range, method choice, and export
+steps. Their selectors come from the old process and haven't run under this code. The sign-in is
+the one `buildium-statements` uses, which has.
 
 ## buildium-statements
 

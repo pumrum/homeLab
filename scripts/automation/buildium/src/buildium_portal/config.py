@@ -67,6 +67,13 @@ class Config:
     notifications: Mapping[str, Template] = field(default_factory=lambda: NOTIFICATIONS)
 
 
+@dataclass(frozen=True)
+class GlConfig:
+    site: Site
+    entities: tuple[Entity, ...]
+    notifications: Mapping[str, Template] = field(default_factory=lambda: NOTIFICATIONS)
+
+
 def _table(doc: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     table = doc.get(key)
     if not isinstance(table, dict):
@@ -119,22 +126,35 @@ def _reject_repeats(entities: list[Entity]) -> None:
         raise ConfigError('[[entities]]: two entities have the same "abbreviation"')
 
 
-def parse_config(doc: Mapping[str, Any]) -> Config:
-    """Validate an already-parsed TOML document."""
+def _shared(doc: Mapping[str, Any]) -> tuple[Site, tuple[Entity, ...], Mapping[str, Template]]:
+    """The sections every command needs. Each command checks only its own section besides."""
     reject_unknown_keys(doc, {"site", "entities", "statements", "notifications"}, "config")
-    site, statements = _table(doc, "site"), _table(doc, "statements")
+    site = _table(doc, "site")
     reject_unknown_keys(site, {"login_url"}, "[site]")
-    reject_unknown_keys(statements, {"system"}, "[statements]")
     entities = [_entity(table, number)
                 for number, table in enumerate(require_tables(doc, "entities"), start=1)]
     _reject_repeats(entities)
-    return Config(
-        Site(_url(site, "login_url", "[site]")),
-        tuple(entities),
-        Statements(_file_name_part(statements, "system", "[statements]")),
-        parse_notifications(doc, NOTIFICATIONS),
-    )
+    return (Site(_url(site, "login_url", "[site]")), tuple(entities),
+            parse_notifications(doc, NOTIFICATIONS))
+
+
+def parse_config(doc: Mapping[str, Any]) -> Config:
+    """Validate an already-parsed TOML document for buildium-statements."""
+    site, entities, notifications = _shared(doc)
+    statements = _table(doc, "statements")
+    reject_unknown_keys(statements, {"system"}, "[statements]")
+    return Config(site, entities, Statements(_file_name_part(statements, "system", "[statements]")),
+                  notifications)
 
 
 def load_config(path: Path) -> Config:
     return parse_config(load_toml(path))
+
+
+def parse_gl_config(doc: Mapping[str, Any]) -> GlConfig:
+    """Validate an already-parsed TOML document for buildium-gl."""
+    return GlConfig(*_shared(doc))
+
+
+def load_gl_config(path: Path) -> GlConfig:
+    return parse_gl_config(load_toml(path))

@@ -19,9 +19,10 @@ from playwright.sync_api import sync_playwright
 
 from automation_common.secrets import Credential
 from buildium_portal import capture as capture_module
+from buildium_portal import gl_fetch, gl_main, session, statements_fetch
 from buildium_portal import login as login_module
-from buildium_portal import session, statements_fetch
 from buildium_portal.config import Site
+from buildium_portal.gl_fetch import date_forms, export_method, open_report, report_url
 from buildium_portal.login import (
     LoginError,
     SignOutError,
@@ -38,7 +39,8 @@ HOST = "https://site.example.invalid"
 LOGIN = "/manager/public/authentication/login"
 HOME = "/manager/app/home"
 LEDGER = "/manager/app/ledger"
-MFA = "/manager/public/authentication/verify"
+GL_REPORT = "/manager/app/reports/Financials/GeneralLedger"
+MFA ="/manager/public/authentication/verify"
 SITE = Site(f"{HOST}{LOGIN}")
 CRED = Credential("one@example.invalid", "made-up-password")
 FAST = Timeouts(field=2_000, after_submit=2_000, mfa_settle_s=0.3, mfa=1_500, menu=500,
@@ -111,8 +113,48 @@ LEDGER_PAGE = """<button onclick="location = '/send-funds'">Send funds</button>
 <script>function get(path) { location = '__BASE__' + path; }</script>"""
 
 
+# Built from the ids and names the old process used on the real report, which this code hasn't
+# run against yet. A PDF item sits beside the CSV one, as the old process's menu implies
+GL_PAGE = """<form id="ReportFiltersForm" name="ReportFiltersForm">
+  <div id="daterange-dropdown" onclick="show('daterange-menu')">Last month</div>
+  <ul id="daterange-menu" style="display:none">
+    <li id="daterange-dropdown-menu-item-1"><span>Last month</span></li>
+    <li id="daterange-dropdown-menu-item-10" onclick="custom()"><span>Custom</span></li>
+  </ul>
+  <div id="dates" style="display:none">
+    <input name="dateInput_fromDate" onblur="tidy(this)">
+    <input name="dateInput_toDate" onblur="tidy(this)">
+  </div>
+  <label>
+                 Cash
+             <input type="radio" name="method" value="Cash" checked></label>
+  <label>
+                 Accrual
+             <input type="radio" name="method" value="Accrual"></label>
+</form>
+<a id="exportReportButton" href="#" onclick="show('export-menu'); return false">Export</a>
+<ul id="export-menu" style="display:none">
+  <li><a href="#" onclick="fetch('/pdf-export'); return false">PDF (.pdf)</a></li>
+  <li><a href="#" onclick="get(); return false"><span>Comma-separated (.csv)</span></a></li>
+</ul>
+<script>
+  function custom() { document.getElementById('dates').style.display = 'block'; }
+  function tidy(box) {
+    if (!__PAD_DATES__) return;
+    const [m, d, y] = box.value.split('/');
+    box.value = `${m.padStart(2, '0')}/${d.padStart(2, '0')}/${y}`;
+  }
+  function get() {
+    const method = document.querySelector('input[name=method]:checked').value;
+    const from = document.querySelector('input[name=dateInput_fromDate]').value;
+    const to = document.querySelector('input[name=dateInput_toDate]').value;
+    location = `__BASE__/__USER___${method}.csv?from=${from}&to=${to}`;
+  }
+</script>"""
+
+
 class PdfServer:
-    """Serves PDFs over a real connection on 127.0.0.1, as attachments like the real site's."""
+    """Serves files over a real connection on 127.0.0.1, as attachments like the real site's."""
 
     def __init__(self):
         self.files = {}
@@ -122,12 +164,14 @@ class PdfServer:
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
                 owner.fetches.append(self.path)
-                body = owner.files.get(self.path, b"not found")
-                self.send_response(200 if self.path in owner.files else 404)
-                self.send_header("Content-Type", "application/pdf")
+                path = urlsplit(self.path).path
+                body = owner.files.get(path, b"not found")
+                is_csv = path.endswith(".csv")
+                name = "General_Ledger.csv" if is_csv else "Rental_owner_statement.pdf"
+                self.send_response(200 if path in owner.files else 404)
+                self.send_header("Content-Type", "text/csv" if is_csv else "application/pdf")
                 self.send_header("Content-Length", str(len(body)))
-                self.send_header("Content-Disposition",
-                                 'attachment; filename="Rental_owner_statement.pdf"')
+                self.send_header("Content-Disposition", f'attachment; filename="{name}"')
                 self.end_headers()
                 self.wfile.write(body)
 
@@ -147,7 +191,7 @@ class FakeSite:
     """One sign-in page and an app, answered by Playwright. One user at a time, like the site."""
 
     def __init__(self, signed_in_as=None, mfa=False, mfa_clears=False, reject=False,
-                 challenge=False, sign_out_works=True, pdf_for=None):
+                 challenge=False, sign_out_works=True, pdf_for=None, pad_dates=False):
         self.user = signed_in_as
         self.mfa = mfa  # True, or the set of users who get asked
         self.mfa_clears = mfa_clears  # someone opens the emailed link
@@ -155,6 +199,7 @@ class FakeSite:
         self.challenge = challenge
         self.sign_out_works = sign_out_works
         self.pdf_for = pdf_for or (lambda user: f"/{user.split('@')[0]}.pdf")
+        self.pad_dates = pad_dates
         self.logins = []
         self.paths = []
         self.server = None
@@ -174,6 +219,11 @@ class FakeSite:
             ledger = (LEDGER_PAGE.replace("__PDF__", self.pdf_for(self.user))
                       .replace("__BASE__", self.server.base))
             return self._html(route, nav + ledger)
+        if path == GL_REPORT:
+            report = (GL_PAGE.replace("__PAD_DATES__", "true" if self.pad_dates else "false")
+                      .replace("__BASE__", self.server.base)
+                      .replace("__USER__", self.user.split("@")[0]))
+            return self._html(route, nav + report)
         return self._html(route, f"{nav}<h1>Home</h1>")
 
     def handle(self, route):
@@ -409,15 +459,17 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch, pdf_of):
     notes = []
     pdfs = {"/one.pdf": pdf_of(owner=ONE), "/two.pdf": pdf_of(owner=TWO)}
 
-    def start(site, *args, files=None):
+    def start(site, *args, files=None, command=main):
         site.use(pdf_server, pdfs if files is None else files)
         monkeypatch.setattr(session, "launch_edge", launch(site))
         monkeypatch.setattr(capture_module, "launch_edge", launch(site))
         monkeypatch.setattr(login_module, "Timeouts", lambda: FAST)
         monkeypatch.setattr(statements_fetch, "PAGE_TIMEOUT_MS", 2_000)
         monkeypatch.setattr(statements_fetch, "DOWNLOAD_TIMEOUT_MS", 1_500)
-        return main(list(args), notifier=lambda note, masker: notes.append(note) or True,
-                    today=TODAY)
+        monkeypatch.setattr(gl_fetch, "PAGE_TIMEOUT_MS", 2_000)
+        monkeypatch.setattr(gl_fetch, "DOWNLOAD_TIMEOUT_MS", 1_500)
+        return command(list(args), notifier=lambda note, masker: notes.append(note) or True,
+                       today=TODAY)
 
     def credentials(name, user):
         email = {"buildium/entity1": "one@example.invalid",
@@ -615,3 +667,142 @@ def test_capture_saves_snapshots_and_types_nothing(whole_run, monkeypatch):
     assert (run_dir / "capture_001_page.txt").exists()
     assert site.logins == []
     assert not list(run_dir.glob("trace*"))
+
+
+# ---------------------------------------------- buildium-gl
+
+def _gl_files(gl_csv_of):
+    return {f"/{user}_{method}.csv": gl_csv_of(rows=[{"Id": "1", "JournalMemo": f"{user}{method}"}])
+            for user in ("one", "two") for method in ("Cash", "Accrual")}
+
+
+def _gl_run(whole_run, site, gl_csv_of, *args, files=None):
+    files = _gl_files(gl_csv_of) if files is None else files
+    return whole_run.start(site, "--dump", *args, files=files, command=gl_main.main)
+
+
+def test_the_report_address_comes_from_the_sign_in_host():
+    assert report_url(f"{SITE.login_url}?x=1") == f"{HOST}{GL_REPORT}"
+
+
+def test_date_forms_cover_the_ways_a_box_can_show_a_date():
+    assert date_forms(dt.date(1999, 1, 5)) == ("1/5/1999", "01/05/1999")
+
+
+def _gl_page(open_site, gl_csv_of, monkeypatch, site=None):
+    monkeypatch.setattr(gl_fetch, "PAGE_TIMEOUT_MS", 2_000)
+    monkeypatch.setattr(gl_fetch, "DOWNLOAD_TIMEOUT_MS", 1_500)
+    page = open_site(site or FakeSite(), _gl_files(gl_csv_of))
+    sign_in(page, SITE, CRED, FAST)
+    return page
+
+
+def test_each_method_saves_its_own_export_for_the_whole_date_range(
+        open_site, pdf_server, gl_csv_of, tmp_path, monkeypatch):
+    page = _gl_page(open_site, gl_csv_of, monkeypatch)
+    open_report(page, SITE, TODAY)
+    for method in ("Cash", "Accrual"):
+        export_method(page, method, tmp_path / f"{method}.csv")
+    assert b"oneCash" in (tmp_path / "Cash.csv").read_bytes()
+    assert b"oneAccrual" in (tmp_path / "Accrual.csv").read_bytes()
+    assert pdf_server.fetches == ["/one_Cash.csv?from=1/1/1999&to=11/5/2026",
+                                  "/one_Accrual.csv?from=1/1/1999&to=11/5/2026"]
+
+
+def test_a_date_box_that_rewrites_the_date_still_works(open_site, pdf_server, gl_csv_of, tmp_path,
+                                                       monkeypatch):
+    page = _gl_page(open_site, gl_csv_of, monkeypatch, FakeSite(pad_dates=True))
+    open_report(page, SITE, TODAY)
+    export_method(page, "Cash", tmp_path / "Cash.csv")
+    assert pdf_server.fetches == ["/one_Cash.csv?from=01/01/1999&to=11/05/2026"]
+
+
+def test_a_dump_saves_every_export_with_a_profile_and_signs_out(whole_run, gl_csv_of):
+    site = FakeSite()
+    assert _gl_run(whole_run, site, gl_csv_of) == 0
+    run_dir = _run_dir(whole_run.data)
+    for key in ("entity1", "entity2"):
+        for method in ("Cash", "Accrual"):
+            assert (run_dir / "downloads" / f"{key}_{method}.csv").stat().st_size > 0
+            assert "columns: 53" in (run_dir / f"gl_profile_{key}_{method}.txt").read_text(
+                encoding="utf-8")
+    for step in ("report", "dates", "export_menu_cash", "export_menu_accrual"):
+        assert (run_dir / f"dump_entity1_{step}_page.txt").exists()
+    assert site.paths.count("/sign-out") == 2
+    assert whole_run.notes == [{"title": "buildium-gl", "message": "PASS"}]
+    assert not (whole_run.data / "data").exists()
+
+
+def test_the_log_report_and_profiles_hold_no_private_values(whole_run, gl_csv_of):
+    # Unlike these, a dump's page copies and the raw exports do hold real values
+    assert _gl_run(whole_run, FakeSite(), gl_csv_of) == 0
+    run_dir = _run_dir(whole_run.data)
+    safe = [run_dir / "run.log", run_dir / "report.txt", run_dir / "summary.json",
+            *run_dir.glob("gl_profile_*.txt")]
+    written = "".join(path.read_text(encoding="utf-8") for path in safe)
+    for private in (SITE.login_url, ONE, "ONELLC", "one@example.invalid", "oneCash"):
+        assert private not in written
+    assert "entity1 Cash" in written
+
+
+def test_it_doesnt_need_the_statements_section(whole_run, gl_csv_of):
+    config = whole_run.data / "config.toml"
+    config.write_text(config.read_text(encoding="utf-8").split("[statements]")[0],
+                      encoding="utf-8")
+    assert _gl_run(whole_run, FakeSite(), gl_csv_of) == 0
+
+
+def test_a_missing_export_stops_the_run_and_saves_evidence(whole_run, gl_csv_of):
+    # The sheet needs every entity, so there's no point in signing the next one in
+    site = FakeSite()
+    files = _gl_files(gl_csv_of)
+    del files["/one_Accrual.csv"]
+    assert _gl_run(whole_run, site, gl_csv_of, files=files) == 1
+    assert len(site.logins) == 1
+    assert site.user is None
+    report = _report(whole_run.data)
+    assert "Accrual: FetchError: no Accrual export" in report
+    assert "export: entity2  (not processed: entity1 failed)" in report
+    run_dir = _run_dir(whole_run.data)
+    assert (run_dir / "fail_01.png").exists()
+    assert (run_dir / "trace_entity1.zip").exists()
+    assert whole_run.notes[-1] == {"title": "buildium-gl", "message": "FAIL"}
+
+
+def test_a_failed_sign_in_stops_the_run(whole_run, gl_csv_of):
+    site = FakeSite(reject=True)
+    assert _gl_run(whole_run, site, gl_csv_of) == 1
+    assert len(site.logins) == 1
+    report = _report(whole_run.data)
+    assert "login: entity1" in report
+    assert "export: entity2  (not processed: entity1 failed)" in report
+
+
+def test_a_report_that_wont_open_stops_the_run_and_saves_evidence(whole_run, gl_csv_of,
+                                                                  monkeypatch):
+    monkeypatch.setattr(gl_fetch, "REPORT_PATH", "/manager/app/moved")
+    site = FakeSite()
+    assert _gl_run(whole_run, site, gl_csv_of) == 1
+    assert len(site.logins) == 1
+    assert site.user is None  # still signed out
+    run_dir = _run_dir(whole_run.data)
+    assert (run_dir / "fail_01.png").exists()
+    assert (run_dir / "trace_entity1.zip").exists()
+    assert "report: FetchError: no date range menu" in _report(whole_run.data)
+
+
+def test_mfa_failing_says_so(whole_run, gl_csv_of):
+    assert _gl_run(whole_run, FakeSite(mfa=True), gl_csv_of) == 1
+    assert whole_run.notes[0]["message"] == "ONELLC: MFA link needed"
+    assert whole_run.notes[-1] == {"title": "buildium-gl", "message": "FAIL: MFA needed"}
+
+
+def test_entity_exports_only_that_one(whole_run, gl_csv_of):
+    site = FakeSite()
+    assert _gl_run(whole_run, site, gl_csv_of, "--entity", "entity2") == 0
+    assert [login["email"] for login in site.logins] == ["two@example.invalid"]
+
+
+def test_it_needs_dump_while_nothing_writes_to_a_sheet(whole_run):
+    with pytest.raises(SystemExit):
+        gl_main.main([])

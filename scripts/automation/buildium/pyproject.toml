@@ -9,6 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
+buildium-gl = "buildium_portal.gl_main:main"
 buildium-statements = "buildium_portal.main:main"
 
 [tool.uv.sources]

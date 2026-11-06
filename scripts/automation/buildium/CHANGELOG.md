@@ -5,6 +5,11 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
 
 ## Unreleased
 
+- Add `buildium-gl`, which so far only runs with `--dump`: for each entity it signs in, exports
+  the general ledger as CSV for each accounting method, and saves the exports, the page
+  structure, and a masked profile of each export to the run folder. It stops at the first
+  entity that fails.
+- `[statements]` is now only required by `buildium-statements`.
 - The MFA push now names the entity's abbreviation instead of its key.
 - The push notifications' words can now be set in `config.toml`, as optional
   `[notifications.<event>]` blocks with `{variables}`.

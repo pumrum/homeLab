@@ -5,7 +5,7 @@ import copy
 import pytest
 
 from automation_common.config import ConfigError
-from buildium_portal.config import load_config, parse_config
+from buildium_portal.config import load_config, parse_config, parse_gl_config
 
 VALID = {
     "site": {"login_url": "https://site.example.invalid/login"},
@@ -75,6 +75,23 @@ def test_a_missing_file_says_what_to_do(tmp_path):
 def test_a_bad_config_fails_clearly(change, message):
     with pytest.raises(ConfigError, match=message):
         parse_config(_changed(change))
+
+
+def test_buildium_gl_doesnt_depend_on_the_statements_section():
+    doc = _changed(lambda d: d.pop("statements"))
+    assert [entity.key for entity in parse_gl_config(doc).entities] == ["entity1", "entity2"]
+    doc = _changed(lambda d: d["statements"].update(system="<system name>"))
+    assert parse_gl_config(doc).site.login_url == VALID["site"]["login_url"]
+
+
+@pytest.mark.parametrize(("change", "message"), [
+    (lambda d: d.pop("site"), r"\[site\] section"),
+    (lambda d: d.pop("entities"), r"\[\[entities\]\]"),
+    (lambda d: d.update(extra=1), "unknown"),
+])
+def test_buildium_gl_still_checks_the_shared_sections(change, message):
+    with pytest.raises(ConfigError, match=message):
+        parse_gl_config(_changed(change))
 
 
 def test_a_message_never_repeats_a_private_value():
