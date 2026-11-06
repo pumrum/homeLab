@@ -13,7 +13,6 @@ Build a new automation in this repo. The working directory is the `homeLab` repo
 - **What to capture:** <the fields or files, and an example of what they look like, made up if needed>
 - **Sign-in:** <none / what kind, and whether MFA is involved>
 - **Where it goes:** <CSV / Google Sheet / webhook message / other>
-- **How often:** <schedule, and when the data is ready>
 - **What counts as a repeat:** <what makes two rows the same, or "help me decide">
 - **Anything else:** <constraints, or things you know will be awkward>
 
@@ -74,21 +73,29 @@ These have caused real problems here, so state each decision in your plan:
   fetched the same value.
 - **Re-running.** A second run the same day, or a run from another machine, must not
   duplicate anything. A run after a failed write must catch up by itself.
+- **Downloaded files.** Each run overwrites what's in the data folder, because a re-run
+  means I want the freshest copy. Don't compare files, keep old copies, or manage
+  staleness. A file must pass its checks before it replaces a good one. Rows appended to
+  a sheet or log are different, because a repeat there is a real duplicate.
 - **Separate test data.** The test workstation shouldn't write to live destinations, so
   say what the test config should point to.
-- **When the data is ready.** If the source updates at a certain time, say what a run
-  does before then.
+- **Data that isn't ready.** If the source can return data that isn't ready yet, the run
+  must detect that and not save it.
 - **Partial failure.** Each stage and item fails on its own and is recorded, and the run
   exits 1. Nothing waits for a person, except an MFA wait with a timeout.
 
 ## Scheduling and deployment
 
-Home Assistant is the scheduler, and `automation-agent` starts the job. Don't add a
-Windows Task Scheduler entry for the job. When you finish, give me these as steps:
+Home Assistant is the scheduler, and `automation-agent` starts the job. I set the schedule
+myself, so don't ask how often it runs. Don't add a Windows Task Scheduler entry for the
+job. When you finish, give me these as steps:
 
 - The `[[jobs]]` block for `C:\automation\agent\config.toml`, and the agent restart it
-  needs to pick up the new job.
-- The Home Assistant automation in YAML, publishing `run` to `automation/<job>/run`.
+  needs to pick up the new job. Set `timeout_minutes` above the run's longest possible
+  time, with every MFA or other wait added up. The agent stops a job instantly at its
+  limit, which leaves no report or notification.
+- The Home Assistant automation in YAML, publishing `run` to `automation/<job>/run`, with
+  the time left for me to fill in.
 - The private setup for this process: config values, secrets, and any Google or Home
   Assistant setup, as things only I can do.
 
@@ -101,13 +108,17 @@ anything else on the robot, such as a new dependency or a tool outside `uv sync`
 - Unit tests use synthetic data only, and nothing touches a network or real system. Run
   `uv run pytest`, `uv run ruff check .`, and `pre-commit` before you say it's ready.
 - Give me PowerShell test steps for the robot test workstation, in `powershell` blocks I
-  can paste, each with what I should expect to see. That machine has a read-only clone,
+  can paste, each with what I should expect to see. When a step runs the tests, say how
+  many should pass. That machine has a read-only clone,
   its config uses the `automation-test` topic prefix, and I start its `automation-agent`
   task only while testing. It updates whichever branch is checked out.
 - Before you give me a test step, check that it can't undo what it's testing. For example,
   don't move a checkout to a commit that's missing the file being tested.
 - Test by running the command directly first, then from the Home Assistant button, then
   on a schedule.
+- If the job signs in, plan a run with a new browser profile and no manual sign-in first,
+  usually the robot's first run, with me ready to answer any MFA. A profile the site
+  already remembers hides the sign-in prompts, so only a new one tests them.
 - When something fails, find the cause from the evidence before changing code. If you
   suspect your own test steps or a test fake, prove it.
 
