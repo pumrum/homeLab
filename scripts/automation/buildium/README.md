@@ -59,18 +59,19 @@ the reason in `report.txt` and `run.log`. A failure after sign-in also saves
 | The form stays gone with no app yet | Treated as MFA. Sends the push and waits up to 5 minutes |
 | The app | Signed in |
 
-**MFA during a job is untested.** The site emails a link. When the push arrives, open the email
-and the link. The job's browser should move on by itself, but no unattended run has reached MFA
-yet. If it doesn't, the run ends with `FAIL: MFA needed`. Sign in with `--capture` at the desktop
-(step 3 below), then run the job again. The site currently remembers a device after one
-successful sign-in, so this should be rare.
+**MFA works in an unattended run.** The site emails a link. When the push arrives, open the email
+and the link, and the job's browser moves on by itself. If that's not done in time, the run ends
+with `FAIL: MFA needed`, so run the job again or sign in with `--capture` at the desktop (step 3
+below). The site currently remembers a device after one successful sign-in, so this should be
+rare.
 
 Allow enough time in the agent's limit, which stops a job instantly and with no evidence. Each
 entity can wait 5 minutes, plus a minute or two for its work.
 
-Sign-in, sign-out, the statement menus, and saving have all run on the real site, including
-unattended. MFA during a job and a failed sign-out haven't. The code doesn't know the MFA page's
-structure, so anything that isn't the form or the app counts as MFA.
+Sign-in, MFA, sign-out, the statement menus, and saving have all run on the real site,
+unattended. MFA timing out and a failed sign-out haven't, and there's no plan to force them, so
+expect a possible fix if one ever happens. The code doesn't know the MFA page's structure, so
+anything that isn't the form or the app counts as MFA.
 
 ## Set up each machine
 
@@ -95,8 +96,9 @@ Copy-Item buildium\config.example.toml C:\automation\buildium\config.toml
 Add one `[[entities]]` block per entity. `statement_name` must match the name in the statement's
 header, though case and extra spaces don't matter.
 
-**3. Sign in by hand,** so the job's browser profile is remembered. A sign-in in Edge from the
-Start menu doesn't count, because the job has its own profile:
+**3. Optional: sign in by hand.** A first run doesn't need this, because it asks for MFA with a
+push. It's the fallback if a job's MFA doesn't go through. A sign-in in Edge from the Start menu
+doesn't count, because the job has its own profile:
 
 ```powershell
 uv run buildium-statements --capture
