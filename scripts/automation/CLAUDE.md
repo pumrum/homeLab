@@ -66,6 +66,24 @@ config, and each job is a bare console script name. The one other action is the
 word `update`, which starts a fixed helper task (`agent/update_agent.ps1`) that
 takes no input. Keep it that way.
 
+Assume the agent is running on the test workstation and the robot. Steps for either
+machine must stop it first when they change the checkout or environment (`git switch`,
+`git pull`, `uv sync`), run a job by hand, or change the agent's config. Tell the
+maintainer to check that no job is running first, because stopping the agent leaves a
+running job going with nothing to report its result:
+
+```powershell
+Stop-ScheduledTask -TaskName "automation-agent"
+
+```
+
+End those steps by starting it again:
+
+```powershell
+Start-ScheduledTask -TaskName "automation-agent"
+
+```
+
 ## Paths (Windows 11)
 
 | Path | Purpose |
@@ -98,7 +116,7 @@ Use these from `automation_common` instead of writing your own:
 | `secrets` | Credential Manager entries and encrypted secret files |
 | `browser` | `launch_edge`, `find_first`, `click_until`, `type_date`, `capture_pdf`, tracing, and failure evidence |
 | `sheets` | `open_worksheet`: read a Google Sheet tab, append rows, or replace a column from a cell down |
-| `notify` | The webhook POST (`Run` calls it for you) |
+| `notify` | The webhook POST (`Run` calls it for you), and the `[notifications]` templates |
 
 ## Workspace and packaging
 
@@ -139,13 +157,21 @@ Use these from `automation_common` instead of writing your own:
 - Use `automation_common.run.Run`: it creates the run folder and log, and
   always writes the summary (`summary.json`, `report.txt`) on exit. If the
   `automation/home-assistant-webhook` secret exists, it POSTs only
-  `{"title": ..., "message": ...}` there (default: the process name and
-  `PASS` or `FAIL`), which the Home Assistant automation shows as is;
+  `{"title": ..., "message": ...}` there (default: the command or process name
+  and `PASS` or `FAIL`), which the Home Assistant automation shows as is;
   otherwise it only logs it. Each automation uses this standard notification,
   tailored to its purpose, and details stay in the run folder. Any other push
   needs the maintainer's OK, because of rate limits, though they're very high,
-  so propose it in the plan. Keep messages short: they are read on a watch. Pass
-  `title=` or `message=` to `Run.start` to change them.
+  so propose it in the plan. Keep messages short: they are read on a watch.
+- A notification's words belong in `config.toml`, not code. Each event has an
+  optional `[notifications.<event>]` table with `title` and `message`, which can use
+  `{variables}`, checked at start-up. Defaults stay in the process's `config.py`
+  (`STANDARD_NOTIFICATIONS` plus its own events, each naming its extra variables),
+  because a run whose config can't load still has to send its `FAIL`. Call
+  `parse_notifications`, set `run.notifications = cfg.notifications` once the config
+  has loaded, pass `event=` to `Run.start` for a different final event, and use
+  `run.notify(event, ...)` for a push during the run. Show every event's table in
+  `config.example.toml`.
 - Each stage, and each item within a stage (e.g. each fund), has its own
   try/except. Record one failure with `run.summary.record(...)`, then continue.
 - Exit code: 0 all OK, 1 any item failed.

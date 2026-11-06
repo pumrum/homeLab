@@ -11,3 +11,14 @@ url = "https://..."     # the fund's summary page
 # [sheet]
 # spreadsheet_id = "<ID>"   # from .../spreadsheets/d/<ID>/edit
 # worksheet = "NAV"         # the tab name
+
+# Optional: the push notifications' words. Leave a block or line out to keep what's shown
+# here. Any of these can go in {braces}: {command}, {process}, {run_id}, {ok}, {unchanged},
+# {failed}, and {total}. Keep them short, since they're read on a watch.
+[notifications.pass]
+title = "{command}"
+message = "PASS"
+
+[notifications.fail]
+title = "{command}"
+message = "FAIL"

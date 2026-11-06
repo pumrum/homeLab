@@ -1,12 +1,13 @@
 """Load and validate C:\\automation\\buildium\\config.toml.
 
 Everything that identifies an entity lives in this private file. The code only ever
-works with what's here, and a neutral key is all that reaches a notification.
+works with what's here. Logs and reports use only the neutral key, while an MFA push
+goes to a person's phone, so its words can use the abbreviation too.
 """
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -18,10 +19,23 @@ from automation_common.config import (
     require_str,
     require_tables,
 )
+from automation_common.notify import (
+    RUN_VARIABLES,
+    STANDARD_NOTIFICATIONS,
+    Template,
+    parse_notifications,
+)
 
 _KEY = re.compile(r"^[a-z0-9-]+$")  # goes in a credential's name and a run folder's file names
 _FILE_NAME_PART = re.compile(r"^[A-Za-z0-9-]+$")  # "_" separates a saved file's name parts
 _PLACEHOLDERS = ("...", "<", ">")
+
+NOTIFICATIONS = {
+    **STANDARD_NOTIFICATIONS,
+    "mfa_failed": Template("{command}", "FAIL: MFA needed"),
+    "mfa_needed": Template("{command}", "{abbreviation}: MFA link needed",
+                           RUN_VARIABLES | {"key", "abbreviation"}),
+}
 
 
 @dataclass(frozen=True)
@@ -50,6 +64,7 @@ class Config:
     site: Site
     entities: tuple[Entity, ...]
     statements: Statements
+    notifications: Mapping[str, Template] = field(default_factory=lambda: NOTIFICATIONS)
 
 
 def _table(doc: Mapping[str, Any], key: str) -> Mapping[str, Any]:
@@ -106,7 +121,7 @@ def _reject_repeats(entities: list[Entity]) -> None:
 
 def parse_config(doc: Mapping[str, Any]) -> Config:
     """Validate an already-parsed TOML document."""
-    reject_unknown_keys(doc, {"site", "entities", "statements"}, "config")
+    reject_unknown_keys(doc, {"site", "entities", "statements", "notifications"}, "config")
     site, statements = _table(doc, "site"), _table(doc, "statements")
     reject_unknown_keys(site, {"login_url"}, "[site]")
     reject_unknown_keys(statements, {"system"}, "[statements]")
@@ -117,6 +132,7 @@ def parse_config(doc: Mapping[str, Any]) -> Config:
         Site(_url(site, "login_url", "[site]")),
         tuple(entities),
         Statements(_file_name_part(statements, "system", "[statements]")),
+        parse_notifications(doc, NOTIFICATIONS),
     )
 
 

@@ -10,6 +10,7 @@ from automation_agent.main import (
     report_update_result,
 )
 from automation_agent.runner import JobResult
+from automation_common.notify import Template
 from automation_common.secrets import Credential, SecretMasker
 
 MQTT = Mqtt("broker.invalid")
@@ -83,6 +84,15 @@ def _states(client):
 
 def _connect(agent, client, reason=CONNECTED):
     agent.on_connect(client, None, None, reason, None)
+
+
+def test_the_config_sets_the_words_of_the_agents_own_pushes(tmp_path):
+    (tmp_path / "update_result.txt").write_text("FAIL\n", encoding="ascii")
+    notes = []
+    words = {"update_fail": Template("Update", "Didn't work"),
+             "update_pass": Template("Update", "Worked")}
+    report_update_result(tmp_path, SecretMasker(), lambda n, m: notes.append(n) or True, words)
+    assert notes == [{"title": "Update", "message": "Didn't work"}]
 
 
 def test_connect_retries_with_backoff_and_logs_why(caplog):

@@ -130,5 +130,5 @@ timeout_minutes = 5
    `pyproject.toml`.
 2. Get a signed-in page from `innago_portal.session.signed_in_page`. It handles the
    profile, credential, trace, and failure evidence. Don't sign in any other way.
-3. Pass `title="<command>"` to `Run.start`, so its notifications name the command.
+3. Pass `command="<command>"` to `Run.start`, so its notifications name the command.
 4. Add its settings as a new section in `config.py`. `[site]` is already shared.

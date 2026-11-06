@@ -6,7 +6,7 @@ from automation_common.run import Run, Status
 from buildium_portal import session
 from buildium_portal.config import Entity, Site
 from buildium_portal.login import LoginError
-from buildium_portal.main import notification_message, parse_args
+from buildium_portal.main import final_event, parse_args
 
 SITE = Site("https://site.example.invalid/login")
 ENTITY = Entity("entity1", "ABCLLC", "FakeEntity One, LLC")
@@ -44,10 +44,10 @@ def test_a_job_run_with_no_arguments_never_waits_for_a_person():
     assert args.entity is None
 
 
-def test_the_final_message_names_mfa_only_when_it_stopped_a_sign_in(run):
+def test_the_final_event_names_mfa_only_when_it_stopped_a_sign_in(run):
     run.summary.record("login", "entity1", Status.OK)
-    assert notification_message(run.summary) == "PASS"
+    assert final_event(run.summary) == "pass"
     run.summary.record("statement", "entity1", Status.FAILED, "mentions MFA, but isn't a sign-in")
-    assert notification_message(run.summary) == "FAIL"
+    assert final_event(run.summary) == "fail"
     run.summary.record("login", "entity2", Status.FAILED, "MFA was not completed")
-    assert notification_message(run.summary) == "FAIL: MFA needed"
+    assert final_event(run.summary) == "mfa_failed"

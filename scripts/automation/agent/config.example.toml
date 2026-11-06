@@ -18,3 +18,19 @@ topic_prefix = "automation"     # use a different one on a test machine
 name = "<job>"                  # lowercase; used in topics and Home Assistant names
 command = "<console script>"    # its name only, as in the process's pyproject.toml
 timeout_minutes = 30            # a run longer than this is stopped and reported as FAIL
+
+# Optional: the words of what the agent reports itself. Jobs set their own in their own
+# config. Leave a block or line out to keep what's shown here.
+# A job the agent had to stop, or couldn't start. {job} is its name.
+[notifications.job_failed]
+title = "{job}"
+message = "FAIL"
+
+# The Update button's result. These use no variables.
+[notifications.update_pass]
+title = "agent update"
+message = "PASS"
+
+[notifications.update_fail]
+title = "agent update"
+message = "FAIL"

@@ -53,8 +53,11 @@ Every run makes `C:\automation\<process>\runs\<yyyyMMdd_HHmmss>\` with
 `fail_NN_page.txt`, and `trace.zip`. Exit code 0 means every item was OK.
 If the Credential Manager entry `automation/home-assistant-webhook` exists,
 each run POSTs `{"title": "<process>", "message": "PASS"}` (or `"FAIL"`) to
-it, and nothing else; the details stay in the run folder. A generic Home
-Assistant webhook automation can pass both straight to a notification:
+it, and nothing else; the details stay in the run folder. To change the words, add
+`[notifications.<event>]` blocks to that `config.toml`. Its `config.example.toml`
+lists the events and the `{variables}` each one can use, and a run fails at start-up
+if one is misspelled. A run whose config can't load uses the built-in words. A
+generic Home Assistant webhook automation can pass both straight to a notification:
 
 ```yaml
 actions:

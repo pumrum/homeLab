@@ -1,7 +1,8 @@
 """Load and validate C:\\automation\\agent\\config.toml."""
 
 import re
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ from automation_common.config import (
     require_str,
     require_tables,
 )
+from automation_common.notify import Template, parse_notifications
 
 _JOB = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # A console script's bare name: no paths, spaces, or arguments can get through
@@ -19,6 +21,13 @@ _COMMAND = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _PREFIX = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 _PLACEHOLDERS = ("<", ">", "...")
 DEFAULT_TIMEOUT_MINUTES = 30
+
+# Jobs send their own. These cover what the agent reports itself
+NOTIFICATIONS = {
+    "job_failed": Template("{job}", "FAIL", frozenset({"job"})),
+    "update_pass": Template("agent update", "PASS", frozenset()),
+    "update_fail": Template("agent update", "FAIL", frozenset()),
+}
 
 
 @dataclass(frozen=True)
@@ -41,6 +50,7 @@ class Job:
 class Config:
     mqtt: Mqtt
     jobs: list[Job]
+    notifications: Mapping[str, Template] = field(default_factory=lambda: NOTIFICATIONS)
 
 
 def _int(table: dict[str, Any], key: str, default: int, low: int, high: int, where: str) -> int:
@@ -98,14 +108,14 @@ def _job(table: dict[str, Any], n: int) -> Job:
 
 def parse_config(doc: dict[str, Any]) -> Config:
     """Validate an already-parsed TOML document."""
-    reject_unknown_keys(doc, {"mqtt", "jobs"}, "config")
+    reject_unknown_keys(doc, {"mqtt", "jobs", "notifications"}, "config")
     mqtt = _mqtt(doc.get("mqtt"))
     jobs = [_job(t, n) for n, t in enumerate(require_tables(doc, "jobs"), start=1)]
     names = [j.name for j in jobs]
     dupes = sorted({n for n in names if names.count(n) > 1})
     if dupes:
         raise ConfigError(f"duplicate job name(s): {', '.join(dupes)}")
-    return Config(mqtt, jobs)
+    return Config(mqtt, jobs, parse_notifications(doc, NOTIFICATIONS))
 
 
 def load_config(path: Path) -> Config:

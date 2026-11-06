@@ -15,14 +15,14 @@ import ssl
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 import paho.mqtt.client as mqtt_client
 
 from automation_agent import PROCESS
-from automation_agent.config import Config, Job, Mqtt, load_config
+from automation_agent.config import NOTIFICATIONS, Config, Job, Mqtt, load_config
 from automation_agent.runner import JobResult, Runner, run_job
 from automation_agent.topics import (
     FAIL,
@@ -48,7 +48,7 @@ from automation_agent.update import (
     take_update_result,
 )
 from automation_common.config import ConfigError, process_dir
-from automation_common.notify import send_notification
+from automation_common.notify import Template, send_notification
 from automation_common.run import MaskingFormatter
 from automation_common.secrets import Credential, SecretMasker, get_credential
 
@@ -60,7 +60,6 @@ LOG_BACKUPS = 5
 QOS = 1
 RETRY_MIN_S = 5
 RETRY_MAX_S = 60
-UPDATE_TITLE = "agent update"
 UPDATE_WAIT_S = 300  # the helper stops this agent within seconds; still here means it didn't
 
 
@@ -173,7 +172,7 @@ class Agent:
 
     def _update_failed(self) -> None:
         self.updating = False
-        self.notify({"title": UPDATE_TITLE, "message": FAIL}, self.masker)
+        self.notify(self.cfg.notifications["update_fail"].render(), self.masker)
 
     def _publish_state(self, job: Job, state: str) -> None:
         self.client.publish(state_topic(self.cfg.mqtt, job.name), state, qos=QOS, retain=True)
@@ -187,7 +186,7 @@ class Agent:
                 job.name, PASS if result.ok else FAIL, result.detail)
         self._publish_state(job, PASS if result.ok else FAIL)
         if not result.reported_by_job:
-            self.notify({"title": job.name, "message": FAIL}, self.masker)
+            self.notify(self.cfg.notifications["job_failed"].render(job=job.name), self.masker)
 
 
 def setup_logging(data_dir: Path, masker: SecretMasker) -> None:
@@ -243,12 +242,14 @@ def report_update_result(
     data_dir: Path,
     masker: SecretMasker,
     notify: Callable[[dict[str, str], SecretMasker], bool] = send_notification,
+    notifications: Mapping[str, Template] = NOTIFICATIONS,
 ) -> None:
     """Tell Home Assistant how the update that restarted this agent went, if there was one."""
     result = take_update_result(data_dir)
     if result is not None:
         log.log(logging.INFO if result == PASS else logging.ERROR, "update finished: %s", result)
-        notify({"title": UPDATE_TITLE, "message": result}, masker)
+        event = "update_pass" if result == PASS else "update_fail"
+        notify(notifications[event].render(), masker)
 
 
 def main() -> int:
@@ -269,7 +270,7 @@ def main() -> int:
 
     scripts_dir = Path(sys.executable).parent
     workspace = scripts_dir.parents[1]
-    report_update_result(data_dir, masker)
+    report_update_result(data_dir, masker, notifications=cfg.notifications)
     client = build_client(cfg, cred)
     agent = Agent(cfg, client, masker, lambda job: run_job(job, scripts_dir, workspace),
                   version=current_version(workspace))

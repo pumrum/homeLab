@@ -10,9 +10,9 @@ from innago_portal.login import LoginError
 from innago_portal.main import (
     browser_stage,
     download_stage,
+    final_event,
     load_stage,
     main,
-    notification_message,
 )
 
 SITE = Site("https://sign-in.example.invalid/login", "https://app.example.invalid/")
@@ -205,15 +205,15 @@ def test_signed_in_session_runs_the_downloads(run, row, tmp_path):
 
 
 def test_only_an_mfa_failure_is_named_in_the_notification(run):
-    assert notification_message(run.summary) == "FAIL"  # nothing ran
+    assert final_event(run.summary) == "fail"  # nothing ran
     run.summary.record("login", "site", Status.OK)
-    assert notification_message(run.summary) == "PASS"
+    assert final_event(run.summary) == "pass"
     run.summary.items.clear()
     run.summary.record("login", "site", Status.FAILED, "the site did not accept the password")
-    assert notification_message(run.summary) == "FAIL"
+    assert final_event(run.summary) == "fail"
     run.summary.items.clear()
     run.summary.record("login", "site", Status.FAILED, "MFA was not completed within 60 seconds")
-    assert notification_message(run.summary) == "FAIL: MFA needed"
+    assert final_event(run.summary) == "mfa_failed"
 
 
 def test_missing_config_fails_with_a_clear_message(run, tmp_path):

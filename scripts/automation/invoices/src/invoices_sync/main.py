@@ -57,6 +57,7 @@ def load_stage(run: Run, data_dir: Path) -> Config | None:
     except ConfigError as e:
         run.summary.record("config", "config.toml", Status.FAILED, str(e))
         return None
+    run.notifications = cfg.notifications
     # Private: never in logs. The file names and tab name aren't secret, so they stay readable
     for value in (cfg.sftp.host, cfg.sftp.user, cfg.sftp.folder, cfg.sheet.spreadsheet_id):
         run.masker.add(value)

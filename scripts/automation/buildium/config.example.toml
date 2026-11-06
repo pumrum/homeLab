@@ -9,8 +9,8 @@ login_url = "https://<address of the sign-in page>"
 
 # Used by every command in this package. Add one block per entity.
 [[entities]]
-key = "entity1"                                  # neutral: in logs, notifications, and the credential's name
-abbreviation = "<ABBREVIATION>"                  # in the saved file's name, like ABCLLC
+key = "entity1"                                  # neutral: in logs, reports, and the credential's name
+abbreviation = "<ABBREVIATION>"                  # in the saved file's name and the MFA push, like ABCLLC
 statement_name = "<name as shown on statement>"  # checked against each statement before it's saved
 
 [[entities]]
@@ -21,3 +21,25 @@ statement_name = "<name as shown on statement>"
 # Used by buildium-statements.
 [statements]
 system = "<system name>"                         # in every saved file's name
+
+# Optional: the push notifications' words. Leave a block or line out to keep what's shown
+# here. Any of these can go in {braces}: {command}, {process}, {run_id}, {ok}, {unchanged},
+# {failed}, and {total}. Keep them short, since they're read on a watch.
+[notifications.pass]
+title = "{command}"
+message = "PASS"
+
+[notifications.fail]
+title = "{command}"
+message = "FAIL"
+
+# When a sign-in stopped at MFA, so a person has to act, instead of [notifications.fail].
+[notifications.mfa_failed]
+title = "{command}"
+message = "FAIL: MFA needed"
+
+# Sent during the run, when a sign-in is waiting for the emailed MFA link. This one can
+# also use that entity's {abbreviation} and {key}.
+[notifications.mfa_needed]
+title = "{command}"
+message = "{abbreviation}: MFA link needed"

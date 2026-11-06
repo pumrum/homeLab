@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +13,7 @@ from automation_common.config import (
     require_str,
     require_tables,
 )
+from automation_common.notify import STANDARD_NOTIFICATIONS, Template, parse_notifications
 
 _CODE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 _FILE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]*$")  # a bare name: no folders, no leading dot
@@ -49,6 +50,7 @@ class Config:
     sftp: Sftp
     sheet: Sheet
     entities: list[Entity]
+    notifications: Mapping[str, Template] = field(default_factory=lambda: STANDARD_NOTIFICATIONS)
 
     @property
     def enabled_entities(self) -> list[Entity]:
@@ -129,13 +131,14 @@ def _column(cell: str) -> str:
 
 def parse_config(doc: Mapping[str, Any]) -> Config:
     """Validate an already-parsed TOML document."""
-    reject_unknown_keys(doc, {"sftp", "sheet", "entities"}, "config")
+    reject_unknown_keys(doc, {"sftp", "sheet", "entities", "notifications"}, "config")
     entities = [_entity(t, n) for n, t in enumerate(require_tables(doc, "entities"), start=1)]
     _reject_repeats([e.code for e in entities], "entity code(s)")
     _reject_repeats([e.file for e in entities], "file name(s)")
     # A replace clears the column to the bottom, so two blocks can't share a column
     _reject_repeats([_column(e.start_cell) for e in entities], "start cell column(s)")
-    cfg = Config(_sftp(_table(doc, "sftp")), _sheet(_table(doc, "sheet")), entities)
+    cfg = Config(_sftp(_table(doc, "sftp")), _sheet(_table(doc, "sheet")), entities,
+                 parse_notifications(doc, STANDARD_NOTIFICATIONS))
     if not cfg.enabled_entities:
         raise ConfigError("no entity has enabled = true, so there is nothing to do")
     return cfg

@@ -24,8 +24,7 @@ from automation_common.browser import (
     start_trace,
     stop_trace,
 )
-from automation_common.notify import send_notification
-from automation_common.run import Notifier, Run
+from automation_common.run import Run
 from automation_common.secrets import Credential, SecretMasker, get_credential
 from buildium_portal import PROCESS
 from buildium_portal.config import Entity, Site
@@ -60,7 +59,6 @@ def _ignore(_: str) -> None:
 
 @contextmanager
 def signed_in_page(run: Run, ctx: BrowserContext, site: Site, entity: Entity,
-                   notifier: Notifier = send_notification,
                    observer: Observer = _ignore,
                    get_cred: GetCredential = get_credential) -> Iterator[Page]:
     """Yield a page signed in as `entity`, or raise. Any failure saves what's on screen."""
@@ -72,7 +70,7 @@ def signed_in_page(run: Run, ctx: BrowserContext, site: Site, entity: Entity,
 
     def on_mfa() -> None:
         # Only what's needed to act on it. Sending a notification never raises
-        notifier({"title": run.title, "message": f"{entity.key}: MFA link needed"}, run.masker)
+        run.notify("mfa_needed", key=entity.key, abbreviation=entity.abbreviation)
 
     page = first_page(ctx)
     try:

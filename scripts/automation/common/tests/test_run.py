@@ -3,6 +3,7 @@ import json
 import logging
 import re
 
+from automation_common.notify import STANDARD_NOTIFICATIONS, Template
 from automation_common.run import Run, Status, make_run_dir
 
 NOW = dt.datetime(2026, 11, 3, 8, 0, 0, tzinfo=dt.UTC)
@@ -83,24 +84,54 @@ def test_notification_says_fail_when_an_item_failed(tmp_path):
     assert sent[0]["message"] == "FAIL"
 
 
-def test_custom_title_and_message(tmp_path):
+def test_the_title_names_the_command_when_there_is_one(tmp_path):
     sent = []
-    run = Run.start("test", tmp_path, now=NOW, notifier=lambda s, m: sent.append(s) or False,
-                    title="Daily NAV", message=lambda s: f"{s.counts()['ok']} updated")
-    with run:
+    with Run.start("test", tmp_path, now=NOW, command="test-thing",
+                   notifier=lambda s, m: sent.append(s) or False) as run:
         run.summary.record("fetch", "AAA", Status.OK)
-        run.summary.record("fetch", "BBB", Status.OK)
-    assert (sent[0]["title"], sent[0]["message"]) == ("Daily NAV", "2 updated")
+    assert sent == [{"title": "test-thing", "message": "PASS"}]
 
 
-def test_broken_message_function_falls_back_to_pass_fail(tmp_path):
+def test_templates_from_the_config_fill_in_the_runs_values(tmp_path):
+    sent = []
+    with _run(tmp_path, sent) as run:
+        run.notifications = {"pass": Template("{process}/{command} {run_id}",
+                                              "{ok} ok, {unchanged} same, {failed} bad, {total}")}
+        run.summary.record("fetch", "AAA", Status.OK)
+        run.summary.record("fetch", "BBB", Status.UNCHANGED)
+    assert sent == [{"title": "test/test 20261103_080000", "message": "1 ok, 1 same, 0 bad, 2"}]
+    saved = json.loads((run.run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert saved["message"] == "1 ok, 1 same, 0 bad, 2"
+
+
+def test_a_process_can_choose_its_own_final_event(tmp_path):
+    sent = []
+    with Run.start("test", tmp_path, now=NOW, notifier=lambda s, m: sent.append(s) or False,
+                   notifications={**STANDARD_NOTIFICATIONS, "odd": Template("t", "odd one")},
+                   event=lambda summary: "odd") as run:
+        run.summary.record("fetch", "AAA", Status.OK)
+    assert sent == [{"title": "t", "message": "odd one"}]
+
+
+def test_a_push_during_the_run_takes_its_own_values(tmp_path):
+    sent = []
+    with _run(tmp_path, sent) as run:
+        run.notifications = {**STANDARD_NOTIFICATIONS, "wait": Template("{command}", "{who} waits",
+                                                                        frozenset({"who"}))}
+        assert run.notify("wait", who="someone") is False  # what this notifier returned
+        run.summary.record("fetch", "AAA", Status.OK)
+    assert sent[0] == {"title": "test", "message": "someone waits"}
+    assert sent[1]["message"] == "PASS"
+
+
+def test_a_broken_event_function_falls_back_to_pass_or_fail(tmp_path):
     sent = []
 
     def broken(summary):
         raise KeyError("nope")
 
     with Run.start("test", tmp_path, now=NOW, notifier=lambda s, m: sent.append(s) or False,
-                   message=broken) as run:
+                   event=broken) as run:
         run.summary.record("fetch", "AAA", Status.OK)
     assert sent[0]["message"] == "PASS"
     assert run.exit_code == 0
