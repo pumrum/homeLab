@@ -66,6 +66,24 @@ config, and each job is a bare console script name. The one other action is the
 word `update`, which starts a fixed helper task (`agent/update_agent.ps1`) that
 takes no input. Keep it that way.
 
+Assume the agent is running on the test workstation and the robot. Steps for either
+machine must stop it first when they change the checkout or environment (`git switch`,
+`git pull`, `uv sync`), run a job by hand, or change the agent's config. Tell the
+maintainer to check that no job is running first, because stopping the agent leaves a
+running job going with nothing to report its result:
+
+```powershell
+Stop-ScheduledTask -TaskName "automation-agent"
+
+```
+
+End those steps by starting it again:
+
+```powershell
+Start-ScheduledTask -TaskName "automation-agent"
+
+```
+
 ## Paths (Windows 11)
 
 | Path | Purpose |
