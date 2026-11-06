@@ -68,12 +68,19 @@ takes no input. Keep it that way.
 
 Assume the agent is running on the test workstation and the robot. Steps for either
 machine must stop it first when they change the checkout or environment (`git switch`,
-`git pull`, `uv sync`), run a job by hand, or change the agent's config. Tell the
-maintainer to check that no job is running first, because stopping the agent leaves a
-running job going with nothing to report its result:
+`git pull`, `uv sync`), run a job by hand, or change the agent's config. Put the stop
+command at the top of the same block as the commands that need it, never in a block of
+its own, so the step can't be pasted without it. Tell the maintainer to check that no job
+is running first, because stopping the agent leaves a running job going with nothing to
+report its result:
 
 ```powershell
 Stop-ScheduledTask -TaskName "automation-agent"
+cd C:\src\homeLab
+git fetch origin
+git switch <branch>
+cd scripts\automation
+uv sync
 
 ```
 
