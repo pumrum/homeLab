@@ -27,6 +27,12 @@ When you finish, tell the maintainer what you built, what you couldn't verify,
 and what to check. Give the test steps as PowerShell commands for the robot
 test workstation, in `powershell` code blocks, including anything only the
 maintainer can do (secrets, Google or Home Assistant setup, config values).
+When a step runs `uv sync` and the tests, state how many passes to expect, like
+"Get the branch and run the tests. This takes a few minutes. Expect 134 passed."
+
+Record what hasn't run on the real site only in the process's `README.md`, not in
+code comments or its `CHANGELOG.md`, so there's one place to update. Update it when
+the maintainer's testing changes the answer.
 
 ## Naming and generic docs
 
@@ -135,8 +141,10 @@ Use these from `automation_common` instead of writing your own:
   `automation/home-assistant-webhook` secret exists, it POSTs only
   `{"title": ..., "message": ...}` there (default: the process name and
   `PASS` or `FAIL`), which the Home Assistant automation shows as is;
-  otherwise it only logs it. Send nothing else to the webhook: details stay
-  in the run folder. Keep messages short: they are read on a watch. Pass
+  otherwise it only logs it. Each automation uses this standard notification,
+  tailored to its purpose, and details stay in the run folder. Any other push
+  needs the maintainer's OK, because of rate limits, though they're very high,
+  so propose it in the plan. Keep messages short: they are read on a watch. Pass
   `title=` or `message=` to `Run.start` to change them.
 - Each stage, and each item within a stage (e.g. each fund), has its own
   try/except. Record one failure with `run.summary.record(...)`, then continue.
@@ -171,8 +179,11 @@ Use these from `automation_common` instead of writing your own:
   site-specific and the most likely part of a site to change. `automation_common`
   has no sign-in or MFA helper. The FakeBank flow in `tools/env_check.py` is a
   pattern to read, not a library to import. An MFA wait must time out, and tell
-  the maintainer that new sign-in code is untested on a real site. If a second
-  site needs identical code, raise it with the maintainer rather than moving it.
+  the maintainer that new sign-in code is untested on a real site. The job's
+  `timeout_minutes` must be above the run's longest possible time, with every MFA
+  wait added up: the agent stops a job instantly at its limit, which leaves no report
+  or notification. If a second site needs identical code, raise it with the
+  maintainer rather than moving it.
 - On failure save to the run folder: screenshot, `fail_NN_page.txt`
   (`save_page_evidence`, a shadow-DOM-piercing outline), and `trace.zip`.
 - Respect sites: one page load per item per run, no parallel requests.
