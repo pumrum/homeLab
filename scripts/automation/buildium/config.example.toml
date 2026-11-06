@@ -1,0 +1,23 @@
+# buildium-portal configuration. Copy to C:\automation\buildium\config.toml and replace
+# the placeholders. Every text value is quoted. Each entity's sign-in goes in Credential
+# Manager as buildium/<key>, never here. The run fails with a clear message until no
+# placeholder is left.
+
+# Used by every command in this package.
+[site]
+login_url = "https://<address of the sign-in page>"
+
+# Used by every command in this package. Add one block per entity.
+[[entities]]
+key = "entity1"                                  # neutral: in logs, notifications, and the credential's name
+abbreviation = "<ABBREVIATION>"                  # in the saved file's name, like ABCLLC
+statement_name = "<name as shown on statement>"  # checked against each statement before it's saved
+
+[[entities]]
+key = "entity2"
+abbreviation = "<ABBREVIATION>"
+statement_name = "<name as shown on statement>"
+
+# Used by buildium-statements.
+[statements]
+system = "<system name>"                         # in every saved file's name
