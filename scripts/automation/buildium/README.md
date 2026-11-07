@@ -105,7 +105,8 @@ Share the spreadsheet with the service account as an Editor. Add the `[gl]` sect
 from `config.example.toml` to `C:\automation\buildium\config.toml`. To test, point
 `spreadsheet_id` at a copy of the sheet with the same tab names.
 
-**Not yet run on the real site:** writing to the sheet.
+Exporting, cleaning, and writing to a test copy of the sheet have run on the real site, started
+by hand. **Not yet run:** the job through the agent, and a tab or sheet write failing.
 
 ## buildium-statements
 
@@ -177,10 +178,10 @@ unattended. MFA timing out hasn't, and there's no plan to force it, so expect a 
 it ever happens. The code doesn't know the MFA page's structure, so anything that isn't the form
 or the app counts as MFA.
 
-**Not yet run on the real site:** the sign-out fix below. On the real site, the Account button's
-tooltip was seen covering `Sign out` when one sign-out timed out. Sign-out now moves the mouse to
-the item first, then uses `click_until`, and `run.log` says which way the click worked:
-`sign-out: signed out (Sign out via keyboard)`, for example.
+The Account button's tooltip was seen covering `Sign out` when one sign-out timed out. Sign-out
+now moves the mouse to the item first, then uses `click_until`, and `run.log` says which way the
+click worked: `sign-out: signed out (Sign out via click)`, for example. **Not yet run:** the
+forced and keyboard fallbacks, which only run if the normal click fails.
 
 ## Set up each machine
 
