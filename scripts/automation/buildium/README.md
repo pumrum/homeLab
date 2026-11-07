@@ -32,7 +32,7 @@ Each tab is a full snapshot, replaced every run.
 
 | Tab | Rows | Before writing |
 | --- | --- | --- |
-| Each entity's tab, from `start_cell` | The Cash view: 15 columns, with the rules below | Clears from `start_cell` to the tab's right edge and bottom |
+| Each entity's tab, from `gl_start_cell` | The Cash view: 15 columns, with the rules below | Clears from `gl_start_cell` to the tab's right edge and bottom |
 | The master tab, from `A2` | Every entity, Cash and Accrual: 56 columns | Clears everything below row 1, then deletes spare rows so the tab shrinks with its data |
 
 The master's columns are `Entity`, `Method`, the export's 53, and `EntryDate_YM`. Its row 1 is
@@ -54,7 +54,8 @@ Both methods:
    what's missing and added.
 2. Rows with no `Id` are report lines and are dropped, but one that isn't zero fails the run,
    because dropping it would change the totals.
-3. Each `[[gl.unit_fixes]]` block sets the unit number on one lease's rows before its date.
+3. Each entry in an entity's `gl_unit_fixes` sets the unit number on one lease's rows before its
+   date.
 4. Rows sort by `EntryDate`, `Id`, `PostingId`, `GLAccountNameRaw` descending, then `UnitNumber`.
    `Id` and `PostingId` sort as numbers.
 
@@ -101,9 +102,10 @@ a deliberate exception to the usual rule of carrying on with the next item.
 
 ### Set it up
 
-Share the spreadsheet with the service account as an Editor. Add the `[gl]` section
-from `config.example.toml` to `C:\automation\buildium\config.toml`. To test, point
-`spreadsheet_id` at a copy of the sheet with the same tab names.
+Share the spreadsheet with the service account as an Editor. In
+`C:\automation\buildium\config.toml`, add the `[gl]` section from `config.example.toml`, and the
+`gl_` values to each `[[entities]]` block. To test, point `spreadsheet_id` at a copy of the sheet
+with the same tab names.
 
 Exporting, cleaning, and writing to a test copy of the sheet have run on the real site, started
 by hand. **Not yet run:** the job through the agent, and a tab or sheet write failing.

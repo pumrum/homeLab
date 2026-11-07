@@ -136,9 +136,15 @@ def _file_name_part(table: Mapping[str, Any], key: str, where: str) -> str:
     return value
 
 
+def _entity_where(number: int) -> str:
+    return f"[[entities]] number {number}"
+
+
 def _entity(table: Mapping[str, Any], number: int) -> Entity:
-    where = f"[[entities]] number {number}"
-    reject_unknown_keys(table, {"key", "abbreviation", "statement_name"}, where)
+    where = _entity_where(number)
+    # The gl_ values are only checked by buildium-gl
+    reject_unknown_keys(table, {"key", "abbreviation", "statement_name", "gl_code", "gl_tab",
+                                "gl_start_cell", "gl_unit_fixes"}, where)
     key = _text(table, "key", where)
     if not _KEY.match(key):
         raise ConfigError(f'{where}: "key" can only use lowercase letters, digits, or -')
@@ -182,57 +188,47 @@ def load_config(path: Path) -> Config:
     return parse_config(load_toml(path))
 
 
-def _gl_tables(gl: Mapping[str, Any], key: str) -> list[Mapping[str, Any]]:
-    value = gl.get(key, [])
-    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
-        raise ConfigError(f"every {key} entry must be a [[gl.{key}]] table")
-    return value
-
-
-def _gl_entity(table: Mapping[str, Any], number: int) -> GlEntity:
-    where = f"[[gl.entities]] number {number}"
-    reject_unknown_keys(table, {"key", "code", "tab", "start_cell"}, where)
-    start_cell = _text(table, "start_cell", where)
+def _gl_entity(table: Mapping[str, Any], key: str, where: str) -> GlEntity:
+    start_cell = _text(table, "gl_start_cell", where)
     # The value is private, so the message never repeats it
     if not _CELL.match(start_cell):
-        raise ConfigError(f'{where}: "start_cell" must be a cell like B5')
-    return GlEntity(_text(table, "key", where), _text(table, "code", where),
-                    _text(table, "tab", where), start_cell)
+        raise ConfigError(f'{where}: "gl_start_cell" must be a cell like B5')
+    return GlEntity(key, _text(table, "gl_code", where), _text(table, "gl_tab", where), start_cell)
 
 
-def _unit_fix(table: Mapping[str, Any], number: int) -> UnitFix:
-    where = f"[[gl.unit_fixes]] number {number}"
-    reject_unknown_keys(table, {"key", "lease_id", "before", "unit_number"}, where)
+def _unit_fix(table: Mapping[str, Any], key: str, where: str) -> UnitFix:
+    reject_unknown_keys(table, {"lease_id", "before", "unit_number"}, where)
     try:
         before = dt.date.fromisoformat(_text(table, "before", where))
     except ValueError:
         raise ConfigError(f'{where}: "before" must be a date like 2030-01-31') from None
-    return UnitFix(_text(table, "key", where), _text(table, "lease_id", where), before,
+    return UnitFix(key, _text(table, "lease_id", where), before,
                    _text(table, "unit_number", where))
+
+
+def _unit_fixes(table: Mapping[str, Any], key: str, where: str) -> list[UnitFix]:
+    value = table.get("gl_unit_fixes", [])
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        raise ConfigError(f'{where}: "gl_unit_fixes" must be a list of {{ ... }} entries')
+    return [_unit_fix(item, key, f"{where}, gl_unit_fixes number {number}")
+            for number, item in enumerate(value, start=1)]
 
 
 def _parse_gl(doc: Mapping[str, Any], entities: tuple[Entity, ...]) -> Gl:
     gl = _table(doc, "gl")
-    reject_unknown_keys(gl, {"spreadsheet_id", "master_tab", "entities", "unit_fixes"}, "[gl]")
-    targets = [_gl_entity(table, number)
-               for number, table in enumerate(_gl_tables(gl, "entities"), start=1)]
-    keys = [target.key for target in targets]
-    wanted = [entity.key for entity in entities]
-    # The sheet needs every entity, so a missing or extra one is a mistake in the config
-    if sorted(keys) != sorted(wanted):
-        raise ConfigError("[[gl.entities]]: needs one block for each [[entities]] key: "
-                          + ", ".join(wanted))
+    reject_unknown_keys(gl, {"spreadsheet_id", "master_tab"}, "[gl]")
+    targets: dict[str, GlEntity] = {}
+    fixes: list[UnitFix] = []
+    tables = require_tables(doc, "entities")
+    for number, (entity, table) in enumerate(zip(entities, tables, strict=True), start=1):
+        where = _entity_where(number)
+        targets[entity.key] = _gl_entity(table, entity.key, where)
+        fixes += _unit_fixes(table, entity.key, where)
     master_tab = _text(gl, "master_tab", "[gl]")
-    tabs = [target.tab for target in targets] + [master_tab]
+    tabs = [target.tab for target in targets.values()] + [master_tab]
     if len(set(tabs)) != len(tabs):
         raise ConfigError("[gl]: every entity and the master need their own tab")
-    fixes = tuple(_unit_fix(table, number)
-                  for number, table in enumerate(_gl_tables(gl, "unit_fixes"), start=1))
-    unknown = sorted({fix.key for fix in fixes} - set(wanted))
-    if unknown:
-        raise ConfigError(f"[[gl.unit_fixes]]: unknown key(s): {', '.join(unknown)}")
-    return Gl(_text(gl, "spreadsheet_id", "[gl]"), master_tab,
-              {target.key: target for target in targets}, fixes)
+    return Gl(_text(gl, "spreadsheet_id", "[gl]"), master_tab, targets, tuple(fixes))
 
 
 def parse_gl_config(doc: Mapping[str, Any]) -> GlConfig:

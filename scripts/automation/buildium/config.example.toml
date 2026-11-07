@@ -7,16 +7,27 @@
 [site]
 login_url = "https://<address of the sign-in page>"
 
-# Used by every command in this package. Add one block per entity.
+# One block per entity, holding everything about it. The gl_ values are used by buildium-gl.
+# A run clears from gl_start_cell to the tab's right edge and bottom.
 [[entities]]
 key = "entity1"                                  # neutral: in logs, reports, and the credential's name
 abbreviation = "<ABBREVIATION>"                  # in the saved file's name and the MFA push, like ABCLLC
 statement_name = "<name as shown on statement>"  # checked against each statement before it's saved
+gl_code = "<value for the master tab's Entity column>"
+gl_tab = "<this entity's tab>"
+gl_start_cell = "<first cell of its rows, like B5>"
+# Optional: this lease's rows dated before this date get this unit number, in both methods.
+# gl_unit_fixes = [
+#   { lease_id = "<lease ID>", before = "<date, like 2030-01-31>", unit_number = "<unit number>" },
+# ]
 
 [[entities]]
 key = "entity2"
 abbreviation = "<ABBREVIATION>"
 statement_name = "<name as shown on statement>"
+gl_code = "<value for the master tab's Entity column>"
+gl_tab = "<this entity's tab>"
+gl_start_cell = "<first cell of its rows, like B5>"
 
 # Used by buildium-statements.
 [statements]
@@ -26,27 +37,6 @@ system = "<system name>"                         # in every saved file's name
 [gl]
 spreadsheet_id = "<spreadsheet ID>"
 master_tab = "<tab holding every entity's ledger, with headers in row 1>"
-
-# One block per [[entities]] key. A run clears from start_cell to the tab's right edge and bottom.
-[[gl.entities]]
-key = "entity1"
-code = "<value for the master tab's Entity column>"
-tab = "<this entity's tab>"
-start_cell = "<first cell of its rows, like B5>"
-
-[[gl.entities]]
-key = "entity2"
-code = "<value for the master tab's Entity column>"
-tab = "<this entity's tab>"
-start_cell = "<first cell of its rows, like B5>"
-
-# Optional: one block per correction. That entity's rows for this lease dated before this date
-# get this unit number, in both methods.
-# [[gl.unit_fixes]]
-# key = "entity1"
-# lease_id = "<lease ID>"
-# before = "<date, like 2030-01-31>"
-# unit_number = "<unit number>"
 
 # Optional: the push notifications' words. Leave a block or line out to keep what's shown
 # here. Any of these can go in {braces}: {command}, {process}, {run_id}, {ok}, {unchanged},
