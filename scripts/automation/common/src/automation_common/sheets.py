@@ -1,5 +1,5 @@
 """Google Sheets with a service account: read a worksheet, append rows, or
-replace one column from a given cell down.
+replace one column or a whole block from a given cell down.
 
 The service account key is the encrypted secret file
 `automation/google-service-account` (see secrets.py; import it with
@@ -8,9 +8,11 @@ account's email as an Editor. The spreadsheet ID is private config: it is
 added to the masker and never written to logs or error messages.
 """
 
+import datetime as dt
 import json
 import logging
 from collections.abc import Callable, Sequence
+from decimal import Decimal
 from typing import Any, Protocol
 
 import gspread
@@ -23,6 +25,10 @@ log = logging.getLogger(__name__)
 
 SERVICE_ACCOUNT_SECRET = "automation/google-service-account"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]  # sheets only, no Drive
+BLOCK_CHUNK_ROWS = 2_000  # rows in one write, so a big block stays a reasonable request
+_SHEETS_DAY_ZERO = dt.date(1899, 12, 30)
+
+Cell = str | int | float | Decimal | dt.date | None
 
 
 class SheetError(Exception):
@@ -37,6 +43,9 @@ class Worksheet(Protocol):
     def append_rows(self, rows: Sequence[Sequence[Any]]) -> None: ...
 
     def replace_from_cell(self, start_cell: str, lines: Sequence[str]) -> None: ...
+
+    def replace_block(self, start_cell: str, rows: Sequence[Sequence[Cell]],
+                      date_columns: Sequence[int] = (), trim: bool = False) -> None: ...
 
 
 def replace_requests(
@@ -73,6 +82,85 @@ def replace_requests(
     return requests
 
 
+def _block_cell(value: Cell) -> dict[str, Any]:
+    """Text stays literal text, so nothing in it can run as a formula. "" and None are blank."""
+    if value is None or value == "":
+        return {}
+    if isinstance(value, dt.date):
+        return {"userEnteredValue": {"numberValue": (value - _SHEETS_DAY_ZERO).days}}
+    if isinstance(value, Decimal):
+        return {"userEnteredValue": {"numberValue": float(value)}}
+    if isinstance(value, int | float):
+        return {"userEnteredValue": {"numberValue": value}}
+    return {"userEnteredValue": {"stringValue": value}}
+
+
+def block_requests(
+    sheet_id: int, row_count: int, col_count: int, start_cell: str,
+    rows: Sequence[Sequence[Cell]], date_columns: Sequence[int] = (), trim: bool = False,
+    chunk_rows: int = BLOCK_CHUNK_ROWS,
+) -> tuple[list[list[dict[str, Any]]], int, int]:
+    """The writes that replace everything from `start_cell` right to the tab's edge and down.
+
+    Returns the writes, each a list of requests sent together, then the tab's new row and
+    column counts. A write overwrites its own rows in place, and only the last one clears what
+    the new rows don't reach, so the tab is never left empty on the way. `date_columns` are
+    positions within a row, shown as yyyy-mm-dd. Other cell formatting stays. `trim` deletes
+    the rows below the block, so the tab shrinks with its data.
+    """
+    try:
+        row, col = a1_to_rowcol(start_cell)
+    except IncorrectCellLabel:
+        raise SheetError(f'"{start_cell}" is not a cell like B5') from None
+    first_row, first_col = row - 1, col - 1
+    end_row = first_row + len(rows)
+    width = max((len(r) for r in rows), default=0)
+    total_rows = max(row_count, end_row)
+    total_cols = max(col_count, first_col + width)
+
+    def block_range(start: int, end: int) -> dict[str, int]:
+        return {"sheetId": sheet_id, "startRowIndex": start, "endRowIndex": end,
+                "startColumnIndex": first_col, "endColumnIndex": total_cols}
+
+    writes: list[list[dict[str, Any]]] = []
+    for start in range(0, len(rows), chunk_rows):
+        chunk = rows[start:start + chunk_rows]
+        writes.append([{"updateCells": {
+            "range": block_range(first_row + start, first_row + start + len(chunk)),
+            "rows": [{"values": [_block_cell(value) for value in r]} for r in chunk],
+            "fields": "userEnteredValue",
+        }}])
+    if not writes:
+        writes.append([])
+    if total_rows > row_count:
+        writes[0].insert(0, {"appendDimension": {
+            "sheetId": sheet_id, "dimension": "ROWS", "length": total_rows - row_count}})
+    if total_cols > col_count:
+        writes[0].insert(0, {"appendDimension": {
+            "sheetId": sheet_id, "dimension": "COLUMNS", "length": total_cols - col_count}})
+    if rows:
+        for column in date_columns:
+            writes[-1].append({"repeatCell": {
+                "range": {"sheetId": sheet_id, "startRowIndex": first_row, "endRowIndex": end_row,
+                          "startColumnIndex": first_col + column,
+                          "endColumnIndex": first_col + column + 1},
+                "cell": {"userEnteredFormat": {"numberFormat": {
+                    "type": "DATE", "pattern": "yyyy-mm-dd"}}},
+                "fields": "userEnteredFormat.numberFormat",
+            }})
+    new_row_count = total_rows
+    if end_row < total_rows:
+        if trim and rows:  # a tab can't lose all its rows, so an empty block only clears
+            writes[-1].append({"deleteDimension": {"range": {
+                "sheetId": sheet_id, "dimension": "ROWS",
+                "startIndex": end_row, "endIndex": total_rows}}})
+            new_row_count = end_row
+        else:
+            writes[-1].append({"updateCells": {
+                "range": block_range(end_row, total_rows), "fields": "userEnteredValue"}})
+    return writes, new_row_count, total_cols
+
+
 def load_service_account(
     masker: SecretMasker, read: Callable[[str], bytes | None] = read_secret_file
 ) -> dict[str, Any]:
@@ -101,6 +189,7 @@ class GoogleWorksheet:
     def __init__(self, ws: gspread.Worksheet) -> None:
         self._ws = ws
         self._row_count = ws.row_count  # kept current, since a replace can grow the tab
+        self._col_count = ws.col_count
 
     def read_rows(self, columns: str) -> list[list[Any]]:
         """All rows in `columns` (e.g. "A:D"): numbers as numbers, dates as serial numbers."""
@@ -136,6 +225,24 @@ class GoogleWorksheet:
         except gspread.exceptions.APIError as e:
             raise _api_error("writing to", e) from None
         self._row_count = requests[-1]["updateCells"]["range"]["endRowIndex"]
+
+    def replace_block(self, start_cell: str, rows: Sequence[Sequence[Cell]],
+                      date_columns: Sequence[int] = (), trim: bool = False) -> None:
+        """Replace everything from `start_cell` right and down (see block_requests).
+
+        A block that fits in one write is all or nothing. A bigger one that fails partway
+        holds new rows above old ones, so the caller must report that it failed.
+        """
+        writes, row_count, col_count = block_requests(
+            self._ws.id, self._row_count, self._col_count, start_cell, rows, date_columns, trim)
+        for requests in writes:
+            if not requests:
+                continue
+            try:
+                self._ws.spreadsheet.batch_update({"requests": requests})
+            except gspread.exceptions.APIError as e:
+                raise _api_error("writing to", e) from None
+        self._row_count, self._col_count = row_count, col_count
 
 
 def _api_error(action: str, e: gspread.exceptions.APIError) -> SheetError:
