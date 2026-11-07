@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 
+from automation_common.sheets import Formula
 from buildium_portal.config import UnitFix
 from buildium_portal.gl_parse import (
     CASH_VIEW_COLUMNS,
@@ -46,7 +47,6 @@ def test_a_clean_row_gets_its_entity_method_and_types(gl_csv_of):
     assert row["Entity"] == "FakeCode"
     assert row["Method"] == "Cash"
     assert row["EntryDate"] == dt.date(2026, 3, 5)
-    assert row["EntryDate_YM"] == "2026-03"
     assert row["Amount"] == Decimal("-1250.50")
     assert (ledger.read, ledger.blank_id, ledger.unit_fixed) == (1, 0, 0)
 
@@ -128,6 +128,7 @@ def test_the_sheet_layouts():
     assert len(MASTER_COLUMNS) == 56
     assert MASTER_COLUMNS[:2] == ("Entity", "Method")
     assert MASTER_COLUMNS[-1] == "EntryDate_YM"
+    assert MASTER_COLUMNS.index("EntryDate") == 5  # column F, which the formula reads
     assert len(CASH_VIEW_COLUMNS) == 15
 
 
@@ -199,7 +200,7 @@ def test_sheet_rows_type_each_column(gl_csv_of):
     assert cell["VendorId"] == ""  # blank, not zero
     assert cell["EntryDate"] == dt.date(2026, 3, 15)
     assert cell["Amount"] == Decimal("10.00")
-    assert cell["EntryDate_YM"] == "2026-03"
+    assert cell["EntryDate_YM"] == Formula('=LEFT(INDIRECT("F" & ROW()), 7)')
     assert cell["UnitNumber"] == 9
     assert cell["IsCashPosting"] == 1
     assert cell["FileIdString"] == 55

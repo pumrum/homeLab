@@ -12,6 +12,7 @@ import datetime as dt
 import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -28,7 +29,15 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]  # sheets only, no Dri
 BLOCK_CHUNK_ROWS = 2_000  # rows in one write, so a big block stays a reasonable request
 _SHEETS_DAY_ZERO = dt.date(1899, 12, 30)
 
-Cell = str | bool | int | float | Decimal | dt.date | None
+
+@dataclass(frozen=True)
+class Formula:
+    """A cell the sheet calculates. Only code can make one: plain text never runs as a formula."""
+
+    text: str
+
+
+Cell = str | bool | int | float | Decimal | dt.date | Formula | None
 
 
 class SheetError(Exception):
@@ -87,6 +96,8 @@ def _block_cell(value: Cell) -> dict[str, Any]:
     """Text stays literal text, so nothing in it can run as a formula. "" and None are blank."""
     if value is None or value == "":
         return {}
+    if isinstance(value, Formula):
+        return {"userEnteredValue": {"formulaValue": value.text}}
     if isinstance(value, bool):
         return {"userEnteredValue": {"boolValue": value}}
     if isinstance(value, dt.date):

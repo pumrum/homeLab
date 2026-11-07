@@ -42,7 +42,7 @@ yours and is never touched.
 | --- | --- |
 | `Amount` | A number |
 | `EntryDate` | A date, shown as `yyyy-mm-dd` |
-| `EntryDate_YM` | Text like `2026-03` |
+| `EntryDate_YM` | The formula `=LEFT(INDIRECT("F" & ROW()), 7)`, which reads `EntryDate` in column F |
 | `EFTResultDate` | A date, shown as `m/d/yyyy` |
 | Any other value that's a plain number, in any column | A number |
 | `True` and `False`, in any column | `TRUE` and `FALSE`, as real true or false values |
@@ -50,7 +50,7 @@ yours and is never touched.
 
 This matches paste values, except where a paste would change the value: `007` and numbers over 15
 digits stay text. Sheets marks text that looks like a number or date with a leading `'` in the
-formula bar, such as `EntryDate_YM`'s `2026-03`. The `'` isn't part of the value.
+formula bar. The `'` isn't part of the value.
 
 ### How rows are cleaned
 

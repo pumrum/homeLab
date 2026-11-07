@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from automation_common.sheets import Cell
+from automation_common.sheets import Cell, Formula
 from buildium_portal.config import UnitFix
 from buildium_portal.gl_rules import Row
 
@@ -36,6 +36,8 @@ CASH_VIEW_COLUMNS = (
     "PayeeName", "PayeeNameRaw", "PayeeNames", "UnitNumber", "BuildingName",
     "GLAccountTypeName", "JournalCodeDescription", "GLAccountNameRaw",
 )
+# The year and month from the row's EntryDate, which is column F of the master tab
+ENTRY_MONTH_FORMULA = Formula('=LEFT(INDIRECT("F" & ROW()), 7)')
 _MAX_NAMED_COLUMNS = 5
 _COLUMN_NAME = re.compile(r"\w{1,40}")
 _BOOLEANS = {"True": True, "False": False}
@@ -113,10 +115,10 @@ def _clean_row(fields: Mapping[str, str], code: str, method: str, record: int) -
     for column in ("Id", "PostingId"):
         if not fields[column].strip().isdecimal():
             raise LedgerError(f"record {record}: {column} isn't a whole number")
-    entry_date = _parse_date(fields["EntryDate"], record)
-    return {**fields, "Entity": code, "Method": method, "EntryDate": entry_date,
+    return {**fields, "Entity": code, "Method": method,
+            "EntryDate": _parse_date(fields["EntryDate"], record),
             "Amount": parse_amount(fields["Amount"], record),
-            "EntryDate_YM": entry_date.strftime("%Y-%m")}
+            "EntryDate_YM": ENTRY_MONTH_FORMULA}
 
 
 def apply_unit_fixes(rows: Sequence[Row], fixes: Iterable[UnitFix]) -> int:

@@ -7,6 +7,7 @@ import pytest
 
 from automation_common.secrets import SecretMasker
 from automation_common.sheets import (
+    Formula,
     GoogleWorksheet,
     SheetError,
     _api_error,
@@ -155,6 +156,14 @@ def test_block_values_keep_their_types_and_text_stays_literal():
         {"userEnteredValue": {"numberValue": 46096}},  # what Sheets calls that date
         {"userEnteredValue": {"boolValue": True}},
         {"userEnteredValue": {"boolValue": False}},
+    ]
+
+
+def test_only_a_formula_cell_is_written_as_a_formula():
+    cells = _block(rows=[[Formula("=1+1"), "=1+1"]])[0][0][0]["updateCells"]["rows"][0]["values"]
+    assert cells == [
+        {"userEnteredValue": {"formulaValue": "=1+1"}},
+        {"userEnteredValue": {"stringValue": "=1+1"}},
     ]
 
 
