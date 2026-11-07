@@ -98,11 +98,15 @@ NAV = """<nav>
     <a href="/manager/app/ledger">Rental owner ledger</a>
     <a href="/manager/app/documents">Documents</a></div>
   <a id="account" href="#" onclick="show('account-menu'); return false"><span>Account</span></a>
-  <div id="account-menu" style="display:none">
+  <div id="account-menu" style="display:none; position:relative">
     <a href="/manager/app/settings">My settings</a>
-    <a href="__SIGN_OUT__">Sign out</a></div>
+    <a href="__SIGN_OUT__">Sign out</a>__COVER__</div>
 </nav>
 <script>function show(id) { document.getElementById(id).style.display = 'block'; }</script>"""
+# The real Account button's tooltip names the account, and can sit on top of Sign out
+COVER = """<div class="cover" style="position:absolute; inset:0; background:#333">A name</div>"""
+TOOLTIP = """<style>.cover {display:none} #account:hover ~ #account-menu .cover {display:block}
+</style>""" + COVER
 LEDGER_PAGE = """<button onclick="location = '/send-funds'">Send funds</button>
 <a href="#" onclick="show('statement-menu'); return false">Statement</a>
 <ul id="statement-menu" style="display:none">
@@ -193,13 +197,15 @@ class FakeSite:
     """One sign-in page and an app, answered by Playwright. One user at a time, like the site."""
 
     def __init__(self, signed_in_as=None, mfa=False, mfa_clears=False, reject=False,
-                 challenge=False, sign_out_works=True, pdf_for=None, pad_dates=False):
+                 challenge=False, sign_out_works=True, pdf_for=None, pad_dates=False,
+                 sign_out_cover=""):
         self.user = signed_in_as
         self.mfa = mfa  # True, or the set of users who get asked
         self.mfa_clears = mfa_clears  # someone opens the emailed link
         self.reject = reject
         self.challenge = challenge
         self.sign_out_works = sign_out_works
+        self.sign_out_cover = sign_out_cover
         self.pdf_for = pdf_for or (lambda user: f"/{user.split('@')[0]}.pdf")
         self.pad_dates = pad_dates
         self.logins = []
@@ -216,7 +222,8 @@ class FakeSite:
         return self.mfa is True or (self.mfa and user in self.mfa)
 
     def _app(self, route, path):
-        nav = NAV.replace("__SIGN_OUT__", "/sign-out" if self.sign_out_works else "#")
+        nav = (NAV.replace("__SIGN_OUT__", "/sign-out" if self.sign_out_works else "#")
+               .replace("__COVER__", self.sign_out_cover))
         if path == LEDGER:
             ledger = (LEDGER_PAGE.replace("__PDF__", self.pdf_for(self.user))
                       .replace("__BASE__", self.server.base))
@@ -382,6 +389,16 @@ def test_a_normal_sign_in_never_notifies(open_site):
 
 def test_sign_out_uses_the_account_menu(open_site):
     site = FakeSite()
+    page = open_site(site)
+    sign_in(page, SITE, CRED, FAST)
+    sign_out(page, SITE, FAST)
+    assert site.user is None
+    assert classify(page.url, SITE.login_url) is Step.LOGIN
+
+
+@pytest.mark.parametrize("cover", [TOOLTIP, COVER], ids=["while hovering", "always"])
+def test_sign_out_works_with_something_on_top_of_it(open_site, cover):
+    site = FakeSite(sign_out_cover=cover)
     page = open_site(site)
     sign_in(page, SITE, CRED, FAST)
     sign_out(page, SITE, FAST)

@@ -4,9 +4,8 @@ All entities share one browser profile, so the site's memory of the device carri
 but only one can be signed in at a time. A run may also find a session left by a run that
 was stopped. So signing in always starts by signing out whoever is there.
 
-This has run on the real site, including MFA during a job, but not MFA timing out or a
-failed sign-out. The MFA page's structure isn't known, so it's anything that isn't the
-sign-in form or the app once the page has settled.
+The MFA page's structure isn't known, so it's anything that isn't the sign-in form or the
+app once the page has settled.
 
 The page loads reCAPTCHA all the time, with a badge, so only a visible challenge counts as
 a person-check. It's never worked around.
@@ -144,13 +143,24 @@ def sign_out(page: Page, site: Site, timeouts: Timeouts | None = None,
     item, _ = find_first([page], SIGN_OUT_ITEM, t.menu)
     if item is None:
         raise SignOutError(f"Sign out disappeared from the menu on {_path(page)}")
+
+    def left_app() -> bool:
+        try:
+            page.wait_for_url(lambda url: classify(url, site.login_url) is not Step.SIGNED_IN,
+                              timeout=t.sign_out)
+        except PwError:  # includes a timeout
+            return False
+        return True
+
+    # The Account button's tooltip can cover the item while the mouse is still on the button
     try:
-        item.click()
-        page.wait_for_url(lambda url: classify(url, site.login_url) is not Step.SIGNED_IN,
-                          timeout=t.sign_out)
-    except PwError as e:  # includes a timeout
-        raise SignOutError(f"still in the app after Sign out ({type(e).__name__})") from None
-    log.info("sign-out: signed out")
+        item.hover(force=True, timeout=t.menu)
+    except PwError as e:
+        log.debug("sign-out: couldn't move the mouse to Sign out (%s)", type(e).__name__)
+    how = click_until(item, left_app, "Sign out")
+    if how is None:
+        raise SignOutError("still in the app after Sign out")
+    log.info("sign-out: signed out (%s)", how)
 
 
 def _open_login_form(page: Page, site: Site, t: Timeouts) -> Step:

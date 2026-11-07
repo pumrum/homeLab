@@ -105,8 +105,7 @@ Share the spreadsheet with the service account as an Editor. Add the `[gl]` sect
 from `config.example.toml` to `C:\automation\buildium\config.toml`. To test, point
 `spreadsheet_id` at a copy of the sheet with the same tab names.
 
-**Not yet run on the real site:** writing to the sheet. A sign-out also timed out once after the
-last entity's exports, and it's not yet known why.
+**Not yet run on the real site:** writing to the sheet.
 
 ## buildium-statements
 
@@ -174,9 +173,14 @@ Allow enough time in the agent's limit, which stops a job instantly and with no 
 entity can wait 5 minutes, plus a minute or two for its work.
 
 Sign-in, MFA, sign-out, the statement menus, and saving have all run on the real site,
-unattended. MFA timing out and a failed sign-out haven't, and there's no plan to force them, so
-expect a possible fix if one ever happens. The code doesn't know the MFA page's structure, so
-anything that isn't the form or the app counts as MFA.
+unattended. MFA timing out hasn't, and there's no plan to force it, so expect a possible fix if
+it ever happens. The code doesn't know the MFA page's structure, so anything that isn't the form
+or the app counts as MFA.
+
+**Not yet run on the real site:** the sign-out fix below. On the real site, the Account button's
+tooltip was seen covering `Sign out` when one sign-out timed out. Sign-out now moves the mouse to
+the item first, then uses `click_until`, and `run.log` says which way the click worked:
+`sign-out: signed out (Sign out via keyboard)`, for example.
 
 ## Set up each machine
 

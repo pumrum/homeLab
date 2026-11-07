@@ -10,6 +10,8 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
   and the master tab in a Google Sheet. The first failure stops the run and writes nothing.
   `--dump` also saves the page structure and a masked profile of each export, and `--dump` and
   `--entity` never write. It needs a new `[gl]` section in `config.toml`.
+- Fix sign-out failing when the Account button's tooltip covers `Sign out`. It now moves the
+  mouse off the button and escalates the click, which also covers `buildium-statements`.
 - `[statements]` is now only required by `buildium-statements`.
 - The MFA push now names the entity's abbreviation instead of its key.
 - The push notifications' words can now be set in `config.toml`, as optional
