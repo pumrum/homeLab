@@ -1,6 +1,7 @@
 """Config validation."""
 
 import copy
+import datetime as dt
 
 import pytest
 
@@ -77,21 +78,84 @@ def test_a_bad_config_fails_clearly(change, message):
         parse_config(_changed(change))
 
 
+GL = {
+    "spreadsheet_id": "made-up-id",
+    "master_tab": "FakeMaster",
+    "entities": [
+        {"key": "entity1", "code": "CODE1", "tab": "FakeOne", "start_cell": "B5"},
+        {"key": "entity2", "code": "CODE2", "tab": "FakeTwo", "start_cell": "AB12"},
+    ],
+    "unit_fixes": [
+        {"key": "entity1", "lease_id": "77", "before": "2030-01-31", "unit_number": "Upper"},
+    ],
+}
+
+
+def _gl_changed(change):
+    doc = _changed(lambda d: d.update(gl=copy.deepcopy(GL)))
+    change(doc)
+    return doc
+
+
+def test_a_valid_gl_section_loads():
+    gl = parse_gl_config(_gl_changed(lambda d: None)).gl
+    assert (gl.spreadsheet_id, gl.master_tab) == ("made-up-id", "FakeMaster")
+    assert gl.entities["entity2"].code == "CODE2"
+    assert gl.entities["entity2"].start_cell == "AB12"
+    fix = gl.unit_fixes[0]
+    assert (fix.key, fix.lease_id, fix.before, fix.unit_number) == (
+        "entity1", "77", dt.date(2030, 1, 31), "Upper")
+
+
+def test_unit_fixes_are_optional():
+    assert parse_gl_config(_gl_changed(lambda d: d["gl"].pop("unit_fixes"))).gl.unit_fixes == ()
+
+
 def test_buildium_gl_doesnt_depend_on_the_statements_section():
-    doc = _changed(lambda d: d.pop("statements"))
+    doc = _gl_changed(lambda d: d.pop("statements"))
     assert [entity.key for entity in parse_gl_config(doc).entities] == ["entity1", "entity2"]
-    doc = _changed(lambda d: d["statements"].update(system="<system name>"))
+    doc = _gl_changed(lambda d: d["statements"].update(system="<system name>"))
     assert parse_gl_config(doc).site.login_url == VALID["site"]["login_url"]
+
+
+def test_buildium_statements_doesnt_depend_on_the_gl_section():
+    assert parse_config(VALID).statements.system == "FakeSystem"
+    doc = _gl_changed(lambda d: d["gl"].update(master_tab="<tab>"))
+    assert parse_config(doc).statements.system == "FakeSystem"
 
 
 @pytest.mark.parametrize(("change", "message"), [
     (lambda d: d.pop("site"), r"\[site\] section"),
     (lambda d: d.pop("entities"), r"\[\[entities\]\]"),
+    (lambda d: d.pop("gl"), r"\[gl\] section"),
     (lambda d: d.update(extra=1), "unknown"),
+    (lambda d: d["gl"].update(extra="x"), "unknown"),
+    (lambda d: d["gl"].pop("spreadsheet_id"), "spreadsheet_id"),
+    (lambda d: d["gl"].update(master_tab="<tab>"), "placeholder"),
+    (lambda d: d["gl"]["entities"].pop(), "one block for each"),
+    (lambda d: d["gl"]["entities"][1].update(key="entity3"), "one block for each"),
+    (lambda d: d["gl"]["entities"][1].update(key="entity1"), "one block for each"),
+    (lambda d: d["gl"]["entities"][0].update(extra="x"), "unknown"),
+    (lambda d: d["gl"]["entities"][0].pop("code"), "code"),
+    (lambda d: d["gl"]["entities"][0].update(start_cell="b5"), "a cell like B5"),
+    (lambda d: d["gl"]["entities"][0].update(start_cell="A0"), "a cell like B5"),
+    (lambda d: d["gl"]["entities"][1].update(tab="FakeOne"), "their own tab"),
+    (lambda d: d["gl"].update(master_tab="FakeOne"), "their own tab"),
+    (lambda d: d["gl"].update(entities="x"), "must be"),
+    (lambda d: d["gl"]["unit_fixes"][0].update(before="1/31/2030"), "a date like"),
+    (lambda d: d["gl"]["unit_fixes"][0].update(key="entity3"), "unknown key"),
+    (lambda d: d["gl"]["unit_fixes"][0].update(extra="x"), "unknown"),
+    (lambda d: d["gl"]["unit_fixes"][0].pop("lease_id"), "lease_id"),
 ])
-def test_buildium_gl_still_checks_the_shared_sections(change, message):
+def test_a_bad_gl_config_fails_clearly(change, message):
     with pytest.raises(ConfigError, match=message):
-        parse_gl_config(_changed(change))
+        parse_gl_config(_gl_changed(change))
+
+
+def test_a_gl_message_never_repeats_a_private_value():
+    with pytest.raises(ConfigError) as caught:
+        parse_gl_config(_gl_changed(lambda d: d["gl"]["entities"][0].update(start_cell="SECRET")))
+    assert "SECRET" not in str(caught.value)
 
 
 def test_a_message_never_repeats_a_private_value():

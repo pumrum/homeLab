@@ -5,6 +5,7 @@ works with what's here. Logs and reports use only the neutral key, while an MFA 
 goes to a person's phone, so its words can use the abbreviation too.
 """
 
+import datetime as dt
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -28,6 +29,7 @@ from automation_common.notify import (
 
 _KEY = re.compile(r"^[a-z0-9-]+$")  # goes in a credential's name and a run folder's file names
 _FILE_NAME_PART = re.compile(r"^[A-Za-z0-9-]+$")  # "_" separates a saved file's name parts
+_CELL = re.compile(r"^[A-Z]+[1-9][0-9]*$")
 _PLACEHOLDERS = ("...", "<", ">")
 
 NOTIFICATIONS = {
@@ -68,9 +70,38 @@ class Config:
 
 
 @dataclass(frozen=True)
+class GlEntity:
+    """Where one entity goes in the sheet."""
+
+    key: str
+    code: str  # the master tab's Entity column
+    tab: str
+    start_cell: str
+
+
+@dataclass(frozen=True)
+class UnitFix:
+    """For one entity: this lease's rows dated before `before` get this unit number."""
+
+    key: str
+    lease_id: str
+    before: dt.date
+    unit_number: str
+
+
+@dataclass(frozen=True)
+class Gl:
+    spreadsheet_id: str
+    master_tab: str
+    entities: Mapping[str, GlEntity]
+    unit_fixes: tuple[UnitFix, ...]
+
+
+@dataclass(frozen=True)
 class GlConfig:
     site: Site
     entities: tuple[Entity, ...]
+    gl: Gl
     notifications: Mapping[str, Template] = field(default_factory=lambda: NOTIFICATIONS)
 
 
@@ -128,7 +159,7 @@ def _reject_repeats(entities: list[Entity]) -> None:
 
 def _shared(doc: Mapping[str, Any]) -> tuple[Site, tuple[Entity, ...], Mapping[str, Template]]:
     """The sections every command needs. Each command checks only its own section besides."""
-    reject_unknown_keys(doc, {"site", "entities", "statements", "notifications"}, "config")
+    reject_unknown_keys(doc, {"site", "entities", "statements", "gl", "notifications"}, "config")
     site = _table(doc, "site")
     reject_unknown_keys(site, {"login_url"}, "[site]")
     entities = [_entity(table, number)
@@ -151,9 +182,63 @@ def load_config(path: Path) -> Config:
     return parse_config(load_toml(path))
 
 
+def _gl_tables(gl: Mapping[str, Any], key: str) -> list[Mapping[str, Any]]:
+    value = gl.get(key, [])
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        raise ConfigError(f"every {key} entry must be a [[gl.{key}]] table")
+    return value
+
+
+def _gl_entity(table: Mapping[str, Any], number: int) -> GlEntity:
+    where = f"[[gl.entities]] number {number}"
+    reject_unknown_keys(table, {"key", "code", "tab", "start_cell"}, where)
+    start_cell = _text(table, "start_cell", where)
+    # The value is private, so the message never repeats it
+    if not _CELL.match(start_cell):
+        raise ConfigError(f'{where}: "start_cell" must be a cell like B5')
+    return GlEntity(_text(table, "key", where), _text(table, "code", where),
+                    _text(table, "tab", where), start_cell)
+
+
+def _unit_fix(table: Mapping[str, Any], number: int) -> UnitFix:
+    where = f"[[gl.unit_fixes]] number {number}"
+    reject_unknown_keys(table, {"key", "lease_id", "before", "unit_number"}, where)
+    try:
+        before = dt.date.fromisoformat(_text(table, "before", where))
+    except ValueError:
+        raise ConfigError(f'{where}: "before" must be a date like 2030-01-31') from None
+    return UnitFix(_text(table, "key", where), _text(table, "lease_id", where), before,
+                   _text(table, "unit_number", where))
+
+
+def _parse_gl(doc: Mapping[str, Any], entities: tuple[Entity, ...]) -> Gl:
+    gl = _table(doc, "gl")
+    reject_unknown_keys(gl, {"spreadsheet_id", "master_tab", "entities", "unit_fixes"}, "[gl]")
+    targets = [_gl_entity(table, number)
+               for number, table in enumerate(_gl_tables(gl, "entities"), start=1)]
+    keys = [target.key for target in targets]
+    wanted = [entity.key for entity in entities]
+    # The sheet needs every entity, so a missing or extra one is a mistake in the config
+    if sorted(keys) != sorted(wanted):
+        raise ConfigError("[[gl.entities]]: needs one block for each [[entities]] key: "
+                          + ", ".join(wanted))
+    master_tab = _text(gl, "master_tab", "[gl]")
+    tabs = [target.tab for target in targets] + [master_tab]
+    if len(set(tabs)) != len(tabs):
+        raise ConfigError("[gl]: every entity and the master need their own tab")
+    fixes = tuple(_unit_fix(table, number)
+                  for number, table in enumerate(_gl_tables(gl, "unit_fixes"), start=1))
+    unknown = sorted({fix.key for fix in fixes} - set(wanted))
+    if unknown:
+        raise ConfigError(f"[[gl.unit_fixes]]: unknown key(s): {', '.join(unknown)}")
+    return Gl(_text(gl, "spreadsheet_id", "[gl]"), master_tab,
+              {target.key: target for target in targets}, fixes)
+
+
 def parse_gl_config(doc: Mapping[str, Any]) -> GlConfig:
     """Validate an already-parsed TOML document for buildium-gl."""
-    return GlConfig(*_shared(doc))
+    site, entities, notifications = _shared(doc)
+    return GlConfig(site, entities, _parse_gl(doc, entities), notifications)
 
 
 def load_gl_config(path: Path) -> GlConfig:

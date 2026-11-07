@@ -9,6 +9,7 @@ import datetime as dt
 import http.server
 import json
 import threading
+from decimal import Decimal
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
@@ -23,6 +24,7 @@ from buildium_portal import gl_fetch, gl_main, session, statements_fetch
 from buildium_portal import login as login_module
 from buildium_portal.config import Site
 from buildium_portal.gl_fetch import date_forms, export_method, open_report, report_url
+from buildium_portal.gl_parse import EXPECTED_COLUMNS
 from buildium_portal.login import (
     LoginError,
     SignOutError,
@@ -439,6 +441,19 @@ statement_name = "{ONE}"
 key = "entity2"
 abbreviation = "TWOLLC"
 statement_name = "{TWO}"
+[gl]
+spreadsheet_id = "made-up-spreadsheet-id"
+master_tab = "FakeMasterTab"
+[[gl.entities]]
+key = "entity1"
+code = "FAKECODE1"
+tab = "FakeTabOne"
+start_cell = "B5"
+[[gl.entities]]
+key = "entity2"
+code = "FAKECODE2"
+tab = "FakeTabTwo"
+start_cell = "C9"
 [statements]
 system = "FakeSystem"
 """
@@ -671,14 +686,50 @@ def test_capture_saves_snapshots_and_types_nothing(whole_run, monkeypatch):
 
 # ---------------------------------------------- buildium-gl
 
+def _gl_row(number, memo):
+    return {"Id": str(number), "PostingId": str(number + 100), "EntryDate": "03/15/2026",
+            "Amount": "-10.50", "JournalMemo": memo, "GLAccountName": "Rent",
+            "GLAccountNameRaw": "Rent", "GLAccountTypeName": "Income",
+            "JournalCodeDescription": "Charge"}
+
+
 def _gl_files(gl_csv_of):
-    return {f"/{user}_{method}.csv": gl_csv_of(rows=[{"Id": "1", "JournalMemo": f"{user}{method}"}])
-            for user in ("one", "two") for method in ("Cash", "Accrual")}
+    return {f"/{user}_{method}.csv": gl_csv_of(rows=[_gl_row(number, f"{user}{method}")])
+            for number, user in enumerate(("one", "two"), start=1)
+            for method in ("Cash", "Accrual")}
 
 
 def _gl_run(whole_run, site, gl_csv_of, *args, files=None):
     files = _gl_files(gl_csv_of) if files is None else files
     return whole_run.start(site, "--dump", *args, files=files, command=gl_main.main)
+
+
+class FakeBook:
+    """Stands in for the spreadsheet, and keeps every write by tab."""
+
+    def __init__(self):
+        self.writes = {}
+
+    def open(self, spreadsheet_id, tab, masker):
+        masker.add(spreadsheet_id)  # what open_worksheet does
+        book = self
+
+        class Tab:
+            def replace_block(self, start_cell, rows, date_columns=(), trim=False):
+                book.writes[tab] = SimpleNamespace(start_cell=start_cell, rows=rows,
+                                                   date_columns=date_columns, trim=trim)
+
+        return Tab()
+
+
+def _gl_write_run(whole_run, site, gl_csv_of, *args, files=None, book=None):
+    book = book or FakeBook()
+    files = _gl_files(gl_csv_of) if files is None else files
+
+    def command(argv, **options):
+        return gl_main.main(argv, open_ws=book.open, **options)
+
+    return whole_run.start(site, *args, files=files, command=command), book
 
 
 def test_the_report_address_comes_from_the_sign_in_host():
@@ -740,7 +791,8 @@ def test_the_log_report_and_profiles_hold_no_private_values(whole_run, gl_csv_of
     safe = [run_dir / "run.log", run_dir / "report.txt", run_dir / "summary.json",
             *run_dir.glob("gl_profile_*.txt")]
     written = "".join(path.read_text(encoding="utf-8") for path in safe)
-    for private in (SITE.login_url, ONE, "ONELLC", "one@example.invalid", "oneCash"):
+    for private in (SITE.login_url, ONE, "ONELLC", "one@example.invalid", "oneCash",
+                    "made-up-spreadsheet-id", "FakeMasterTab", "FakeTabOne", "FAKECODE1"):
         assert private not in written
     assert "entity1 Cash" in written
 
@@ -803,6 +855,108 @@ def test_entity_exports_only_that_one(whole_run, gl_csv_of):
     assert [login["email"] for login in site.logins] == ["two@example.invalid"]
 
 
-def test_it_needs_dump_while_nothing_writes_to_a_sheet(whole_run):
-    with pytest.raises(SystemExit):
-        gl_main.main([])
+def test_a_normal_run_replaces_each_tab_after_every_entity_worked(whole_run, gl_csv_of):
+    site = FakeSite()
+    code, book = _gl_write_run(whole_run, site, gl_csv_of)
+    assert code == 0
+    assert site.paths.count("/sign-out") == 2
+    assert set(book.writes) == {"FakeTabOne", "FakeTabTwo", "FakeMasterTab"}
+
+    one = book.writes["FakeTabOne"]
+    assert (one.start_cell, one.trim) == ("B5", False)
+    assert one.rows[0][:3] == [1, 101, dt.date(2026, 3, 15)]
+    assert one.rows[0][3] == "oneCash"
+    assert one.rows[0][5] == Decimal("10.50")  # the view's sign is flipped
+
+    master = book.writes["FakeMasterTab"]
+    assert (master.start_cell, master.trim) == ("A2", True)
+    assert [row[:2] for row in master.rows] == [["FAKECODE1", "Cash"], ["FAKECODE1", "Accrual"],
+                                                ["FAKECODE2", "Cash"], ["FAKECODE2", "Accrual"]]
+    assert all(len(row) == 56 for row in master.rows)
+    assert master.rows[0][-1] == "2026-03"
+    assert Decimal("-10.50") in master.rows[0]  # the master keeps the export's sign
+
+    assert whole_run.notes == [{"title": "buildium-gl", "message": "PASS"}]
+    report = _report(whole_run.data)
+    assert "read 1, kept 1, no Id 0, unit fixes 0, repeated pairs 0" in report
+    assert "kept 1; removed: none" in report
+    assert "wrote 4 rows" in report
+    # Raw exports stay, and only a --dump adds page copies and profiles
+    run_dir = _run_dir(whole_run.data)
+    assert (run_dir / "downloads" / "entity2_Accrual.csv").exists()
+    assert not list(run_dir.glob("gl_profile_*"))
+    assert not list(run_dir.glob("dump_*"))
+
+
+def test_one_entitys_failed_export_means_nothing_is_written(whole_run, gl_csv_of):
+    files = _gl_files(gl_csv_of)
+    del files["/two_Accrual.csv"]
+    code, book = _gl_write_run(whole_run, FakeSite(), gl_csv_of, files=files)
+    assert code == 1
+    assert book.writes == {}
+    assert whole_run.notes[-1] == {"title": "buildium-gl", "message": "FAIL"}
+
+
+def test_a_changed_column_fails_by_name_and_writes_nothing(whole_run, gl_csv_of):
+    files = _gl_files(gl_csv_of)
+    columns = ["BrandNew" if c == "Amount" else c for c in EXPECTED_COLUMNS]
+    files["/two_Cash.csv"] = gl_csv_of(rows=[], columns=columns)
+    code, book = _gl_write_run(whole_run, FakeSite(), gl_csv_of, files=files)
+    assert code == 1
+    assert book.writes == {}
+    assert "missing Amount; added BrandNew" in _report(whole_run.data)
+
+
+def test_a_bad_first_entity_stops_before_the_next_one_signs_in(whole_run, gl_csv_of):
+    files = _gl_files(gl_csv_of)
+    files["/one_Cash.csv"] = gl_csv_of(rows=[])
+    site = FakeSite()
+    code, book = _gl_write_run(whole_run, site, gl_csv_of, files=files)
+    assert code == 1
+    assert len(site.logins) == 1
+    assert site.user is None
+    assert book.writes == {}
+    assert "the export has no entries" in _report(whole_run.data)
+    assert "export: entity2  (not processed: entity1 failed)" in _report(whole_run.data)
+
+
+def test_a_failed_sign_out_means_nothing_is_written(whole_run, gl_csv_of):
+    code, book = _gl_write_run(whole_run, FakeSite(sign_out_works=False), gl_csv_of)
+    assert code == 1
+    assert book.writes == {}
+    assert "sign-out: entity1" in _report(whole_run.data)
+
+
+def test_entries_in_two_entities_exports_mean_nothing_is_written(whole_run, gl_csv_of):
+    files = _gl_files(gl_csv_of)
+    files["/two_Cash.csv"] = files["/one_Cash.csv"]
+    code, book = _gl_write_run(whole_run, FakeSite(), gl_csv_of, files=files)
+    assert code == 1
+    assert book.writes == {}
+    assert "1 Cash entries are in both exports" in _report(whole_run.data)
+
+
+def test_one_entity_never_writes(whole_run, gl_csv_of):
+    site = FakeSite()
+    code, book = _gl_write_run(whole_run, site, gl_csv_of, "--entity", "entity2")
+    assert code == 0
+    assert [login["email"] for login in site.logins] == ["two@example.invalid"]
+    assert book.writes == {}
+    assert "not written" in _report(whole_run.data)
+
+
+def test_a_dump_never_writes(whole_run, gl_csv_of):
+    code, book = _gl_write_run(whole_run, FakeSite(), gl_csv_of, "--dump")
+    assert code == 0
+    assert book.writes == {}
+    assert "would write 4 rows" in _report(whole_run.data)
+
+
+def test_a_config_with_no_gl_section_fails_clearly(whole_run, gl_csv_of):
+    config = whole_run.data / "config.toml"
+    text = config.read_text(encoding="utf-8")
+    config.write_text(text.split("[gl]")[0], encoding="utf-8")
+    code, book = _gl_write_run(whole_run, FakeSite(), gl_csv_of)
+    assert code == 1
+    assert book.writes == {}
+    assert "a [gl] section is required" in _report(whole_run.data)

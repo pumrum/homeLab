@@ -22,6 +22,32 @@ statement_name = "<name as shown on statement>"
 [statements]
 system = "<system name>"                         # in every saved file's name
 
+# Used by buildium-gl. Share the spreadsheet with the service account as an Editor.
+[gl]
+spreadsheet_id = "<spreadsheet ID>"
+master_tab = "<tab holding every entity's ledger, with headers in row 1>"
+
+# One block per [[entities]] key. A run clears from start_cell to the tab's right edge and bottom.
+[[gl.entities]]
+key = "entity1"
+code = "<value for the master tab's Entity column>"
+tab = "<this entity's tab>"
+start_cell = "<first cell of its rows, like B5>"
+
+[[gl.entities]]
+key = "entity2"
+code = "<value for the master tab's Entity column>"
+tab = "<this entity's tab>"
+start_cell = "<first cell of its rows, like B5>"
+
+# Optional: one block per correction. That entity's rows for this lease dated before this date
+# get this unit number, in both methods.
+# [[gl.unit_fixes]]
+# key = "entity1"
+# lease_id = "<lease ID>"
+# before = "<date, like 2030-01-31>"
+# unit_number = "<unit number>"
+
 # Optional: the push notifications' words. Leave a block or line out to keep what's shown
 # here. Any of these can go in {braces}: {command}, {process}, {run_id}, {ok}, {unchanged},
 # {failed}, and {total}. Keep them short, since they're read on a watch.

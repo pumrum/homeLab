@@ -1,0 +1,71 @@
+"""Writing to the sheet, with a fake worksheet."""
+
+import datetime as dt
+
+import pytest
+
+from automation_common.run import Run
+from automation_common.sheets import SheetError
+from buildium_portal.config import Gl, GlEntity
+from buildium_portal.gl_parse import CASH_VIEW_COLUMNS, MASTER_COLUMNS
+from buildium_portal.gl_sheet import sheet_stage
+
+GL = Gl("made-up-id", "FakeMaster",
+        {"entity1": GlEntity("entity1", "CODE1", "FakeOne", "B5"),
+         "entity2": GlEntity("entity2", "CODE2", "FakeTwo", "C9")}, ())
+VIEWS = {"entity1": [["a", dt.date(2026, 1, 1)]], "entity2": [["b", dt.date(2026, 1, 2)]]}
+MASTER = [["m"]] * 2
+
+
+class FakeBook:
+    def __init__(self, bad_tab=None, missing_tab=None):
+        self.writes = []
+        self.bad_tab = bad_tab
+        self.missing_tab = missing_tab
+
+    def open(self, spreadsheet_id, tab, masker):
+        if tab == self.missing_tab:
+            raise SheetError(f'no tab named "{tab}" in the spreadsheet')
+        book = self
+
+        class Tab:
+            def replace_block(self, start_cell, rows, date_columns=(), trim=False):
+                if tab == book.bad_tab:
+                    raise SheetError("Google Sheets error 500 writing to the sheet")
+                book.writes.append((tab, start_cell, rows, date_columns, trim))
+
+        return Tab()
+
+
+@pytest.fixture
+def run(tmp_path):
+    with Run.start("buildium", tmp_path, notifier=lambda note, masker: True) as started:
+        yield started
+
+
+def test_each_tab_gets_its_rows_and_only_the_master_trims(run):
+    book = FakeBook()
+    sheet_stage(run, GL, VIEWS, MASTER, book.open)
+    assert book.writes == [
+        ("FakeOne", "B5", VIEWS["entity1"], [CASH_VIEW_COLUMNS.index("EntryDate")], False),
+        ("FakeTwo", "C9", VIEWS["entity2"], [CASH_VIEW_COLUMNS.index("EntryDate")], False),
+        ("FakeMaster", "A2", MASTER, [MASTER_COLUMNS.index("EntryDate")], True),
+    ]
+    assert run.summary.exit_code == 0
+
+
+def test_a_missing_tab_means_nothing_is_written_at_all(run):
+    book = FakeBook(missing_tab="FakeMaster")
+    sheet_stage(run, GL, VIEWS, MASTER, book.open)
+    assert book.writes == []
+    assert run.summary.exit_code == 1
+    assert "nothing written" in run.summary.report_text()
+
+
+def test_a_failed_write_doesnt_stop_the_other_tabs_and_is_reported(run):
+    book = FakeBook(bad_tab="FakeOne")
+    sheet_stage(run, GL, VIEWS, MASTER, book.open)
+    assert [write[0] for write in book.writes] == ["FakeTwo", "FakeMaster"]
+    assert run.summary.exit_code == 1
+    assert "FAILED    sheet: entity1" in run.summary.report_text()
+    assert "wrote 2 rows" in run.summary.report_text()
