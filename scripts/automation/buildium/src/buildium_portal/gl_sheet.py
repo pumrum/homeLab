@@ -1,6 +1,6 @@
 """Writing the finished general ledger to the sheet."""
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from automation_common.run import Run, Status
@@ -13,6 +13,11 @@ from buildium_portal.stages import why
 OpenWorksheet = Callable[[str, str, SecretMasker], Worksheet]
 
 MASTER_START_CELL = "A2"  # row 1 holds the maintainer's headers
+ENTRY_DATE_PATTERN = "yyyy-mm-dd"
+EXPORTED_DATE_PATTERN = "m/d/yyyy"  # how the export shows a date we don't reformat
+VIEW_DATES = {CASH_VIEW_COLUMNS.index("EntryDate"): ENTRY_DATE_PATTERN}
+MASTER_DATES = {MASTER_COLUMNS.index("EntryDate"): ENTRY_DATE_PATTERN,
+                MASTER_COLUMNS.index("EFTResultDate"): EXPORTED_DATE_PATTERN}
 SheetRows = Sequence[Sequence[Cell]]
 
 
@@ -22,18 +27,17 @@ class _Target:
     tab: str
     start_cell: str
     rows: SheetRows
-    date_column: int
+    date_columns: Mapping[int, str]
     trim: bool
 
 
 def _targets(gl: Gl, views: dict[str, SheetRows], master: SheetRows) -> list[_Target]:
-    view_date = CASH_VIEW_COLUMNS.index("EntryDate")
-    targets = [_Target(key, gl.entities[key].tab, gl.entities[key].start_cell, rows, view_date,
+    targets = [_Target(key, gl.entities[key].tab, gl.entities[key].start_cell, rows, VIEW_DATES,
                        trim=False)
                for key, rows in views.items()]
     # Only the master shrinks with its data. An entity's tab holds other things below its rows
-    targets.append(_Target("master", gl.master_tab, MASTER_START_CELL, master,
-                           MASTER_COLUMNS.index("EntryDate"), trim=True))
+    targets.append(_Target("master", gl.master_tab, MASTER_START_CELL, master, MASTER_DATES,
+                           trim=True))
     return targets
 
 
@@ -54,7 +58,7 @@ def sheet_stage(run: Run, gl: Gl, views: dict[str, SheetRows], master: SheetRows
             return
     for target, ws in opened:
         try:
-            ws.replace_block(target.start_cell, target.rows, [target.date_column], target.trim)
+            ws.replace_block(target.start_cell, target.rows, target.date_columns, target.trim)
         except Exception as e:  # noqa: BLE001 - one tab's failure must not stop the others
             run.summary.record("sheet", target.name, Status.FAILED, why(e))
         else:

@@ -38,6 +38,9 @@ CASH_VIEW_COLUMNS = (
 )
 _MAX_NAMED_COLUMNS = 5
 _COLUMN_NAME = re.compile(r"\w{1,40}")
+_BOOLEANS = {"True": True, "False": False}
+# No leading zeros, and few enough digits that a sheet's number holds them exactly
+_PLAIN_NUMBER = re.compile(r"-?(?:0|[1-9]\d{0,14})(?:\.\d{1,6})?")
 
 
 class LedgerError(Exception):
@@ -184,9 +187,22 @@ def shared_pairs(a: Iterable[Row], b: Iterable[Row]) -> int:
 
 
 def _cell(column: str, value: Any) -> Cell:
-    """Ids are numbers when they're whole numbers. All other text stays exactly as exported."""
-    if column.endswith("Id") and isinstance(value, str) and value.strip().isdecimal():
-        return int(value)
+    """What a paste would store, but only where the value can't change.
+
+    True and False, plain numbers, and EFTResultDate's dates become real values. Anything else
+    stays text exactly as exported, such as 007, which a paste would turn into 7.
+    """
+    if not isinstance(value, str):
+        return value
+    if value in _BOOLEANS:
+        return _BOOLEANS[value]
+    if _PLAIN_NUMBER.fullmatch(value):
+        return Decimal(value) if "." in value else int(value)
+    if column == "EFTResultDate":
+        try:
+            return dt.datetime.strptime(value, "%m/%d/%Y").date()
+        except ValueError:
+            return value
     return value
 
 

@@ -11,7 +11,7 @@ added to the masker and never written to logs or error messages.
 import datetime as dt
 import json
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -28,7 +28,7 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]  # sheets only, no Dri
 BLOCK_CHUNK_ROWS = 2_000  # rows in one write, so a big block stays a reasonable request
 _SHEETS_DAY_ZERO = dt.date(1899, 12, 30)
 
-Cell = str | int | float | Decimal | dt.date | None
+Cell = str | bool | int | float | Decimal | dt.date | None
 
 
 class SheetError(Exception):
@@ -45,7 +45,8 @@ class Worksheet(Protocol):
     def replace_from_cell(self, start_cell: str, lines: Sequence[str]) -> None: ...
 
     def replace_block(self, start_cell: str, rows: Sequence[Sequence[Cell]],
-                      date_columns: Sequence[int] = (), trim: bool = False) -> None: ...
+                      date_columns: Mapping[int, str] | None = None,
+                      trim: bool = False) -> None: ...
 
 
 def replace_requests(
@@ -86,6 +87,8 @@ def _block_cell(value: Cell) -> dict[str, Any]:
     """Text stays literal text, so nothing in it can run as a formula. "" and None are blank."""
     if value is None or value == "":
         return {}
+    if isinstance(value, bool):
+        return {"userEnteredValue": {"boolValue": value}}
     if isinstance(value, dt.date):
         return {"userEnteredValue": {"numberValue": (value - _SHEETS_DAY_ZERO).days}}
     if isinstance(value, Decimal):
@@ -97,16 +100,16 @@ def _block_cell(value: Cell) -> dict[str, Any]:
 
 def block_requests(
     sheet_id: int, row_count: int, col_count: int, start_cell: str,
-    rows: Sequence[Sequence[Cell]], date_columns: Sequence[int] = (), trim: bool = False,
-    chunk_rows: int = BLOCK_CHUNK_ROWS,
+    rows: Sequence[Sequence[Cell]], date_columns: Mapping[int, str] | None = None,
+    trim: bool = False, chunk_rows: int = BLOCK_CHUNK_ROWS,
 ) -> tuple[list[list[dict[str, Any]]], int, int]:
     """The writes that replace everything from `start_cell` right to the tab's edge and down.
 
     Returns the writes, each a list of requests sent together, then the tab's new row and
     column counts. A write overwrites its own rows in place, and only the last one clears what
-    the new rows don't reach, so the tab is never left empty on the way. `date_columns` are
-    positions within a row, shown as yyyy-mm-dd. Other cell formatting stays. `trim` deletes
-    the rows below the block, so the tab shrinks with its data.
+    the new rows don't reach, so the tab is never left empty on the way. `date_columns` maps a
+    position within a row to the pattern its dates show in, like yyyy-mm-dd. Other cell
+    formatting stays. `trim` deletes the rows below the block, so the tab shrinks with its data.
     """
     try:
         row, col = a1_to_rowcol(start_cell)
@@ -139,13 +142,13 @@ def block_requests(
         writes[0].insert(0, {"appendDimension": {
             "sheetId": sheet_id, "dimension": "COLUMNS", "length": total_cols - col_count}})
     if rows:
-        for column in date_columns:
+        for column, pattern in (date_columns or {}).items():
             writes[-1].append({"repeatCell": {
                 "range": {"sheetId": sheet_id, "startRowIndex": first_row, "endRowIndex": end_row,
                           "startColumnIndex": first_col + column,
                           "endColumnIndex": first_col + column + 1},
                 "cell": {"userEnteredFormat": {"numberFormat": {
-                    "type": "DATE", "pattern": "yyyy-mm-dd"}}},
+                    "type": "DATE", "pattern": pattern}}},
                 "fields": "userEnteredFormat.numberFormat",
             }})
     new_row_count = total_rows
@@ -227,7 +230,8 @@ class GoogleWorksheet:
         self._row_count = requests[-1]["updateCells"]["range"]["endRowIndex"]
 
     def replace_block(self, start_cell: str, rows: Sequence[Sequence[Cell]],
-                      date_columns: Sequence[int] = (), trim: bool = False) -> None:
+                      date_columns: Mapping[int, str] | None = None,
+                      trim: bool = False) -> None:
         """Replace everything from `start_cell` right and down (see block_requests).
 
         A block that fits in one write is all or nothing. A bigger one that fails partway

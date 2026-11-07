@@ -143,7 +143,7 @@ def test_a_block_covers_from_the_start_cell_right_to_the_edge_and_down():
 
 def test_block_values_keep_their_types_and_text_stays_literal():
     day = dt.date(2026, 3, 15)
-    rows = [["=1+1", "", None, 12, Decimal("-1250.50"), 1.5, day]]
+    rows = [["=1+1", "", None, 12, Decimal("-1250.50"), 1.5, day, True, False]]
     cells = _block(rows=rows)[0][0][0]["updateCells"]["rows"][0]["values"]
     assert cells == [
         {"userEnteredValue": {"stringValue": "=1+1"}},
@@ -153,14 +153,16 @@ def test_block_values_keep_their_types_and_text_stays_literal():
         {"userEnteredValue": {"numberValue": -1250.5}},
         {"userEnteredValue": {"numberValue": 1.5}},
         {"userEnteredValue": {"numberValue": 46096}},  # what Sheets calls that date
+        {"userEnteredValue": {"boolValue": True}},
+        {"userEnteredValue": {"boolValue": False}},
     ]
 
 
 def test_block_date_columns_change_only_the_number_format_of_written_rows():
-    writes, _, _ = _block(rows=[["a", dt.date(2026, 1, 1)]] * 3, date_columns=[1])
+    writes, _, _ = _block(rows=[["a", dt.date(2026, 1, 1)]] * 3, date_columns={1: "m/d/yyyy"})
     fmt = writes[-1][1]["repeatCell"]
     assert fmt["fields"] == "userEnteredFormat.numberFormat"
-    assert fmt["cell"]["userEnteredFormat"]["numberFormat"]["pattern"] == "yyyy-mm-dd"
+    assert fmt["cell"]["userEnteredFormat"]["numberFormat"]["pattern"] == "m/d/yyyy"
     assert fmt["range"] == {"sheetId": 7, "startRowIndex": 4, "endRowIndex": 7,
                             "startColumnIndex": 2, "endColumnIndex": 3}
 

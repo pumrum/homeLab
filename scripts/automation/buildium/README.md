@@ -43,8 +43,14 @@ yours and is never touched.
 | `Amount` | A number |
 | `EntryDate` | A date, shown as `yyyy-mm-dd` |
 | `EntryDate_YM` | Text like `2026-03` |
-| Names ending in `Id`, such as `PostingId` and `LeaseId` | Numbers |
+| `EFTResultDate` | A date, shown as `m/d/yyyy` |
+| Any other value that's a plain number, in any column | A number |
+| `True` and `False`, in any column | `TRUE` and `FALSE`, as real true or false values |
 | Everything else | Literal text, exactly as exported, so a memo starting with `=` can't run |
+
+This matches paste values, except where a paste would change the value: `007` and numbers over 15
+digits stay text. Sheets marks text that looks like a number or date with a leading `'` in the
+formula bar, such as `EntryDate_YM`'s `2026-03`. The `'` isn't part of the value.
 
 ### How rows are cleaned
 

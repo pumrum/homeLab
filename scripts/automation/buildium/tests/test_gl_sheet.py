@@ -29,7 +29,7 @@ class FakeBook:
         book = self
 
         class Tab:
-            def replace_block(self, start_cell, rows, date_columns=(), trim=False):
+            def replace_block(self, start_cell, rows, date_columns=None, trim=False):
                 if tab == book.bad_tab:
                     raise SheetError("Google Sheets error 500 writing to the sheet")
                 book.writes.append((tab, start_cell, rows, date_columns, trim))
@@ -46,10 +46,12 @@ def run(tmp_path):
 def test_each_tab_gets_its_rows_and_only_the_master_trims(run):
     book = FakeBook()
     sheet_stage(run, GL, VIEWS, MASTER, book.open)
+    view_dates = {CASH_VIEW_COLUMNS.index("EntryDate"): "yyyy-mm-dd"}
     assert book.writes == [
-        ("FakeOne", "B5", VIEWS["entity1"], [CASH_VIEW_COLUMNS.index("EntryDate")], False),
-        ("FakeTwo", "C9", VIEWS["entity2"], [CASH_VIEW_COLUMNS.index("EntryDate")], False),
-        ("FakeMaster", "A2", MASTER, [MASTER_COLUMNS.index("EntryDate")], True),
+        ("FakeOne", "B5", VIEWS["entity1"], view_dates, False),
+        ("FakeTwo", "C9", VIEWS["entity2"], view_dates, False),
+        ("FakeMaster", "A2", MASTER, {MASTER_COLUMNS.index("EntryDate"): "yyyy-mm-dd",
+                                      MASTER_COLUMNS.index("EFTResultDate"): "m/d/yyyy"}, True),
     ]
     assert run.summary.exit_code == 0
 

@@ -200,10 +200,42 @@ def test_sheet_rows_type_each_column(gl_csv_of):
     assert cell["EntryDate"] == dt.date(2026, 3, 15)
     assert cell["Amount"] == Decimal("10.00")
     assert cell["EntryDate_YM"] == "2026-03"
-    for column, text in (("UnitNumber", "9"), ("JournalMemo", "=1+1"), ("CheckNumber", "99-1"),
-                         ("IsCashPosting", "1"), ("EFTResultDate", "3/1/2026"),
-                         ("FileIdString", "55")):
-        assert cell[column] == text
+    assert cell["UnitNumber"] == 9
+    assert cell["IsCashPosting"] == 1
+    assert cell["FileIdString"] == 55
+    assert cell["EFTResultDate"] == dt.date(2026, 3, 1)
+    assert cell["JournalMemo"] == "=1+1"  # stays text, so it can't run
+    assert cell["CheckNumber"] == "99-1"
+
+
+def test_true_and_false_become_real_values(gl_csv_of):
+    rows = _clean(gl_csv_of, [_row(IsActive="True", IsEFT="False")]).rows
+    cell = dict(zip(MASTER_COLUMNS, sheet_rows(rows, MASTER_COLUMNS)[0], strict=True))
+    assert cell["IsActive"] is True
+    assert cell["IsEFT"] is False
+
+
+@pytest.mark.parametrize("text", [
+    "007",  # a number would lose its zeros
+    "1234567890123456",  # too long for a sheet's number to hold exactly
+    "1/2",  # a unit, not a date
+    "1,250",
+    "5A",
+    "true",
+    "True ",
+    "",
+])
+def test_a_value_that_could_change_stays_as_exported(gl_csv_of, text):
+    rows = _clean(gl_csv_of, [_row(UnitNumber=text)]).rows
+    cell = dict(zip(MASTER_COLUMNS, sheet_rows(rows, MASTER_COLUMNS)[0], strict=True))
+    assert cell["UnitNumber"] == text
+
+
+def test_a_date_in_another_column_or_an_odd_one_stays_as_exported(gl_csv_of):
+    rows = _clean(gl_csv_of, [_row(JournalMemo="3/1/2026", EFTResultDate="soon")]).rows
+    cell = dict(zip(MASTER_COLUMNS, sheet_rows(rows, MASTER_COLUMNS)[0], strict=True))
+    assert cell["JournalMemo"] == "3/1/2026"
+    assert cell["EFTResultDate"] == "soon"
 
 
 def test_trailing_spaces_stay_in_what_goes_to_the_sheet(gl_csv_of):
