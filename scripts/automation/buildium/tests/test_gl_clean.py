@@ -200,7 +200,7 @@ def test_sheet_rows_type_each_column(gl_csv_of):
     assert cell["VendorId"] == ""  # blank, not zero
     assert cell["EntryDate"] == dt.date(2026, 3, 15)
     assert cell["Amount"] == Decimal("10.00")
-    assert cell["EntryDate_YM"] == Formula('=LEFT(INDIRECT("F" & ROW()), 7)')
+    assert cell["EntryDate_YM"] == Formula("=LEFT(INDEX(F:F, ROW()), 7)")
     assert cell["UnitNumber"] == 9
     assert cell["IsCashPosting"] == 1
     assert cell["FileIdString"] == 55

@@ -42,7 +42,7 @@ yours and is never touched.
 | --- | --- |
 | `Amount` | A number |
 | `EntryDate` | A date, shown as `yyyy-mm-dd` |
-| `EntryDate_YM` | The formula `=LEFT(INDIRECT("F" & ROW()), 7)`, which reads `EntryDate` in column F |
+| `EntryDate_YM` | The formula `=LEFT(INDEX(F:F, ROW()), 7)`, which reads `EntryDate` in column F |
 | `EFTResultDate` | A date, shown as `m/d/yyyy` |
 | Any other value that's a plain number, in any column | A number |
 | `True` and `False`, in any column | `TRUE` and `FALSE`, as real true or false values |

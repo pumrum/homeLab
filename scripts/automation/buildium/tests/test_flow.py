@@ -886,7 +886,7 @@ def test_a_normal_run_replaces_each_tab_after_every_entity_worked(whole_run, gl_
     assert [row[:2] for row in master.rows] == [["FAKECODE1", "Cash"], ["FAKECODE1", "Accrual"],
                                                 ["FAKECODE2", "Cash"], ["FAKECODE2", "Accrual"]]
     assert all(len(row) == 56 for row in master.rows)
-    assert master.rows[0][-1].text == '=LEFT(INDIRECT("F" & ROW()), 7)'
+    assert master.rows[0][-1].text == "=LEFT(INDEX(F:F, ROW()), 7)"
     assert Decimal("-10.50") in master.rows[0]  # the master keeps the export's sign
 
     assert whole_run.notes == [{"title": "buildium-gl", "message": "PASS"}]

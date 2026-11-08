@@ -36,8 +36,9 @@ CASH_VIEW_COLUMNS = (
     "PayeeName", "PayeeNameRaw", "PayeeNames", "UnitNumber", "BuildingName",
     "GLAccountTypeName", "JournalCodeDescription", "GLAccountNameRaw",
 )
-# The year and month from the row's EntryDate, which is column F of the master tab
-ENTRY_MONTH_FORMULA = Formula('=LEFT(INDIRECT("F" & ROW()), 7)')
+# The year and month from the row's EntryDate, which is column F of the master tab. The same
+# text works in every row, and unlike INDIRECT, INDEX recalculates only when column F changes
+ENTRY_MONTH_FORMULA = Formula("=LEFT(INDEX(F:F, ROW()), 7)")
 _MAX_NAMED_COLUMNS = 5
 _COLUMN_NAME = re.compile(r"\w{1,40}")
 _BOOLEANS = {"True": True, "False": False}
