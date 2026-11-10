@@ -96,16 +96,16 @@ var LEDGER_COL = {
 
 var CONFIG_HEADER_ROW = 5;
 var CONFIG_DATA_START_ROW = 6;
-var CONFIG_START_COL = 199; // GQ = column 199
+var CONFIG_START_COL = 201; // GS = column 201
 
 var SUMMARY_HEADER_ROW = 5;
 var SUMMARY_DATA_START_ROW = 6;
-var SUMMARY_START_COL = 207; // GY = column 207
+var SUMMARY_START_COL = 209; // HA = column 209
 var SUMMARY_ROWS_TO_CLEAR = 20; // generous, only ~13 used
 
 var DETAIL_HEADER_ROW = 5;
 var DETAIL_DATA_START_ROW = 6;
-var DETAIL_START_COL = 212; // HD = column 212
+var DETAIL_START_COL = 214; // HF = column 214
 var DETAIL_COLS = 7;
 var DETAIL_ROWS_TO_CLEAR = 2000; // generous headroom for a few thousand ledger rows
 
