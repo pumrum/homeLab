@@ -109,7 +109,7 @@ var DETAIL_START_COL = 214; // HF = column 214
 var DETAIL_COLS = 7;
 var DETAIL_ROWS_TO_CLEAR = 2000; // generous headroom for a few thousand ledger rows
 
-var FILENAME_SENTINELS = ['zNo_Invoice', 'zMissing_Invoice', 'xCell'];
+var FILENAME_SENTINELS = ['zNo_Invoice', 'zMissing_Invoice', 'xCell', 'xCamTrust', 'xBeachMon'];
 var URL_SENTINELS = ['zNo_URL', 'zMissing_URL'];
 
 // Every invoice URL is expected to have this exact shape -- the modern
