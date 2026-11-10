@@ -868,18 +868,12 @@ def test_entity_exports_only_that_one(whole_run, gl_csv_of):
     assert [login["email"] for login in site.logins] == ["two@example.invalid"]
 
 
-def test_a_normal_run_replaces_each_tab_after_every_entity_worked(whole_run, gl_csv_of):
+def test_a_normal_run_replaces_the_master_after_every_entity_worked(whole_run, gl_csv_of):
     site = FakeSite()
     code, book = _gl_write_run(whole_run, site, gl_csv_of)
     assert code == 0
     assert site.paths.count("/sign-out") == 2
-    assert set(book.writes) == {"FakeTabOne", "FakeTabTwo", "FakeMasterTab"}
-
-    one = book.writes["FakeTabOne"]
-    assert (one.start_cell, one.trim) == ("B5", False)
-    assert one.rows[0][:3] == [1, 101, dt.date(2026, 3, 15)]
-    assert one.rows[0][3] == "oneCash"
-    assert one.rows[0][5] == Decimal("10.50")  # the view's sign is flipped
+    assert set(book.writes) == {"FakeMasterTab"}  # entity tabs are off
 
     master = book.writes["FakeMasterTab"]
     assert (master.start_cell, master.trim) == ("A2", True)

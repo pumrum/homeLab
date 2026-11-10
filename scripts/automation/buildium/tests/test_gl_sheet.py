@@ -45,7 +45,7 @@ def run(tmp_path):
 
 def test_each_tab_gets_its_rows_and_only_the_master_trims(run):
     book = FakeBook()
-    sheet_stage(run, GL, VIEWS, MASTER, book.open)
+    sheet_stage(run, GL, VIEWS, MASTER, book.open, entity_tabs=True)
     view_dates = {CASH_VIEW_COLUMNS.index("EntryDate"): "yyyy-mm-dd"}
     assert book.writes == [
         ("FakeOne", "B5", VIEWS["entity1"], view_dates, False),
@@ -56,9 +56,17 @@ def test_each_tab_gets_its_rows_and_only_the_master_trims(run):
     assert run.summary.exit_code == 0
 
 
+def test_by_default_only_the_master_is_opened_and_written(run):
+    book = FakeBook(missing_tab="FakeOne")  # an entity's tab isn't even opened
+    sheet_stage(run, GL, VIEWS, MASTER, book.open)
+    assert [write[:2] for write in book.writes] == [("FakeMaster", "A2")]
+    assert run.summary.exit_code == 0
+    assert "sheet: entity1" not in run.summary.report_text()
+
+
 def test_a_missing_tab_means_nothing_is_written_at_all(run):
     book = FakeBook(missing_tab="FakeMaster")
-    sheet_stage(run, GL, VIEWS, MASTER, book.open)
+    sheet_stage(run, GL, VIEWS, MASTER, book.open, entity_tabs=True)
     assert book.writes == []
     assert run.summary.exit_code == 1
     assert "nothing written" in run.summary.report_text()
@@ -66,7 +74,7 @@ def test_a_missing_tab_means_nothing_is_written_at_all(run):
 
 def test_a_failed_write_doesnt_stop_the_other_tabs_and_is_reported(run):
     book = FakeBook(bad_tab="FakeOne")
-    sheet_stage(run, GL, VIEWS, MASTER, book.open)
+    sheet_stage(run, GL, VIEWS, MASTER, book.open, entity_tabs=True)
     assert [write[0] for write in book.writes] == ["FakeTwo", "FakeMaster"]
     assert run.summary.exit_code == 1
     assert "FAILED    sheet: entity1" in run.summary.report_text()

@@ -12,6 +12,9 @@ from buildium_portal.stages import why
 
 OpenWorksheet = Callable[[str, str, SecretMasker], Worksheet]
 
+# Off: the sheet builds each entity's rows from the master with formulas. True writes each
+# entity's Cash view to its gl_tab again, from gl_start_cell
+WRITE_ENTITY_TABS = False
 MASTER_START_CELL = "A2"  # row 1 holds the maintainer's headers
 ENTRY_DATE_PATTERN = "yyyy-mm-dd"
 EXPORTED_DATE_PATTERN = "m/d/yyyy"  # how the export shows a date we don't reformat
@@ -42,13 +45,13 @@ def _targets(gl: Gl, views: dict[str, SheetRows], master: SheetRows) -> list[_Ta
 
 
 def sheet_stage(run: Run, gl: Gl, views: dict[str, SheetRows], master: SheetRows,
-                open_ws: OpenWorksheet) -> None:
-    """Replace each entity's rows and the master.
+                open_ws: OpenWorksheet, entity_tabs: bool = WRITE_ENTITY_TABS) -> None:
+    """Replace the master, and each entity's rows when `entity_tabs` is on.
 
     Every tab is opened first, so a wrong tab name changes nothing. After that a failed write
     doesn't stop the others: each tab is a full snapshot, and the report names what failed.
     """
-    targets = _targets(gl, views, master)
+    targets = _targets(gl, views if entity_tabs else {}, master)
     opened: list[tuple[_Target, Worksheet]] = []
     for target in targets:
         try:

@@ -8,7 +8,8 @@
 login_url = "https://<address of the sign-in page>"
 
 # One block per entity, holding everything about it. The gl_ values are used by buildium-gl.
-# A run clears from gl_start_cell to the tab's right edge and bottom.
+# A run clears from gl_start_cell to the tab's right edge and bottom. Entity tab writes are
+# off for now (see the README), but gl_tab and gl_start_cell are still required.
 [[entities]]
 key = "entity1"                                  # neutral: in logs, reports, and the credential's name
 abbreviation = "<ABBREVIATION>"                  # in the saved file's name and the MFA push, like ABCLLC
