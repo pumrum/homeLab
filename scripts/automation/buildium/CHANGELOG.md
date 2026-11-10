@@ -7,10 +7,9 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
 
 - Add `buildium-gl`: for each entity it signs in, exports the general ledger as CSV for each
   accounting method, and cleans it. Once every entity has worked, it replaces the master tab in a
-  Google Sheet. Writing each entity's Cash view to its own tab is built but switched off,
-  because the sheet now builds those rows from the master. The first failure stops the run and
-  writes nothing.
-  `--dump` also saves the page structure and a masked profile of each export, and `--dump` and
+  Google Sheet. Writing an entity's Cash view to its own tab is off unless that entity's
+  `gl_write_tab` is `true`, because the sheet now builds those rows from the master. The first
+  failure stops the run and writes nothing. `--dump` also saves the page structure and a masked profile of each export, and `--dump` and
   `--entity` never write. It needs a new `[gl]` section in `config.toml`, and `gl_` values in
   each `[[entities]]` block.
 - Fix sign-out failing when the Account button's tooltip covers `Sign out`. It now moves the

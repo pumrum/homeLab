@@ -464,6 +464,7 @@ statement_name = "{TWO}"
 gl_code = "FAKECODE2"
 gl_tab = "FakeTabTwo"
 gl_start_cell = "C9"
+gl_write_tab = true
 [gl]
 spreadsheet_id = "made-up-spreadsheet-id"
 master_tab = "FakeMasterTab"
@@ -873,7 +874,12 @@ def test_a_normal_run_replaces_the_master_after_every_entity_worked(whole_run, g
     code, book = _gl_write_run(whole_run, site, gl_csv_of)
     assert code == 0
     assert site.paths.count("/sign-out") == 2
-    assert set(book.writes) == {"FakeMasterTab"}  # entity tabs are off
+    assert set(book.writes) == {"FakeTabTwo", "FakeMasterTab"}  # only entity2 turns its tab on
+
+    two = book.writes["FakeTabTwo"]
+    assert (two.start_cell, two.trim) == ("C9", False)
+    assert two.rows[0][3] == "twoCash"
+    assert two.rows[0][5] == Decimal("10.50")  # the view's sign is flipped
 
     master = book.writes["FakeMasterTab"]
     assert (master.start_cell, master.trim) == ("A2", True)

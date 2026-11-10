@@ -77,6 +77,7 @@ class GlEntity:
     code: str  # the master tab's Entity column
     tab: str
     start_cell: str
+    write_tab: bool = False  # off: the sheet builds this entity's rows from the master
 
 
 @dataclass(frozen=True)
@@ -144,7 +145,7 @@ def _entity(table: Mapping[str, Any], number: int) -> Entity:
     where = _entity_where(number)
     # The gl_ values are only checked by buildium-gl
     reject_unknown_keys(table, {"key", "abbreviation", "statement_name", "gl_code", "gl_tab",
-                                "gl_start_cell", "gl_unit_fixes"}, where)
+                                "gl_start_cell", "gl_write_tab", "gl_unit_fixes"}, where)
     key = _text(table, "key", where)
     if not _KEY.match(key):
         raise ConfigError(f'{where}: "key" can only use lowercase letters, digits, or -')
@@ -188,12 +189,21 @@ def load_config(path: Path) -> Config:
     return parse_config(load_toml(path))
 
 
+def _flag(table: Mapping[str, Any], name: str, where: str) -> bool:
+    """An optional true or false, off when it's left out."""
+    value = table.get(name, False)
+    if not isinstance(value, bool):
+        raise ConfigError(f'{where}: "{name}" must be true or false, without quotes')
+    return value
+
+
 def _gl_entity(table: Mapping[str, Any], key: str, where: str) -> GlEntity:
     start_cell = _text(table, "gl_start_cell", where)
     # The value is private, so the message never repeats it
     if not _CELL.match(start_cell):
         raise ConfigError(f'{where}: "gl_start_cell" must be a cell like B5')
-    return GlEntity(key, _text(table, "gl_code", where), _text(table, "gl_tab", where), start_cell)
+    return GlEntity(key, _text(table, "gl_code", where), _text(table, "gl_tab", where), start_cell,
+                    _flag(table, "gl_write_tab", where))
 
 
 def _unit_fix(table: Mapping[str, Any], key: str, where: str) -> UnitFix:

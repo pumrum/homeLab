@@ -32,14 +32,14 @@ Each tab is a full snapshot, replaced every run.
 
 | Tab | Rows | Before writing |
 | --- | --- | --- |
-| Each entity's tab, from `gl_start_cell`. **Off**: see below | The Cash view: 15 columns, with the rules below | Clears from `gl_start_cell` to the tab's right edge and bottom |
+| Each entity's tab, from `gl_start_cell`, only when its `gl_write_tab` is `true` | The Cash view: 15 columns, with the rules below | Clears from `gl_start_cell` to the tab's right edge and bottom |
 | The master tab, from `A2` | Every entity, Cash and Accrual: 56 columns | Clears everything below row 1, then deletes spare rows so the tab shrinks with its data |
 
-Entity tab writes are off, because the sheet builds each entity's rows from the master with
-formulas. A run still builds each entity's Cash view and reports its counts, but opens and writes
-only the master. To write the entity tabs again, set `WRITE_ENTITY_TABS = True` in
-`gl_sheet.py`. Each entity's `gl_tab` and `gl_start_cell` are still required and checked, so
-nothing else needs changing to turn it back on.
+Entity tabs are off by default, because the sheet builds each entity's rows from the master with
+formulas. A run still builds each entity's Cash view and reports its counts. To have a run write
+one entity's tab again, for example while its formulas are broken, add `gl_write_tab = true` to
+that entity's block, without quotes. Each entity's `gl_tab` and `gl_start_cell` are still
+required and checked, so turning a tab on needs nothing else.
 
 The master's columns are `Entity`, `Method`, the export's 53, and `EntryDate_YM`. Its row 1 is
 yours and is never touched.

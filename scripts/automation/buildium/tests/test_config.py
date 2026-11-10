@@ -83,7 +83,7 @@ GL_ENTITIES = (
     {"gl_code": "CODE1", "gl_tab": "FakeOne", "gl_start_cell": "B5", "gl_unit_fixes": [
         {"lease_id": "77", "before": "2030-01-31", "unit_number": "Upper"},
     ]},
-    {"gl_code": "CODE2", "gl_tab": "FakeTwo", "gl_start_cell": "AB12"},
+    {"gl_code": "CODE2", "gl_tab": "FakeTwo", "gl_start_cell": "AB12", "gl_write_tab": True},
 )
 
 
@@ -148,6 +148,7 @@ def test_buildium_statements_doesnt_depend_on_the_gl_section():
     (lambda d: d["entities"][1].update(gl_tab="FakeOne"), "their own tab"),
     (lambda d: d["gl"].update(master_tab="FakeOne"), "their own tab"),
     (lambda d: d["entities"][0].update(gl_unit_fixes="x"), "must be a list"),
+    (lambda d: d["entities"][1].update(gl_write_tab="true"), "true or false, without quotes"),
     (lambda d: _fix(d).update(before="1/31/2030"), "a date like"),
     (lambda d: _fix(d).update(key="entity1"), "unknown"),
     (lambda d: _fix(d).pop("lease_id"), "lease_id"),
@@ -155,6 +156,11 @@ def test_buildium_statements_doesnt_depend_on_the_gl_section():
 def test_a_bad_gl_config_fails_clearly(change, message):
     with pytest.raises(ConfigError, match=message):
         parse_gl_config(_gl_changed(change))
+
+
+def test_gl_write_tab_is_off_unless_an_entity_turns_it_on():
+    entities = parse_gl_config(_gl_changed(lambda d: None)).gl.entities
+    assert [entity.write_tab for entity in entities.values()] == [False, True]
 
 
 def test_a_gl_message_never_repeats_a_private_value():

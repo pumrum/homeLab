@@ -11,8 +11,11 @@ from buildium_portal.gl_parse import CASH_VIEW_COLUMNS, MASTER_COLUMNS
 from buildium_portal.gl_sheet import sheet_stage
 
 GL = Gl("made-up-id", "FakeMaster",
-        {"entity1": GlEntity("entity1", "CODE1", "FakeOne", "B5"),
-         "entity2": GlEntity("entity2", "CODE2", "FakeTwo", "C9")}, ())
+        {"entity1": GlEntity("entity1", "CODE1", "FakeOne", "B5", write_tab=True),
+         "entity2": GlEntity("entity2", "CODE2", "FakeTwo", "C9", write_tab=True)}, ())
+ONE_ON = Gl("made-up-id", "FakeMaster",
+            {"entity1": GL.entities["entity1"],
+             "entity2": GlEntity("entity2", "CODE2", "FakeTwo", "C9")}, ())
 VIEWS = {"entity1": [["a", dt.date(2026, 1, 1)]], "entity2": [["b", dt.date(2026, 1, 2)]]}
 MASTER = [["m"]] * 2
 
@@ -45,7 +48,7 @@ def run(tmp_path):
 
 def test_each_tab_gets_its_rows_and_only_the_master_trims(run):
     book = FakeBook()
-    sheet_stage(run, GL, VIEWS, MASTER, book.open, entity_tabs=True)
+    sheet_stage(run, GL, VIEWS, MASTER, book.open)
     view_dates = {CASH_VIEW_COLUMNS.index("EntryDate"): "yyyy-mm-dd"}
     assert book.writes == [
         ("FakeOne", "B5", VIEWS["entity1"], view_dates, False),
@@ -56,17 +59,17 @@ def test_each_tab_gets_its_rows_and_only_the_master_trims(run):
     assert run.summary.exit_code == 0
 
 
-def test_by_default_only_the_master_is_opened_and_written(run):
-    book = FakeBook(missing_tab="FakeOne")  # an entity's tab isn't even opened
-    sheet_stage(run, GL, VIEWS, MASTER, book.open)
-    assert [write[:2] for write in book.writes] == [("FakeMaster", "A2")]
+def test_only_entities_with_gl_write_tab_on_get_their_tab(run):
+    book = FakeBook(missing_tab="FakeTwo")  # a tab that's off isn't even opened
+    sheet_stage(run, ONE_ON, VIEWS, MASTER, book.open)
+    assert [write[:2] for write in book.writes] == [("FakeOne", "B5"), ("FakeMaster", "A2")]
     assert run.summary.exit_code == 0
-    assert "sheet: entity1" not in run.summary.report_text()
+    assert "sheet: entity2" not in run.summary.report_text()
 
 
 def test_a_missing_tab_means_nothing_is_written_at_all(run):
     book = FakeBook(missing_tab="FakeMaster")
-    sheet_stage(run, GL, VIEWS, MASTER, book.open, entity_tabs=True)
+    sheet_stage(run, GL, VIEWS, MASTER, book.open)
     assert book.writes == []
     assert run.summary.exit_code == 1
     assert "nothing written" in run.summary.report_text()
@@ -74,7 +77,7 @@ def test_a_missing_tab_means_nothing_is_written_at_all(run):
 
 def test_a_failed_write_doesnt_stop_the_other_tabs_and_is_reported(run):
     book = FakeBook(bad_tab="FakeOne")
-    sheet_stage(run, GL, VIEWS, MASTER, book.open, entity_tabs=True)
+    sheet_stage(run, GL, VIEWS, MASTER, book.open)
     assert [write[0] for write in book.writes] == ["FakeTwo", "FakeMaster"]
     assert run.summary.exit_code == 1
     assert "FAILED    sheet: entity1" in run.summary.report_text()
