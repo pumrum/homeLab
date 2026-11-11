@@ -175,12 +175,38 @@ class PdfServer:
         self._server.server_close()
 
 
+# After the push option, as on the real page: Next and Cancel are mds-buttons whose shadow root
+# holds the button, its label, and a hidden copy of the label. A hidden copy of each sits in a
+# mobile-only footer. Next sends the push
+NEXT_BUTTON = """
+<mds-button id="next-content" data-label="Next" data-go="/web/verify/sent"></mds-button>
+<div style="display:none"><mds-button id="next-button" data-label="Next" data-go="/web/verify/sent">
+</mds-button></div>"""
+NEXT_PAGE = """
+<h1>We'll send a notification to your device</h1>
+<p>Select Next to get a push notification on your phone.</p>
+__NEXT__
+<mds-button id="cancel-content" data-label="Cancel" data-go="/web/verify"></mds-button>
+<script>
+customElements.define("mds-button", class extends HTMLElement {
+  connectedCallback() {
+    const label = this.dataset.label;
+    const root = this.attachShadow({mode: "open"});
+    root.innerHTML = `<button class="button"><span class="button__label">${label}</span>` +
+      `<span class="accessible-text" style="display:none">${label}</span></button>`;
+    root.querySelector("button").onclick = () => { location = this.dataset.go; };
+  }
+});
+</script>"""
+
+
 class FakeBank:
     """One login, answered by Playwright."""
 
     def __init__(self, signed_in=False, verify=False, approve=False, reject=False,
                  challenge=False, sign_out_works=True, expired=(), show=None,
-                 no_format_choice=False, chooser="push"):
+                 no_format_choice=False, chooser="push",
+                 next_button=True):
         self.signed_in = signed_in
         self.verify = verify  # the site asks to verify the device
         self.approve = approve  # the person approves it on the phone
@@ -193,6 +219,7 @@ class FakeBank:
         # The verification page: "push" shows the real chooser, "other" a chooser without the
         # push option, None skips the chooser because the site sent the push itself
         self.chooser = chooser
+        self.next_button = next_button  # the page after the push option has a Next button
         self.pushes = 0
         self.app_sign_ins = 0
         self.logins = []
@@ -243,6 +270,9 @@ class FakeBank:
         if path == VERIFY:
             return self._html(route, self._chooser() if self.chooser else self._sent())
         if path == VERIFY + "/push":
+            return self._html(route, NEXT_PAGE.replace(
+                "__NEXT__", NEXT_BUTTON if self.next_button else ""))
+        if path == VERIFY + "/sent":
             self.pushes += 1
             return self._html(route, self._sent())
         if path == VERIFY + "/app":
@@ -385,6 +415,15 @@ def test_verification_notifies_once_and_continues_when_approved(open_site):
     assert asked == [1]
     assert (site.pushes, site.app_sign_ins) == (1, 0)
     assert urlsplit(page.url).path == DASHBOARD
+
+
+def test_no_next_button_after_the_push_option_fails_without_waiting(open_site):
+    site = FakeBank(verify=True, approve=True, next_button=False)
+    asked = []
+    with pytest.raises(LoginError, match="no Next button"):
+        sign_in(open_site(site), SITE, CRED, FAST, on_verify=lambda: asked.append(1))
+    assert asked == []
+    assert (site.pushes, site.app_sign_ins) == (0, 0)
 
 
 def test_verification_without_a_chooser_just_waits(open_site):

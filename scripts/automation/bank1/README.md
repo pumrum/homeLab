@@ -59,8 +59,8 @@ That could come later if links turn out to expire often.
 
 | Situation | Result |
 | --- | --- |
-| The site asks to verify the device | Chooses **Confirm using our mobile app**, a push says `Approve the sign-in on your phone`, then it waits 5 minutes |
-| The verification page has no **Confirm using our mobile app** option | The run stops. Nothing is chosen and no account is tried. `FAIL` |
+| The site asks to verify the device | Chooses **Confirm using our mobile app**, then **Next**. A push says `Approve the sign-in on your phone`, then it waits 5 minutes |
+| The verification page has no **Confirm using our mobile app** option, or no **Next** after it | The run stops. No push is sent and no account is tried. `FAIL` |
 | Verification isn't approved in time | The whole run stops. No account is tried and no file is touched. `FAIL: verification timed out` |
 | Rejected username or password | The run stops after 45 seconds. Never retried, so it can't lock the login. `FAIL` |
 | CAPTCHA challenge showing | The run stops right away. Never worked around. `FAIL` |
@@ -85,7 +85,7 @@ These are the default words. `[notifications.<event>]` blocks in `config.toml` c
 | --- | --- |
 | The profile is still signed in | Goes straight on, typing nothing |
 | Sign-in form | Fills in the username and password once from `bank1/login`, then clicks Sign in. The fields may sit in an iframe or in shadow roots, so each is a list of candidates |
-| Verification words on screen, twice in a row, with the form gone | Treated as device verification. If the page asks how to confirm, clicks **Confirm using our mobile app**, never **Sign into our mobile app**. Then sends the push and waits up to 5 minutes for the dashboard |
+| Verification words on screen, twice in a row, with the form gone | Treated as device verification. If the page asks how to confirm, clicks **Confirm using our mobile app**, never **Sign into our mobile app**, then **Next**, which has the site send its push. Then sends a notification and waits up to 5 minutes for the dashboard |
 | The dashboard (`dashboard` in its address) | Signed in. Waits for it to finish loading before opening any statements link |
 
 The sign-in page often mentions the bank's mobile app, so the verification words count only
@@ -108,8 +108,9 @@ session. The sign-in selectors and verification words come from that test.
 **Not yet run:**
 
 - Sign-in and verification through this package's code, including clicking **Confirm using our
-  mobile app**. The selectors come from a `--dump` outline of the real chooser, but nothing has
-  clicked it on the real site yet
+  mobile app** and **Next**. The option's selectors come from a `--dump` outline of the real
+  chooser. Next's are candidates modeled on the site's other buttons. Nothing has clicked either
+  on the real site yet
 - Everything on the statements pages: the row selectors, the download links, the Standard and
   Single choices, how each kind delivers its PDF, and whether the page shows the suffix for the
   `match` check. These are lists of candidates until a `--dump` and `--capture` run shows the
@@ -154,7 +155,7 @@ uv run bank1-statements                             # normal run
 `--dump` signs in, then opens the first account of each kind (or the one named), saves its page
 outline and screenshot as `dump_<label>_statements_page.txt` and `.png`, and reports which
 statement a run would save. It clicks nothing on those pages and downloads nothing. It also saves
-the sign-in, verification chooser, after-push, and dashboard pages as `dump_site_<step>`. The
+the sign-in, verification chooser, Next, after-push, and dashboard pages as `dump_site_<step>`. The
 sign-in page is saved before anything is typed.
 
 `--capture` opens the job's browser on the sign-in page and saves a snapshot each time the page

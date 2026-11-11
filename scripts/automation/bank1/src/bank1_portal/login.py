@@ -8,7 +8,8 @@ After the password, the site may ask to verify the device with a push to its pho
 That's only taken as the prompt when its words are on screen on two checks in a row with
 the sign-in form gone, and never once the dashboard has loaded. Words alone gave a false
 alarm before. The site may first offer a choice of how to confirm: the run always picks
-the push to the phone app, never signing in to the app. It then sends its own notification
+the push to the phone app, never signing in to the app, then clicks Next to send it. It
+then sends its own notification
 and waits for the dashboard, up to a limit.
 
 Nothing here is ever retried: a username and password are sent at most once per run, so
@@ -62,6 +63,18 @@ PUSH_OPTION = [
     "mds-list-item:has-text('Confirm using our mobile app')",
     ":text('Confirm using our mobile app')",
 ]
+# After the push option, a page with a Next button sends the push. Like the site's other
+# buttons, it's an mds-button whose shadow root holds the button, its label, and a hidden
+# copy of the label for screen readers, so the button's own text isn't just "Next"
+NEXT_BUTTON = [
+    "button:has(.button__label:text-is('Next'))",
+    "#next-content button",
+    "#next-button button",
+    "mds-button:has-text('Next') button",
+    "button:text-is('Next')",
+    "button:has-text('Next')",
+    "[role='button']:has-text('Next')",
+]
 # Lowercase. Words that show the chooser is up, so a missing push option is an error
 CHOOSER_TEXT = ["choose a confirmation method", "confirmation method"]
 DASHBOARD_MARK = "dashboard"  # in the address once signed in
@@ -85,7 +98,7 @@ class Timeouts:
 
     field: int = 20_000  # the sign-in form appearing
     after_submit: int = 45_000  # the page moving on after the password
-    choice: int = 10_000  # the verification chooser's push option, and it going away
+    choice: int = 10_000  # each verification control appearing, then going away
     verify: int = 300_000  # approving on the phone; leave room in the job's time limit
     dashboard: int = 30_000  # the dashboard finishing its load
     sign_out: int = 20_000
@@ -164,8 +177,24 @@ def _wait_after_submit(page: Page, t: Timeouts) -> bool:
         page.wait_for_timeout(t.poll)
 
 
-def _choose_push(page: Page, t: Timeouts) -> None:
-    """On the chooser, pick the push to the phone app. A page without one already sent it."""
+def _click_away(page: Page, control, what: str, t: Timeouts) -> None:
+    """Click a control and check it went away, escalating only if it didn't."""
+    def gone() -> bool:
+        try:
+            control.wait_for(state="hidden", timeout=t.choice)
+        except PwError:  # includes a timeout
+            return on_dashboard(page.url)
+        return True
+
+    if click_until(control, gone, what) is None:
+        raise LoginError(f"the verification page didn't move on after clicking {what}")
+
+
+def _choose_push(page: Page, t: Timeouts, observer: Observer) -> None:
+    """On the chooser, pick the push to the phone app, then Next to send it.
+
+    A page without the chooser already sent the push.
+    """
     option, selector = find_first(_scopes(page), PUSH_OPTION, t.choice)
     if option is None:
         text = visible_text(page).lower()
@@ -174,16 +203,13 @@ def _choose_push(page: Page, t: Timeouts) -> None:
         log.info("sign-in: no verification chooser; the site sent the push itself")
         return
     log.info("sign-in: choosing the push to the phone app (%s)", selector)
-
-    def chosen() -> bool:
-        try:
-            option.wait_for(state="hidden", timeout=t.choice)
-        except PwError:  # includes a timeout
-            return on_dashboard(page.url)
-        return True
-
-    if click_until(option, chosen, "Confirm using our mobile app") is None:
-        raise LoginError("the verification page didn't move on after choosing the push")
+    _click_away(page, option, "Confirm using our mobile app", t)
+    observer("next")
+    button, selector = find_first(_scopes(page), NEXT_BUTTON, t.choice)
+    if button is None:
+        raise LoginError("no Next button appeared after choosing the push")
+    log.info("sign-in: sending the push (%s)", selector)
+    _click_away(page, button, "Next", t)
 
 
 def _wait_for_verify(page: Page, t: Timeouts, on_verify: OnVerify) -> None:
@@ -221,7 +247,7 @@ def sign_in(page: Page, site: Site, credential: Credential, timeouts: Timeouts |
         _required(page, SIGN_IN_BUTTON, "Sign in button", t.field).click()
         if not _wait_after_submit(page, t):
             observer("verify")  # the chooser, if the site shows one
-            _choose_push(page, t)
+            _choose_push(page, t, observer)
             observer("push")
             _wait_for_verify(page, t, on_verify or (lambda: None))
     _settle(page, t)
