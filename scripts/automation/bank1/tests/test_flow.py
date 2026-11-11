@@ -39,8 +39,8 @@ USER = "fake-user"
 PASSWORD = "made-up-password"
 CRED = Credential(USER, PASSWORD)
 HEADED = bool(os.environ.get("AUTOMATION_TEST_HEADED"))
-FAST = Timeouts(field=2_000, after_submit=3_000, verify=2_000, dashboard=1_000, sign_out=1_500,
-                poll=100)
+FAST = Timeouts(field=2_000, after_submit=3_000, choice=1_500, verify=2_000, dashboard=1_000,
+                sign_out=1_500, poll=100)
 
 # id: (kind, page name, suffix, rows as (date shown, file on the PDF server))
 ACCOUNTS = {
@@ -180,7 +180,7 @@ class FakeBank:
 
     def __init__(self, signed_in=False, verify=False, approve=False, reject=False,
                  challenge=False, sign_out_works=True, expired=(), show=None,
-                 no_format_choice=False):
+                 no_format_choice=False, chooser="push"):
         self.signed_in = signed_in
         self.verify = verify  # the site asks to verify the device
         self.approve = approve  # the person approves it on the phone
@@ -190,6 +190,11 @@ class FakeBank:
         self.expired = set(expired)  # account ids whose links now go to the dashboard
         self.show = show or {}  # account id: the name its page shows instead
         self.no_format_choice = no_format_choice
+        # The verification page: "push" shows the real chooser, "other" a chooser without the
+        # push option, None skips the chooser because the site sent the push itself
+        self.chooser = chooser
+        self.pushes = 0
+        self.app_sign_ins = 0
         self.logins = []
         self.paths = []
         self.server = None
@@ -236,12 +241,13 @@ class FakeBank:
             return self._html(route, LOGON_FRAME.replace("__CHALLENGE__",
                                                          CHALLENGE if self.challenge else ""))
         if path == VERIFY:
-            approve = f"<script>setTimeout(() => location = '{DASHBOARD}', 700)</script>"
-            if self.approve:
-                self.signed_in = True
-            return self._html(route, "<h1>Let's make sure it's you</h1><p>We sent a "
-                              "notification to your mobile app.</p>"
-                              + (approve if self.approve else ""))
+            return self._html(route, self._chooser() if self.chooser else self._sent())
+        if path == VERIFY + "/push":
+            self.pushes += 1
+            return self._html(route, self._sent())
+        if path == VERIFY + "/app":
+            self.app_sign_ins += 1
+            return self._html(route, "<h1>Open our mobile app</h1>")
         if path.startswith("/web/"):
             if not self.signed_in:
                 return self._go(route, LOGIN)
@@ -252,6 +258,26 @@ class FakeBank:
                 return self._go(route, DASHBOARD)
             return self._html(route, f"{self._sign_out_button()}<h1>Accounts</h1>")
         return self._html(route, "<h1>Other</h1>")
+
+    def _sent(self):
+        approve = f"<script>setTimeout(() => location = '{DASHBOARD}', 700)</script>"
+        if self.approve:
+            self.signed_in = True
+        return ("<h1>Let's make sure it's you</h1><p>We sent a notification to your mobile "
+                "app.</p>" + (approve if self.approve else ""))
+
+    def _chooser(self):
+        push = ("Confirm using our mobile app" if self.chooser == "push"
+                else "Get a text message")
+        # Hidden copies first, as on the real site; the options are list items in shadow DOM
+        return ("<h1>Let's make sure it's you</h1><p>For your security, we need to confirm "
+                "your identity. Choose a confirmation method to continue.</p>"
+                f"<a style='display:none' href='{VERIFY}/push'>{push}</a>"
+                f"<mds-list-item><a href='{VERIFY}/push'><b>{push}</b>"
+                "<span>We'll send a push notification to your device.</span></a></mds-list-item>"
+                f"<mds-list-item><a href='{VERIFY}/app'><b>Sign into our mobile app</b>"
+                "<span>Open our mobile app on your device.</span></a></mds-list-item>"
+                "<a href='#'>Need help? Call us</a>")
 
     def _api_login(self, route, fields):
         self.logins.append(fields)
@@ -344,10 +370,29 @@ def test_a_visible_challenge_fails_without_sending_anything(open_site):
 
 def test_verification_notifies_once_and_continues_when_approved(open_site):
     asked = []
-    page = open_site(FakeBank(verify=True, approve=True))
+    site = FakeBank(verify=True, approve=True)
+    page = open_site(site)
+    sign_in(page, SITE, CRED, FAST, on_verify=lambda: asked.append(1))
+    assert asked == [1]
+    assert (site.pushes, site.app_sign_ins) == (1, 0)
+    assert urlsplit(page.url).path == DASHBOARD
+
+
+def test_verification_without_a_chooser_just_waits(open_site):
+    asked = []
+    page = open_site(FakeBank(verify=True, approve=True, chooser=None))
     sign_in(page, SITE, CRED, FAST, on_verify=lambda: asked.append(1))
     assert asked == [1]
     assert urlsplit(page.url).path == DASHBOARD
+
+
+def test_a_chooser_without_the_push_option_fails_without_choosing(open_site):
+    site = FakeBank(verify=True, approve=True, chooser="other")
+    asked = []
+    with pytest.raises(LoginError, match="no 'Confirm using our mobile app' option"):
+        sign_in(open_site(site), SITE, CRED, FAST, on_verify=lambda: asked.append(1))
+    assert asked == []
+    assert (site.pushes, site.app_sign_ins) == (0, 0)
 
 
 def test_verification_times_out_after_notifying(open_site):
@@ -506,7 +551,9 @@ def test_a_second_run_overwrites_the_first(whole_run, pdf_of):
 
 
 def test_verification_sends_a_push_and_the_run_continues_once_approved(whole_run):
-    assert whole_run.start(FakeBank(verify=True, approve=True)) == 0
+    site = FakeBank(verify=True, approve=True)
+    assert whole_run.start(site) == 0
+    assert (site.pushes, site.app_sign_ins) == (1, 0)
     assert whole_run.notes[0] == {"title": "bank1-statements",
                                   "message": "Approve the sign-in on your phone"}
     assert _saved(whole_run.data) == EVERY_FILE

@@ -7,7 +7,9 @@ candidates searched in the iframe and then the page.
 After the password, the site may ask to verify the device with a push to its phone app.
 That's only taken as the prompt when its words are on screen on two checks in a row with
 the sign-in form gone, and never once the dashboard has loaded. Words alone gave a false
-alarm before. The run then sends a push and waits for the dashboard, up to a limit.
+alarm before. The site may first offer a choice of how to confirm: the run always picks
+the push to the phone app, never signing in to the app. It then sends its own notification
+and waits for the dashboard, up to a limit.
 
 Nothing here is ever retried: a username and password are sent at most once per run, so
 a wrong password can't lock the login.
@@ -46,6 +48,17 @@ BOT_CHECK = [
 VERIFY_TEXT = ["confirm your identity", "verify your identity", "we don't recognize",
                "we don’t recognize", "let's make sure it's you", "let’s make sure it’s you",
                "get a code", "mobile app"]
+# The verification chooser's push option. Never the "Sign into our mobile app" one
+PUSH_OPTION = [
+    "button:has-text('Confirm using our mobile app')",
+    "a:has-text('Confirm using our mobile app')",
+    "[role='button']:has-text('Confirm using our mobile app')",
+    "[role='link']:has-text('Confirm using our mobile app')",
+    "mds-list-item:has-text('Confirm using our mobile app')",
+    ":text('Confirm using our mobile app')",
+]
+# Lowercase. Words that show the chooser is up, so a missing push option is an error
+CHOOSER_TEXT = ["choose a confirmation method", "confirmation method"]
 DASHBOARD_MARK = "dashboard"  # in the address once signed in
 
 
@@ -67,6 +80,7 @@ class Timeouts:
 
     field: int = 20_000  # the sign-in form appearing
     after_submit: int = 45_000  # the page moving on after the password
+    choice: int = 10_000  # the verification chooser's push option, and it going away
     verify: int = 300_000  # approving on the phone; leave room in the job's time limit
     dashboard: int = 30_000  # the dashboard finishing its load
     sign_out: int = 20_000
@@ -145,6 +159,28 @@ def _wait_after_submit(page: Page, t: Timeouts) -> bool:
         page.wait_for_timeout(t.poll)
 
 
+def _choose_push(page: Page, t: Timeouts) -> None:
+    """On the chooser, pick the push to the phone app. A page without one already sent it."""
+    option, selector = find_first(_scopes(page), PUSH_OPTION, t.choice)
+    if option is None:
+        text = visible_text(page).lower()
+        if any(words in text for words in CHOOSER_TEXT):
+            raise LoginError("the verification page has no 'Confirm using our mobile app' option")
+        log.info("sign-in: no verification chooser; the site sent the push itself")
+        return
+    log.info("sign-in: choosing the push to the phone app (%s)", selector)
+
+    def chosen() -> bool:
+        try:
+            option.wait_for(state="hidden", timeout=t.choice)
+        except PwError:  # includes a timeout
+            return on_dashboard(page.url)
+        return True
+
+    if click_until(option, chosen, "Confirm using our mobile app") is None:
+        raise LoginError("the verification page didn't move on after choosing the push")
+
+
 def _wait_for_verify(page: Page, t: Timeouts, on_verify: OnVerify) -> None:
     seconds = t.verify // 1000
     log.warning("sign-in: the site wants to verify this device; waiting up to %d seconds",
@@ -179,7 +215,9 @@ def sign_in(page: Page, site: Site, credential: Credential, timeouts: Timeouts |
         _required(page, PASSWORD_FIELD, "password field", t.field).fill(credential.password)
         _required(page, SIGN_IN_BUTTON, "Sign in button", t.field).click()
         if not _wait_after_submit(page, t):
-            observer("verify")
+            observer("verify")  # the chooser, if the site shows one
+            _choose_push(page, t)
+            observer("push")
             _wait_for_verify(page, t, on_verify or (lambda: None))
     _settle(page, t)
     observer("dashboard")
