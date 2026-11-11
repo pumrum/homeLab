@@ -121,8 +121,10 @@ Share the spreadsheet with the service account as an Editor. In
 `gl_` values to each `[[entities]]` block. To test, point `spreadsheet_id` at a copy of the sheet
 with the same tab names.
 
-Exporting, cleaning, and writing to a test copy of the sheet have run on the real site, started
-by hand. **Not yet run:** the job through the agent, and a tab or sheet write failing.
+Exporting, cleaning, and writing the master have run on the real site and the real sheet, both
+by hand and started by the agent on the robot. So have turning on an entity's `gl_write_tab`, and
+the sheet check stopping a run on a deleted spreadsheet before it signed in. **Not yet run:** a
+write failing partway, which can't be forced safely.
 
 ## buildium-statements
 
