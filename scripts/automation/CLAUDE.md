@@ -115,7 +115,7 @@ Use these from `automation_common` instead of writing your own:
 | `config` | `process_dir`, TOML loading, and validation helpers |
 | `secrets` | Credential Manager entries and encrypted secret files |
 | `browser` | `launch_edge`, `find_first`, `click_until`, `type_date`, `capture_pdf`, tracing, and failure evidence |
-| `sheets` | `open_worksheet`: read a Google Sheet tab, append rows, or replace a column from a cell down |
+| `sheets` | `open_worksheet`: read a Google Sheet tab, append rows, or replace a column or a typed block from a cell down |
 | `notify` | The webhook POST (`Run` calls it for you), and the `[notifications]` templates |
 
 ## Workspace and packaging

@@ -1,13 +1,17 @@
+import datetime as dt
 import json
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
 
 from automation_common.secrets import SecretMasker
 from automation_common.sheets import (
+    Formula,
     GoogleWorksheet,
     SheetError,
     _api_error,
+    block_requests,
     load_service_account,
     open_worksheet,
     replace_requests,
@@ -92,7 +96,8 @@ class _FakeSpreadsheet:
 
 
 def _worksheet(spreadsheet, row_count=10):
-    return GoogleWorksheet(SimpleNamespace(id=7, row_count=row_count, spreadsheet=spreadsheet))
+    return GoogleWorksheet(SimpleNamespace(id=7, row_count=row_count, col_count=26,
+                                           spreadsheet=spreadsheet))
 
 
 def test_replace_from_cell_sends_one_request_however_many_lines():
@@ -118,6 +123,118 @@ def test_replace_failure_reports_only_the_status(monkeypatch):
     monkeypatch.setattr("automation_common.sheets.gspread.exceptions.APIError", FakeApiError)
     with pytest.raises(SheetError, match="error 500 writing to the sheet"):
         _worksheet(_FakeSpreadsheet(FakeApiError("id made-up"))).replace_from_cell("A1", ["x"])
+
+
+def _block(row_count=100, col_count=26, cell="B5", rows=(("x", 1),), **options):
+    return block_requests(7, row_count, col_count, cell, list(rows), **options)
+
+
+def test_a_block_covers_from_the_start_cell_right_to_the_edge_and_down():
+    writes, row_count, col_count = _block()
+    update, clear = writes[0]
+    assert update["updateCells"]["range"] == {
+        "sheetId": 7, "startRowIndex": 4, "endRowIndex": 5,
+        "startColumnIndex": 1, "endColumnIndex": 26}
+    assert clear["updateCells"]["range"] == {
+        "sheetId": 7, "startRowIndex": 5, "endRowIndex": 100,
+        "startColumnIndex": 1, "endColumnIndex": 26}
+    assert "rows" not in clear["updateCells"]
+    assert (row_count, col_count) == (100, 26)
+
+
+def test_block_values_keep_their_types_and_text_stays_literal():
+    day = dt.date(2026, 3, 15)
+    rows = [["=1+1", "", None, 12, Decimal("-1250.50"), 1.5, day, True, False]]
+    cells = _block(rows=rows)[0][0][0]["updateCells"]["rows"][0]["values"]
+    assert cells == [
+        {"userEnteredValue": {"stringValue": "=1+1"}},
+        {},
+        {},
+        {"userEnteredValue": {"numberValue": 12}},
+        {"userEnteredValue": {"numberValue": -1250.5}},
+        {"userEnteredValue": {"numberValue": 1.5}},
+        {"userEnteredValue": {"numberValue": 46096}},  # what Sheets calls that date
+        {"userEnteredValue": {"boolValue": True}},
+        {"userEnteredValue": {"boolValue": False}},
+    ]
+
+
+def test_only_a_formula_cell_is_written_as_a_formula():
+    cells = _block(rows=[[Formula("=1+1"), "=1+1"]])[0][0][0]["updateCells"]["rows"][0]["values"]
+    assert cells == [
+        {"userEnteredValue": {"formulaValue": "=1+1"}},
+        {"userEnteredValue": {"stringValue": "=1+1"}},
+    ]
+
+
+def test_block_date_columns_change_only_the_number_format_of_written_rows():
+    writes, _, _ = _block(rows=[["a", dt.date(2026, 1, 1)]] * 3, date_columns={1: "m/d/yyyy"})
+    fmt = writes[-1][1]["repeatCell"]
+    assert fmt["fields"] == "userEnteredFormat.numberFormat"
+    assert fmt["cell"]["userEnteredFormat"]["numberFormat"]["pattern"] == "m/d/yyyy"
+    assert fmt["range"] == {"sheetId": 7, "startRowIndex": 4, "endRowIndex": 7,
+                            "startColumnIndex": 2, "endColumnIndex": 3}
+
+
+def test_a_trimmed_block_deletes_the_rows_below_it_and_clears_nothing():
+    writes, row_count, _ = _block(trim=True)
+    assert writes[0][-1] == {"deleteDimension": {"range": {
+        "sheetId": 7, "dimension": "ROWS", "startIndex": 5, "endIndex": 100}}}
+    assert len(writes[0]) == 2
+    assert row_count == 5
+
+
+def test_a_block_that_fills_the_tab_has_nothing_to_clear_or_trim():
+    writes, row_count, _ = _block(row_count=5, trim=True)
+    assert [next(iter(request)) for request in writes[0]] == ["updateCells"]
+    assert row_count == 5
+
+
+def test_a_block_grows_a_tab_that_is_too_small_in_the_first_write():
+    writes, row_count, col_count = _block(row_count=4, col_count=2)
+    assert writes[0][:2] == [
+        {"appendDimension": {"sheetId": 7, "dimension": "COLUMNS", "length": 1}},
+        {"appendDimension": {"sheetId": 7, "dimension": "ROWS", "length": 1}},
+    ]
+    assert (row_count, col_count) == (5, 3)
+
+
+def test_a_big_block_clears_only_in_its_last_write():
+    writes, _, _ = _block(rows=[["x"]] * 5, chunk_rows=2)
+    assert len(writes) == 3
+    assert [len(write) for write in writes] == [1, 1, 2]
+    assert [w[0]["updateCells"]["range"]["startRowIndex"] for w in writes] == [4, 6, 8]
+    assert writes[2][1]["updateCells"]["range"]["startRowIndex"] == 9
+
+
+def test_an_empty_block_clears_but_never_deletes_every_row():
+    writes, row_count, _ = _block(rows=[], trim=True)
+    assert [next(iter(request)) for request in writes[0]] == ["updateCells"]
+    assert writes[0][0]["updateCells"]["range"]["startRowIndex"] == 4
+    assert row_count == 100
+
+
+def test_a_block_refuses_a_bad_cell():
+    with pytest.raises(SheetError, match="not a cell"):
+        _block(cell="not-a-cell")
+
+
+def test_replace_block_sends_each_write_and_remembers_the_new_size():
+    book = _FakeSpreadsheet()
+    ws = _worksheet(book, row_count=100)
+    ws.replace_block("A2", [["x"]] * 3, trim=True)
+    ws.replace_block("A2", [["x"]] * 3, trim=True)
+    assert len(book.bodies) == 2
+    assert [next(iter(request)) for request in book.bodies[1]["requests"]] == ["updateCells"]
+
+
+def test_replace_block_failure_reports_only_the_status(monkeypatch):
+    class FakeApiError(Exception):
+        response = SimpleNamespace(status_code=500)
+
+    monkeypatch.setattr("automation_common.sheets.gspread.exceptions.APIError", FakeApiError)
+    with pytest.raises(SheetError, match="error 500 writing to the sheet"):
+        _worksheet(_FakeSpreadsheet(FakeApiError("id made-up"))).replace_block("A1", [["x"]])
 
 
 def test_spreadsheet_id_is_masked_even_when_opening_fails():

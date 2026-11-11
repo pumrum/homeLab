@@ -1,6 +1,11 @@
-"""Synthetic statements: made-up values in the same layout as the site's real PDFs."""
+"""Synthetic statements and ledger exports: made-up values in the real files' layouts."""
+
+import csv
+import io
 
 import pytest
+
+from buildium_portal.gl_parse import EXPECTED_COLUMNS
 
 STATEMENT_PAGE = """{owner}
 100 Example Street
@@ -61,6 +66,35 @@ def make_pdf(text: str) -> bytes:
     pdf += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
         len(objects) + 1, xref)
     return bytes(pdf)
+
+
+GL_ROWS = [
+    {"Id": "1002", "PostingId": "5002", "EntryDate": "03/15/2026", "Amount": "-1,250.50",
+     "JournalMemo": "FakeMemo Rent", "PayeeName": "FakeTenant Person", "UnitNumber": "Upper",
+     "GLAccountName": "Rent Income", "GLAccountTypeName": "Income",
+     "JournalCodeDescription": "Charge", "GLAccountNameRaw": "Rent Income"},
+    {"Id": "1003", "PostingId": "5003", "EntryDate": "03/16/2026", "Amount": "1250.50",
+     "JournalMemo": "FakeMemo two\nlines", "GLAccountName": "Operating Cash",
+     "GLAccountTypeName": "Asset", "JournalCodeDescription": "Check",
+     "GLAccountNameRaw": "Operating Cash"},
+    {"Id": "", "PostingId": "", "JournalMemo": "FakeSubtotal line", "Amount": "0.00"},
+]
+
+
+def gl_csv(rows=None, bom=True, columns=EXPECTED_COLUMNS) -> bytes:
+    """A synthetic general ledger export, with Windows line endings."""
+    out = io.StringIO(newline="")
+    writer = csv.writer(out, lineterminator="\r\n")
+    writer.writerow(columns)
+    for row in GL_ROWS if rows is None else rows:
+        writer.writerow([row.get(column, "") for column in columns])
+    return (b"\xef\xbb\xbf" if bom else b"") + out.getvalue().encode("utf-8")
+
+
+@pytest.fixture
+def gl_csv_of():
+    """Make a synthetic export: gl_csv_of(rows=[{...}], bom=..., columns=...)."""
+    return gl_csv
 
 
 @pytest.fixture

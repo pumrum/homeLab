@@ -8,6 +8,121 @@ The site's address, the entity names, and their abbreviations are only in the pr
 | Command | What it does |
 | --- | --- |
 | `buildium-statements` | Downloads each entity's rental owner statement for the last period |
+| `buildium-gl` | Exports each entity's general ledger, cleans it, and replaces it in a Google Sheet |
+
+The commands run separately, each with its own job and schedule. They share a browser profile,
+but the agent runs one job at a time, so scheduled runs can't collide. Don't start one by hand
+while the other is running.
+
+## buildium-gl
+
+For each entity in the config, one at a time, a run signs in, opens the General Ledger report, sets
+a custom date range from 1/1/1999 to today, exports **Cash** and then **Accrual** as CSV, signs
+out, and cleans both exports. Only once every entity has worked does it write to the sheet.
+
+```powershell
+uv run buildium-gl                    # normal run: every entity, then write the sheet
+uv run buildium-gl --entity entity1   # only one entity; writes nothing
+uv run buildium-gl --dump             # every entity, plus page copies and profiles; writes nothing
+```
+
+### What it writes
+
+Each tab is a full snapshot, replaced every run.
+
+| Tab | Rows | Before writing |
+| --- | --- | --- |
+| Each entity's tab, from `gl_start_cell`, only when its `gl_write_tab` is `true` | The Cash view: 15 columns, with the rules below | Clears from `gl_start_cell` to the tab's right edge and bottom |
+| The master tab, from `A2` | Every entity, Cash and Accrual: 56 columns | Clears everything below row 1, then deletes spare rows so the tab shrinks with its data |
+
+Entity tabs are off by default, because the sheet builds each entity's rows from the master with
+formulas. A run still builds each entity's Cash view and reports its counts. To have a run write
+one entity's tab again, for example while its formulas are broken, add `gl_write_tab = true` to
+that entity's block, without quotes. Each entity's `gl_tab` and `gl_start_cell` are still
+required and checked, so turning a tab on needs nothing else.
+
+The master's columns are `Entity`, `Method`, the export's 53, and `EntryDate_YM`. Its row 1 is
+yours and is never touched.
+
+| Column | Written as |
+| --- | --- |
+| `Amount` | A number |
+| `EntryDate` | A date, shown as `yyyy-mm-dd` |
+| `EntryDate_YM` | The formula `=LEFT(INDEX(F:F, ROW()), 7)`, which reads `EntryDate` in column F |
+| `EFTResultDate` | A date, shown as `m/d/yyyy` |
+| Any other value that's a plain number, in any column | A number |
+| `True` and `False`, in any column | `TRUE` and `FALSE`, as real true or false values |
+| Everything else | Literal text, exactly as exported, so a memo starting with `=` can't run |
+
+This matches paste values, except where a paste would change the value: `007` and numbers over 15
+digits stay text. Sheets marks text that looks like a number or date with a leading `'` in the
+formula bar. The `'` isn't part of the value.
+
+### How rows are cleaned
+
+Both methods:
+
+1. The columns must be the expected 53 in order, ignoring case. A change fails with the names of
+   what's missing and added.
+2. Rows with no `Id` are report lines and are dropped, but one that isn't zero fails the run,
+   because dropping it would change the totals.
+3. Each entry in an entity's `gl_unit_fixes` sets the unit number on one lease's rows before its
+   date.
+4. Rows sort by `EntryDate`, `Id`, `PostingId`, `GLAccountNameRaw` descending, then `UnitNumber`.
+   `Id` and `PostingId` sort as numbers.
+
+The Cash view, in this order. The rules are in `gl_rules.py`, and they ignore case and outer spaces
+because the export really has labels like `Check` with a trailing space:
+
+1. A `Deposit Transfer` row with a payee becomes type `Equity`.
+2. Every amount's sign flips.
+3. Rows are removed by these rules, with the counts in `report.txt`:
+
+| Rule | Removes rows where |
+| --- | --- |
+| Asset | `GLAccountTypeName` is `Asset` |
+| Convenience fee | `GLAccountNameRaw` is `Convenience Fee` |
+| Applied deposit | `JournalCodeDescription` is `Applied Deposit` |
+| Deposit refund | `JournalCodeDescription` is `Refund` and `GLAccountTypeName` isn't `Income` |
+| Owner draw by check | `GLAccountName` is `Owner Draw` and `JournalCodeDescription` is `Check` |
+| Opening balance equity | `GLAccountName` is `Opening Balance Equity` |
+| Opening security credits | `GLAccountTypeName` is `Liability` and `JournalCodeDescription` is `Credit` |
+
+### What a run does when something's wrong
+
+The sheet needs every entity, so unlike `buildium-statements`, the first failure stops the run. It's
+a deliberate exception to the usual rule of carrying on with the next item.
+
+| Situation | Result |
+| --- | --- |
+| The spreadsheet or a tab it will write can't be opened, such as a wrong or deleted `spreadsheet_id` | Checked before the browser starts, so the run stops without signing in or exporting. `FAIL`. Skipped by `--dump` and `--entity`, which never write |
+| Any entity's sign-in, export, or cleaning fails | The run stops and writes nothing. `FAIL` |
+| Sign-out fails, even after the last entity | The run stops and writes nothing. `FAIL` |
+| Two entities' exports share an entry | Writes nothing. `FAIL`. All entities share one browser, so one may be another's data |
+| The same `Id` and `PostingId` appear twice in an export | Kept, and counted in `report.txt` |
+| A tab is gone by the time the run writes | Writes nothing to any tab. `FAIL` |
+| The sheet is shared as Viewer, not Editor | It opens, so the check passes, and the run fails when it writes. `FAIL` |
+| One tab's write fails | The other tabs are still written, and `report.txt` names the one that failed. `FAIL` |
+| The master's write fails partway | It holds new rows above old ones, with nothing cleared yet, until the next good run. `FAIL` |
+
+### What each run folder holds
+
+| File | Holds | Safe to share? |
+| --- | --- | --- |
+| `report.txt`, `run.log` | Results, with each export's size and time, and row counts | Yes |
+| `gl_profile_<key>_<method>.txt` | `--dump` only: the export's structure, with values reduced to shapes such as `-9,999.99` | Yes |
+| `downloads\<key>_<method>.csv` | The raw export, kept for good | No, it holds real data |
+| `dump_<key>_<step>_page.txt`, `.png`, `.html` | `--dump` only: the page at each step | No, it holds real names and addresses |
+
+### Set it up
+
+Share the spreadsheet with the service account as an Editor. In
+`C:\automation\buildium\config.toml`, add the `[gl]` section from `config.example.toml`, and the
+`gl_` values to each `[[entities]]` block. To test, point `spreadsheet_id` at a copy of the sheet
+with the same tab names.
+
+Exporting, cleaning, and writing to a test copy of the sheet have run on the real site, started
+by hand. **Not yet run:** the job through the agent, and a tab or sheet write failing.
 
 ## buildium-statements
 
@@ -75,9 +190,14 @@ Allow enough time in the agent's limit, which stops a job instantly and with no 
 entity can wait 5 minutes, plus a minute or two for its work.
 
 Sign-in, MFA, sign-out, the statement menus, and saving have all run on the real site,
-unattended. MFA timing out and a failed sign-out haven't, and there's no plan to force them, so
-expect a possible fix if one ever happens. The code doesn't know the MFA page's structure, so
-anything that isn't the form or the app counts as MFA.
+unattended. MFA timing out hasn't, and there's no plan to force it, so expect a possible fix if
+it ever happens. The code doesn't know the MFA page's structure, so anything that isn't the form
+or the app counts as MFA.
+
+The Account button's tooltip was seen covering `Sign out` when one sign-out timed out. Sign-out
+now moves the mouse to the item first, then uses `click_until`, and `run.log` says which way the
+click worked: `sign-out: signed out (Sign out via click)`, for example. **Not yet run:** the
+forced and keyboard fallbacks, which only run if the normal click fails.
 
 ## Set up each machine
 
@@ -137,7 +257,14 @@ wait for MFA, so raise it if you add more:
 name = "buildium-statements"
 command = "buildium-statements"
 timeout_minutes = 30
+
+[[jobs]]
+name = "buildium-gl"
+command = "buildium-gl"
+timeout_minutes = 45
 ```
+
+`buildium-gl`'s limit allows four MFA waits, one stalled export, and the sheet writes.
 
 ## Add another command
 
