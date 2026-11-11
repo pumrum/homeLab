@@ -41,6 +41,30 @@ def _targets(gl: Gl, views: dict[str, SheetRows], master: SheetRows) -> list[_Ta
     return targets
 
 
+def tabs_to_write(gl: Gl) -> list[tuple[str, str]]:
+    """The name and tab of everything a run writes: each entity that's on, then the master."""
+    return ([(key, entity.tab) for key, entity in gl.entities.items() if entity.write_tab]
+            + [("master", gl.master_tab)])
+
+
+def check_sheet(run: Run, gl: Gl, open_ws: OpenWorksheet) -> bool:
+    """Open every tab a run will write, before anything slow starts. False if one won't open.
+
+    Opening only reads, so it catches a wrong or deleted spreadsheet, a missing tab, or a sheet
+    that isn't shared. A sheet shared as Viewer opens, and fails only when it's written.
+    """
+    tabs = tabs_to_write(gl)
+    for name, tab in tabs:
+        try:
+            open_ws(gl.spreadsheet_id, tab, run.masker)
+        except Exception as e:  # noqa: BLE001 - recorded, and the run stops before the site
+            run.summary.record("sheet check", name, Status.FAILED,
+                               f"not started, so nothing was exported: {why(e)}")
+            return False
+    run.summary.record("sheet check", "all tabs", Status.OK, f"opened {len(tabs)} tab(s)")
+    return True
+
+
 def sheet_stage(run: Run, gl: Gl, views: dict[str, SheetRows], master: SheetRows,
                 open_ws: OpenWorksheet) -> None:
     """Replace the master, and the rows of each entity whose gl_write_tab is on.

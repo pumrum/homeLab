@@ -19,6 +19,7 @@ from playwright.sync_api import Error as PwError
 from playwright.sync_api import sync_playwright
 
 from automation_common.secrets import Credential
+from automation_common.sheets import SheetError
 from buildium_portal import capture as capture_module
 from buildium_portal import gl_fetch, gl_main, session, statements_fetch
 from buildium_portal import login as login_module
@@ -721,11 +722,14 @@ def _gl_run(whole_run, site, gl_csv_of, *args, files=None):
 class FakeBook:
     """Stands in for the spreadsheet, and keeps every write by tab."""
 
-    def __init__(self):
+    def __init__(self, missing_tab=None):
         self.writes = {}
+        self.missing_tab = missing_tab
 
     def open(self, spreadsheet_id, tab, masker):
         masker.add(spreadsheet_id)  # what open_worksheet does
+        if tab == self.missing_tab:
+            raise SheetError("spreadsheet not found")
         book = self
 
         class Tab:
@@ -744,6 +748,25 @@ def _gl_write_run(whole_run, site, gl_csv_of, *args, files=None, book=None):
         return gl_main.main(argv, open_ws=book.open, **options)
 
     return whole_run.start(site, *args, files=files, command=command), book
+
+
+def test_a_sheet_that_wont_open_stops_the_run_before_the_site(whole_run, gl_csv_of):
+    site = FakeSite()
+    code, book = _gl_write_run(whole_run, site, gl_csv_of, book=FakeBook("FakeMasterTab"))
+    assert code == 1
+    assert site.logins == []  # nothing was signed in to or exported
+    assert book.writes == {}
+    report = _report(whole_run.data)
+    assert "FAILED    sheet check: master" in report
+    assert "not started, so nothing was exported" in report
+
+
+def test_a_run_that_doesnt_write_skips_the_sheet_check(whole_run, gl_csv_of):
+    site = FakeSite()
+    code, _ = _gl_write_run(whole_run, site, gl_csv_of, "--entity", "entity1",
+                            book=FakeBook("FakeMasterTab"))
+    assert code == 0
+    assert "sheet check" not in _report(whole_run.data)
 
 
 def test_the_report_address_comes_from_the_sign_in_host():

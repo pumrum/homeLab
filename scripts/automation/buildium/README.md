@@ -95,11 +95,13 @@ a deliberate exception to the usual rule of carrying on with the next item.
 
 | Situation | Result |
 | --- | --- |
+| The spreadsheet or a tab it will write can't be opened, such as a wrong or deleted `spreadsheet_id` | Checked before the browser starts, so the run stops without signing in or exporting. `FAIL`. Skipped by `--dump` and `--entity`, which never write |
 | Any entity's sign-in, export, or cleaning fails | The run stops and writes nothing. `FAIL` |
 | Sign-out fails, even after the last entity | The run stops and writes nothing. `FAIL` |
 | Two entities' exports share an entry | Writes nothing. `FAIL`. All entities share one browser, so one may be another's data |
 | The same `Id` and `PostingId` appear twice in an export | Kept, and counted in `report.txt` |
-| A tab doesn't exist | Writes nothing to any tab. `FAIL` |
+| A tab is gone by the time the run writes | Writes nothing to any tab. `FAIL` |
+| The sheet is shared as Viewer, not Editor | It opens, so the check passes, and the run fails when it writes. `FAIL` |
 | One tab's write fails | The other tabs are still written, and `report.txt` names the one that failed. `FAIL` |
 | The master's write fails partway | It holds new rows above old ones, with nothing cleared yet, until the next good run. `FAIL` |
 

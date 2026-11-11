@@ -38,7 +38,7 @@ from buildium_portal.gl_parse import (
 )
 from buildium_portal.gl_profile import profile
 from buildium_portal.gl_rules import CashView, cash_view
-from buildium_portal.gl_sheet import OpenWorksheet, sheet_stage
+from buildium_portal.gl_sheet import OpenWorksheet, check_sheet, sheet_stage
 from buildium_portal.login import SignOutError
 from buildium_portal.session import open_browser, signed_in_page
 from buildium_portal.stages import chosen_entities, dump_observer, final_event, why
@@ -237,9 +237,11 @@ def main(argv: list[str] | None = None, *, notifier: Notifier = send_notificatio
         cfg = load_stage(run, data_dir)
         if cfg is not None:
             entities = chosen_entities(run, cfg, args.entity)
-            if entities:
+            # Only a run that writes needs the sheet, and it's checked before the slow part
+            write = not (args.dump or args.entity)
+            if entities and (not write or check_sheet(run, cfg.gl, open_ws)):
                 results = browser_stage(run, cfg, entities, today or dt.date.today(), data_dir,
                                         args.dump)
                 check_entities_differ(run, results)
-                write_stage(run, cfg, results, not (args.dump or args.entity), open_ws)
+                write_stage(run, cfg, results, write, open_ws)
     return run.exit_code

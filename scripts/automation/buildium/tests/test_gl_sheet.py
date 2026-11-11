@@ -8,7 +8,7 @@ from automation_common.run import Run
 from automation_common.sheets import SheetError
 from buildium_portal.config import Gl, GlEntity
 from buildium_portal.gl_parse import CASH_VIEW_COLUMNS, MASTER_COLUMNS
-from buildium_portal.gl_sheet import sheet_stage
+from buildium_portal.gl_sheet import check_sheet, sheet_stage
 
 GL = Gl("made-up-id", "FakeMaster",
         {"entity1": GlEntity("entity1", "CODE1", "FakeOne", "B5", write_tab=True),
@@ -82,3 +82,21 @@ def test_a_failed_write_doesnt_stop_the_other_tabs_and_is_reported(run):
     assert run.summary.exit_code == 1
     assert "FAILED    sheet: entity1" in run.summary.report_text()
     assert "wrote 2 rows" in run.summary.report_text()
+
+
+def test_the_check_opens_each_tab_that_will_be_written_and_writes_nothing(run):
+    opened = []
+
+    def open_ws(spreadsheet_id, tab, masker):
+        opened.append(tab)
+        return FakeBook().open(spreadsheet_id, tab, masker)
+
+    assert check_sheet(run, ONE_ON, open_ws) is True
+    assert opened == ["FakeOne", "FakeMaster"]  # entity2's tab is off, so it isn't needed
+    assert run.summary.exit_code == 0
+
+
+def test_the_check_fails_on_the_first_tab_that_wont_open(run):
+    assert check_sheet(run, GL, FakeBook(missing_tab="FakeTwo").open) is False
+    assert run.summary.exit_code == 1
+    assert "FAILED    sheet check: entity2" in run.summary.report_text()
