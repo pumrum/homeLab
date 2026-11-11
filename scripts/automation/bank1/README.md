@@ -108,7 +108,8 @@ session. The sign-in selectors and verification words come from that test.
 **Not yet run:**
 
 - Sign-in and verification through this package's code, including clicking **Confirm using our
-  mobile app**: its selectors are candidates built from a screenshot of the chooser
+  mobile app**. The selectors come from a `--dump` outline of the real chooser, but nothing has
+  clicked it on the real site yet
 - Everything on the statements pages: the row selectors, the download links, the Standard and
   Single choices, how each kind delivers its PDF, and whether the page shows the suffix for the
   `match` check. These are lists of candidates until a `--dump` and `--capture` run shows the

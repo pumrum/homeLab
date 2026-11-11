@@ -49,7 +49,12 @@ VERIFY_TEXT = ["confirm your identity", "verify your identity", "we don't recogn
                "we don’t recognize", "let's make sure it's you", "let’s make sure it’s you",
                "get a code", "mobile app"]
 # The verification chooser's push option. Never the "Sign into our mobile app" one
+# On the real page, each option is a list item in mds-list's shadow root. The text is in a
+# label, and the clickable link beside it holds only an arrow icon, named by its aria-label
 PUSH_OPTION = [
+    "#optionsList a[aria-label^='Confirm using our mobile app' i]",
+    "a[aria-label^='Confirm using our mobile app' i]",
+    "li:has(label:text-is('Confirm using our mobile app')) a",
     "button:has-text('Confirm using our mobile app')",
     "a:has-text('Confirm using our mobile app')",
     "[role='button']:has-text('Confirm using our mobile app')",

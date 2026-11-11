@@ -269,15 +269,24 @@ class FakeBank:
     def _chooser(self):
         push = ("Confirm using our mobile app" if self.chooser == "push"
                 else "Get a text message")
-        # Hidden copies first, as on the real site; the options are list items in shadow DOM
+        # As on the real page: each option is a list item in mds-list's shadow root, its text
+        # in a label that does nothing when clicked, beside a link holding only an arrow icon,
+        # named by its aria-label. A hidden mds-list-item holds the same words
+        options = "".join(
+            f"<li><span class='accessible-text' style='position:absolute;clip:rect(0 0 0 0)'>"
+            f", {name}, {about}</span><label>{name}</label><span>{about}</span>"
+            f"<a href='{VERIFY}/{to}' aria-label='{name}. {about}'><span>&gt;</span></a></li>"
+            for name, about, to in [
+                (push, "We will send a push notification to your device.", "push"),
+                ("Sign into our mobile app", "Open our mobile app on your device.", "app"),
+            ])
         return ("<h1>Let's make sure it's you</h1><p>For your security, we need to confirm "
                 "your identity. Choose a confirmation method to continue.</p>"
-                f"<a style='display:none' href='{VERIFY}/push'>{push}</a>"
-                f"<mds-list-item><a href='{VERIFY}/push'><b>{push}</b>"
-                "<span>We'll send a push notification to your device.</span></a></mds-list-item>"
-                f"<mds-list-item><a href='{VERIFY}/app'><b>Sign into our mobile app</b>"
-                "<span>Open our mobile app on your device.</span></a></mds-list-item>"
-                "<a href='#'>Need help? Call us</a>")
+                "<mds-list id='optionsList'></mds-list>"
+                f"<mds-list-item id='inAppSend' hidden>{push}</mds-list-item>"
+                "<a href='#'>Need help? Call us</a>"
+                "<script>document.getElementById('optionsList').attachShadow({mode: 'open'})"
+                f".innerHTML = \"<ul>{options}</ul>\"</script>")
 
     def _api_login(self, route, fields):
         self.logins.append(fields)
