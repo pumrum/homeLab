@@ -1,0 +1,102 @@
+# bank1-portal configuration. Copy to C:\automation\bank1\config.toml and replace the
+# placeholders. Every text value is quoted. The login goes in Credential Manager as
+# bank1/login, never here. The run fails with a clear message until no placeholder is left.
+# Everything below is private: the addresses hold account identifiers, so keep this file
+# out of the repo. Logs and reports only ever show each account's label.
+
+[site]
+login_url = "https://<address of the sign-in page>"
+# The bank's name in saved file names, as in 2026-10-31_<name>_1234.pdf. No "_"
+name_in_files = "<bank name>"
+
+# One block per account. A run saves its newest statements, every account's in one folder, as
+# C:\automation\bank1\data\statements\<YYYY-MM-DD>_<name_in_files>_<suffix>.pdf
+#   label           neutral: in logs and reports. Lowercase letters, digits, or _
+#   kind            "checking", "card", or "investment": which row of the list is its statement
+#   statements_url  the full address of its statements page, opened directly after sign-in
+#   suffix          its last four digits, in quotes. In its file names, so each account's
+#                   must differ. The statement PDF must show a number ending in them
+#   match           optional: text the heading above its statements must show. The suffix
+#                   if left out
+
+[[accounts]]
+label = "entity1_checking"
+kind = "checking"
+statements_url = "https://<address of its statements page>"
+suffix = "<last four digits>"
+
+[[accounts]]
+label = "entity2_checking"
+kind = "checking"
+statements_url = "https://<address of its statements page>"
+suffix = "<last four digits>"
+
+[[accounts]]
+label = "entity3_checking"
+kind = "checking"
+statements_url = "https://<address of its statements page>"
+suffix = "<last four digits>"
+
+[[accounts]]
+label = "entity4_checking"
+kind = "checking"
+statements_url = "https://<address of its statements page>"
+suffix = "<last four digits>"
+
+[[accounts]]
+label = "personal_checking_1"
+kind = "checking"
+statements_url = "https://<address of its statements page>"
+suffix = "<last four digits>"
+
+[[accounts]]
+label = "personal_checking_2"
+kind = "checking"
+statements_url = "https://<address of its statements page>"
+suffix = "<last four digits>"
+
+[[accounts]]
+label = "personal_card_1"
+kind = "card"
+statements_url = "https://<address of its statements page>"
+suffix = "<last four digits>"
+
+[[accounts]]
+label = "personal_card_2"
+kind = "card"
+statements_url = "https://<address of its statements page>"
+suffix = "<last four digits>"
+
+[[accounts]]
+label = "personal_invest_1"
+kind = "investment"
+statements_url = "https://<address of its statements page>"
+suffix = "<last four digits>"
+
+[[accounts]]
+label = "personal_invest_2"
+kind = "investment"
+statements_url = "https://<address of its statements page>"
+suffix = "<last four digits>"
+
+# Optional: the push notifications' words. Leave a block or line out to keep what's shown
+# here. Any of these can go in {braces}: {command}, {process}, {run_id}, {ok}, {unchanged},
+# {failed}, and {total}. Keep them short, since they're read on a watch.
+[notifications.pass]
+title = "{command}"
+message = "PASS"
+
+[notifications.fail]
+title = "{command}"
+message = "FAIL"
+
+# Instead of [notifications.fail], when the device verification wasn't approved in time.
+# Nothing else was tried.
+[notifications.mfa_failed]
+title = "{command}"
+message = "FAIL: verification timed out"
+
+# Sent during the run, when the site asks to verify the device with a push to its app.
+[notifications.mfa_needed]
+title = "{command}"
+message = "Approve the sign-in on your phone"

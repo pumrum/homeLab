@@ -4,7 +4,7 @@
 name = "automation"
 version = "0.0.0"
 requires-python = ">=3.13,<3.14"
-dependencies = ["automation-agent", "automation-common", "buildium-portal", "fidelity-nav", "innago-portal", "invoices-sync"]
+dependencies = ["automation-agent", "automation-common", "bank1-portal", "buildium-portal", "fidelity-nav", "innago-portal", "invoices-sync"]
 
 [dependency-groups]
 dev = [
@@ -17,18 +17,19 @@ dev = [
 package = false
 
 [tool.uv.workspace]
-members = ["agent", "buildium", "common", "fidelity", "innago", "invoices"]
+members = ["agent", "bank1", "buildium", "common", "fidelity", "innago", "invoices"]
 
 [tool.uv.sources]
 automation-agent = { workspace = true }
 automation-common = { workspace = true }
+bank1-portal = { workspace = true }
 buildium-portal = { workspace = true }
 fidelity-nav = { workspace = true }
 innago-portal = { workspace = true }
 invoices-sync = { workspace = true }
 
 [tool.pytest.ini_options]
-testpaths = ["agent/tests", "buildium/tests", "common/tests", "fidelity/tests", "innago/tests", "invoices/tests"]
+testpaths = ["agent/tests", "bank1/tests", "buildium/tests", "common/tests", "fidelity/tests", "innago/tests", "invoices/tests"]
 addopts = "--import-mode=importlib"
 # A hung test fails with a stack trace, instead of holding up CI for hours
 timeout = 120
@@ -42,7 +43,7 @@ target-version = "py313"
 select = ["E", "F", "W", "I", "UP", "B", "T20"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["automation_agent", "automation_common", "buildium_portal", "fidelity_nav", "innago_portal", "invoices_sync"]
+known-first-party = ["automation_agent", "automation_common", "bank1_portal", "buildium_portal", "fidelity_nav", "innago_portal", "invoices_sync"]
 
 [tool.ruff.lint.per-file-ignores]
 # CLI tool for people (print is fine); embeds FakeBank's HTML/JS as long lines
