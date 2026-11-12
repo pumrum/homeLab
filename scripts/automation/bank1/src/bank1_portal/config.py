@@ -1,10 +1,14 @@
 """Load and validate C:\\automation\\bank1\\config.toml.
 
-Everything that identifies an account lives in this private file: its statements address,
-its four-digit suffix, and any text its page is checked for, plus the bank's name as used in
-saved file names. The code, logs, and reports only ever use the neutral label.
+Everything that identifies an account lives in this private file: its statements and activity
+addresses, its four-digit suffix, and any text its pages are checked for, plus the bank's name
+as used in saved file names, and the Google Sheets its activity goes to. The code, logs, and
+reports only ever use the neutral label.
+
+Every command in this package reads the whole file, so a mistake anywhere in it stops them all.
 """
 
+import datetime as dt
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -26,6 +30,9 @@ _LABEL = re.compile(r"^[a-z0-9_]+$")  # goes in logs, reports, and run file name
 _SUFFIX = re.compile(r"^[0-9]{4}$")
 _PLACEHOLDERS = ("<", ">")  # not "...": a page may show an account as ...1234
 _FILE_NAME_PART = re.compile(r'^[^\\/:*?"<>|_]+$')  # "_" separates the parts of a file name
+_CELL = re.compile(r"^[A-Z]{1,3}[1-9][0-9]*$")
+_ACCOUNT_KEYS = {"label", "kind", "statements_url", "suffix", "match",
+                 "activity_url", "activity_start", "activity_sheet"}
 
 NOTIFICATIONS = {
     **STANDARD_NOTIFICATIONS,
@@ -35,7 +42,7 @@ NOTIFICATIONS = {
 
 
 class Kind(StrEnum):
-    """What kind of statements page an account has. Each has its own small extra step."""
+    """What kind of account it is. Each kind's pages have their own small differences."""
 
     CHECKING = "checking"
     CARD = "card"
@@ -51,12 +58,38 @@ class Site:
 
 
 @dataclass(frozen=True)
+class Destination:
+    """Where an account's activity goes: a tab of a workbook named in [sheets], from a cell."""
+
+    sheet: str  # the workbook's name under [sheets]: neutral, so it can be logged
+    spreadsheet_id: str
+    tab: str
+    start_cell: str
+
+    def __repr__(self) -> str:  # never show the private values, even in a traceback
+        return f"Destination({self.sheet!r})"
+
+
+@dataclass(frozen=True)
+class Activity:
+    """bank1-activity's settings for one account. Only accounts that have them are in its runs."""
+
+    url: str  # the account's activity download page
+    start: dt.date  # the first day of the range; the last is the day of the run
+    destination: Destination | None  # None: download only
+
+    def __repr__(self) -> str:
+        return f"Activity({self.start.isoformat()!r}, {self.destination!r})"
+
+
+@dataclass(frozen=True)
 class Account:
     label: str
     kind: Kind
     statements_url: str
     suffix: str  # the last four digits, checked in the statement's text
-    match: str  # text the heading above its statements must show; the suffix unless set
+    match: str  # text the account's pages must show; the suffix unless set
+    activity: Activity | None = None
 
     def __repr__(self) -> str:  # never show the private values, even in a traceback
         return f"Account({self.label!r}, {self.kind.value!r})"
@@ -67,6 +100,7 @@ class Config:
     site: Site
     accounts: tuple[Account, ...]
     notifications: Mapping[str, Template] = field(default_factory=lambda: NOTIFICATIONS)
+    sheets: Mapping[str, str] = field(default_factory=dict)  # workbook name: spreadsheet ID
 
 
 def _text(table: Mapping[str, Any], key: str, where: str) -> str:
@@ -85,9 +119,61 @@ def _url(table: Mapping[str, Any], key: str, where: str) -> str:
     return value
 
 
-def _account(table: Mapping[str, Any], number: int) -> Account:
+def _date(table: Mapping[str, Any], key: str, where: str) -> dt.date:
+    value = _text(table, key, where)
+    try:
+        return dt.date.fromisoformat(value)
+    except ValueError:
+        raise ConfigError(f'{where}: "{key}" must be a date like "2025-07-01"') from None
+
+
+def _sheets(doc: Mapping[str, Any]) -> dict[str, str]:
+    """[sheets.<name>] blocks: each workbook once, with its private spreadsheet ID."""
+    sheets = doc.get("sheets", {})
+    if not isinstance(sheets, dict):
+        raise ConfigError("[sheets] must hold [sheets.<name>] blocks")
+    found = {}
+    for name, table in sheets.items():
+        where = f"[sheets.{name}]"
+        if not _LABEL.match(name):
+            raise ConfigError(f"{where}: the name can only use lowercase letters, digits, or _")
+        if not isinstance(table, dict):
+            raise ConfigError(f"{where} must be a table")
+        reject_unknown_keys(table, {"spreadsheet_id"}, where)
+        found[name] = _text(table, "spreadsheet_id", where)
+    return found
+
+
+def _destination(table: Any, sheets: Mapping[str, str], where: str) -> Destination:
+    where = f"{where} activity_sheet"
+    if not isinstance(table, dict):
+        raise ConfigError(f"{where} must be a table")
+    reject_unknown_keys(table, {"sheet", "tab", "start_cell"}, where)
+    sheet = _text(table, "sheet", where)
+    if sheet not in sheets:
+        raise ConfigError(f'{where}: "sheet" must name a [sheets.<name>] block')
+    cell = _text(table, "start_cell", where)
+    if not _CELL.match(cell):
+        raise ConfigError(f'{where}: "start_cell" must be a cell like "A5"')
+    return Destination(sheet, sheets[sheet], _text(table, "tab", where), cell)
+
+
+def _activity(table: Mapping[str, Any], sheets: Mapping[str, str],
+              where: str) -> Activity | None:
+    if "activity_url" not in table:
+        for key in ("activity_start", "activity_sheet"):
+            if key in table:
+                raise ConfigError(f'{where}: "{key}" needs an "activity_url"')
+        return None
+    destination = (_destination(table["activity_sheet"], sheets, where)
+                   if "activity_sheet" in table else None)
+    return Activity(_url(table, "activity_url", where), _date(table, "activity_start", where),
+                    destination)
+
+
+def _account(table: Mapping[str, Any], number: int, sheets: Mapping[str, str]) -> Account:
     where = f"[[accounts]] number {number}"
-    reject_unknown_keys(table, {"label", "kind", "statements_url", "suffix", "match"}, where)
+    reject_unknown_keys(table, _ACCOUNT_KEYS, where)
     label = _text(table, "label", where)
     if not _LABEL.match(label):
         raise ConfigError(f'{where}: "label" can only use lowercase letters, digits, or _')
@@ -100,7 +186,8 @@ def _account(table: Mapping[str, Any], number: int) -> Account:
         # The value is private, so the message never repeats it
         raise ConfigError(f'{where}: "suffix" must be exactly four digits, in quotes')
     match = _text(table, "match", where) if "match" in table else suffix
-    return Account(label, Kind(kind), _url(table, "statements_url", where), suffix, match)
+    return Account(label, Kind(kind), _url(table, "statements_url", where), suffix, match,
+                   _activity(table, sheets, where))
 
 
 def _reject_repeats(accounts: list[Account]) -> None:
@@ -117,11 +204,20 @@ def _reject_repeats(accounts: list[Account]) -> None:
     if len(set(suffixes)) != len(suffixes):
         raise ConfigError('[[accounts]]: two accounts have the same "suffix", so their files '
                           "would overwrite each other")
+    activities = [account.activity for account in accounts if account.activity]
+    urls = [activity.url for activity in activities]
+    if len(set(urls)) != len(urls):
+        raise ConfigError('[[accounts]]: two accounts have the same "activity_url"')
+    # Each write replaces everything below its start cell, so one would wipe out the other
+    places = [(d.sheet, d.tab, d.start_cell) for a in activities if (d := a.destination)]
+    if len(set(places)) != len(places):
+        raise ConfigError("[[accounts]]: two accounts write their activity to the same tab "
+                          "and start cell")
 
 
 def parse_config(doc: Mapping[str, Any]) -> Config:
     """Validate an already-parsed TOML document."""
-    reject_unknown_keys(doc, {"site", "accounts", "notifications"}, "config")
+    reject_unknown_keys(doc, {"site", "accounts", "sheets", "notifications"}, "config")
     site = doc.get("site")
     if not isinstance(site, dict):
         raise ConfigError("a [site] section is required")
@@ -130,11 +226,12 @@ def parse_config(doc: Mapping[str, Any]) -> Config:
     if not _FILE_NAME_PART.match(name):
         # The value is private, so the message never repeats it
         raise ConfigError('[site]: "name_in_files" can\'t use _ \\ / : * ? " < > |')
-    accounts = [_account(table, number)
+    sheets = _sheets(doc)
+    accounts = [_account(table, number, sheets)
                 for number, table in enumerate(require_tables(doc, "accounts"), start=1)]
     _reject_repeats(accounts)
     return Config(Site(_url(site, "login_url", "[site]"), name), tuple(accounts),
-                  parse_notifications(doc, NOTIFICATIONS))
+                  parse_notifications(doc, NOTIFICATIONS), sheets)
 
 
 def load_config(path: Path) -> Config:

@@ -16,56 +16,90 @@ name_in_files = "<bank name>"
 #   statements_url  the full address of its statements page, opened directly after sign-in
 #   suffix          its last four digits, in quotes. In its file names, so each account's
 #                   must differ. The statement PDF must show a number ending in them
-#   match           optional: text the heading above its statements must show. The suffix
-#                   if left out
+#   match           optional: text the heading above its statements, and its activity download
+#                   form, must show. The suffix if left out
+#
+# bank1-activity downloads the activity of only the accounts with an activity_url:
+#   activity_url    the full address of its "download account activity" page
+#   activity_start  the first day to download, as "YYYY-MM-DD"; the last is the day of the run.
+#                   Change it by hand each fiscal year
+#   activity_sheet  optional: where the activity goes. Leave it out to only save the CSV, as
+#                   C:\automation\bank1\data\activity\<label>.csv
+#     sheet         the name of a [sheets.<name>] block below
+#     tab           the tab's name
+#     start_cell    where the oldest row goes, like "A5". Each run replaces everything from here
+#                   down, across as many columns as the CSV has: move it down each fiscal year
 
 [[accounts]]
 label = "entity1_checking"
 kind = "checking"
 statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
+activity_url = "https://<address of its activity download page>"
+activity_start = "<YYYY-MM-DD>"
+activity_sheet = { sheet = "recon", tab = "<tab name>", start_cell = "<cell, like A5>" }
 
 [[accounts]]
 label = "entity2_checking"
 kind = "checking"
 statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
+activity_url = "https://<address of its activity download page>"
+activity_start = "<YYYY-MM-DD>"
+activity_sheet = { sheet = "recon", tab = "<tab name>", start_cell = "<cell, like A5>" }
 
 [[accounts]]
 label = "entity3_checking"
 kind = "checking"
 statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
+activity_url = "https://<address of its activity download page>"
+activity_start = "<YYYY-MM-DD>"
+activity_sheet = { sheet = "recon", tab = "<tab name>", start_cell = "<cell, like A5>" }
 
 [[accounts]]
 label = "entity4_checking"
 kind = "checking"
 statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
+activity_url = "https://<address of its activity download page>"
+activity_start = "<YYYY-MM-DD>"
+activity_sheet = { sheet = "recon", tab = "<tab name>", start_cell = "<cell, like A5>" }
 
 [[accounts]]
 label = "personal_checking_1"
 kind = "checking"
 statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
+activity_url = "https://<address of its activity download page>"
+activity_start = "<YYYY-MM-DD>"
+activity_sheet = { sheet = "recon", tab = "<tab name>", start_cell = "<cell, like A5>" }
 
 [[accounts]]
 label = "personal_checking_2"
 kind = "checking"
 statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
+activity_url = "https://<address of its activity download page>"
+activity_start = "<YYYY-MM-DD>"
+activity_sheet = { sheet = "recon", tab = "<tab name>", start_cell = "<cell, like A5>" }
 
 [[accounts]]
 label = "personal_card_1"
 kind = "card"
 statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
+activity_url = "https://<address of its activity download page>"
+activity_start = "<YYYY-MM-DD>"
+activity_sheet = { sheet = "recon", tab = "<tab name>", start_cell = "<cell, like A5>" }
 
 [[accounts]]
 label = "personal_card_2"
 kind = "card"
 statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
+activity_url = "https://<address of its activity download page>"
+activity_start = "<YYYY-MM-DD>"
 
 [[accounts]]
 label = "personal_invest_1"
@@ -78,6 +112,11 @@ label = "personal_invest_2"
 kind = "investment"
 statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
+
+# The Google Sheets that activity_sheet names, each once. Share each with the service account's
+# email as an Editor. On the test workstation, point these at test copies, never the live ones
+[sheets.recon]
+spreadsheet_id = "<spreadsheet id, from its address>"
 
 # Optional: the push notifications' words. Leave a block or line out to keep what's shown
 # here. Any of these can go in {braces}: {command}, {process}, {run_id}, {ok}, {unchanged},

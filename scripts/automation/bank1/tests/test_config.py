@@ -100,3 +100,85 @@ def test_the_example_lists_every_kind_and_every_event_but_wont_run_as_is():
     assert set(example["notifications"]) == {"pass", "fail", "mfa_needed", "mfa_failed"}
     with pytest.raises(ConfigError, match="placeholder"):
         load_config(EXAMPLE)
+
+
+# ---------------------------------------------- bank1-activity's settings
+
+SHEETS = {"recon": {"spreadsheet_id": "made-up-spreadsheet-id"}}
+SHEET = {"sheet": "recon", "tab": "Recon 1", "start_cell": "A5"}
+ACTIVITY = {"activity_url": "https://bank.example.invalid/activity/a1",
+            "activity_start": "2026-07-01"}
+
+
+def with_sheets(config):
+    return config | {"sheets": SHEETS}
+
+
+def test_an_account_without_an_activity_url_has_no_activity():
+    assert parse_config(doc()).accounts[0].activity is None
+
+
+def test_activity_settings_load_with_and_without_a_sheet():
+    import datetime as dt
+    alone = parse_config(doc(**ACTIVITY)).accounts[0].activity
+    assert alone.start == dt.date(2026, 7, 1) and alone.destination is None
+    cfg = parse_config(with_sheets(doc(**ACTIVITY, activity_sheet=SHEET)))
+    destination = cfg.accounts[0].activity.destination
+    assert (destination.sheet, destination.spreadsheet_id, destination.tab,
+            destination.start_cell) == ("recon", "made-up-spreadsheet-id", "Recon 1", "A5")
+    assert cfg.sheets == {"recon": "made-up-spreadsheet-id"}
+
+
+def test_activity_reprs_never_show_private_values():
+    activity = parse_config(with_sheets(doc(**ACTIVITY, activity_sheet=SHEET))).accounts[0].activity
+    shown = repr(activity)
+    assert "example.invalid" not in shown and "made-up" not in shown and "Recon 1" not in shown
+
+
+@pytest.mark.parametrize(("change", "message"), [
+    ({"activity_start": "2026-07-01"}, "needs an \"activity_url\""),
+    ({"activity_sheet": SHEET}, "needs an \"activity_url\""),
+    ({**ACTIVITY, "activity_start": "07/01/2026"}, "a date like"),
+    ({"activity_url": "https://bank.example.invalid/activity/a1"}, "activity_start"),
+    ({**ACTIVITY, "activity_url": "http://bank.example.invalid/a"}, "https"),
+    ({**ACTIVITY, "activity_sheet": SHEET | {"sheet": "other"}}, r"\[sheets.<name>\]"),
+    ({**ACTIVITY, "activity_sheet": SHEET | {"start_cell": "a5"}}, "a cell like"),
+    ({**ACTIVITY, "activity_sheet": SHEET | {"start_cell": "A0"}}, "a cell like"),
+    ({**ACTIVITY, "activity_sheet": SHEET | {"tab": "<tab name>"}}, "placeholder"),
+    ({**ACTIVITY, "activity_sheet": SHEET | {"cell": "A5"}}, "unknown"),
+])
+def test_a_bad_activity_value_fails_clearly(change, message):
+    with pytest.raises(ConfigError, match=message):
+        parse_config(with_sheets(doc(**change)))
+
+
+@pytest.mark.parametrize("sheets", [
+    {"Recon": {"spreadsheet_id": "x"}},
+    {"recon": {"spreadsheet_id": "<spreadsheet id>"}},
+    {"recon": {"id": "x"}},
+])
+def test_a_bad_workbook_fails_clearly(sheets):
+    with pytest.raises(ConfigError, match=r"\[sheets"):
+        parse_config(doc() | {"sheets": sheets})
+
+
+def test_two_accounts_cant_share_an_activity_address_or_a_block():
+    two = with_sheets(doc(**ACTIVITY, activity_sheet=SHEET))
+    second = dict(two["accounts"][0], label="entity2_checking", suffix="2222",
+                  statements_url="https://bank.example.invalid/statements/a2")
+    two["accounts"].append(second)
+    with pytest.raises(ConfigError, match="same \"activity_url\""):
+        parse_config(two)
+    second["activity_url"] = "https://bank.example.invalid/activity/a2"
+    with pytest.raises(ConfigError, match="same tab and start cell"):
+        parse_config(two)
+    second["activity_sheet"] = SHEET | {"start_cell": "J5"}
+    assert len(parse_config(two).accounts) == 2
+
+
+def test_the_example_shows_activity_for_some_accounts_and_its_workbooks():
+    example = tomllib.loads(EXAMPLE.read_text(encoding="utf-8"))
+    assert example["sheets"]
+    with_activity = [a for a in example["accounts"] if "activity_url" in a]
+    assert {a["kind"] for a in with_activity} == {"checking", "card"}
+    assert any("activity_sheet" not in a for a in with_activity)

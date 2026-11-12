@@ -5,6 +5,17 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
 
 ## Unreleased
 
+- Add `bank1-activity`, to replace the old account-recon process: it signs in the same way, then
+  for each account with an `activity_url` downloads its activity as a CSV from its
+  `activity_start` to today. It checks the header for the account's kind, that there's at least
+  one row, and that every row is in the range. Then it saves the CSV as
+  `data\activity\<label>.csv` and writes the rows, oldest first, with no header, as text, to its
+  `activity_sheet`. Each run clears the account's block from its start cell down, across only
+  the CSV's columns. A file that fails its checks replaces nothing. `--dump` fills in one form
+  of each kind without downloading, and `--download-only` keeps the CSV in the run folder.
+  Config gains `[sheets.<name>]` and the `activity_` account keys.
+- `bank1-statements` and `bank1-activity` share their run plumbing in `cli.py`. Reading a
+  page's text now includes the shadow root of the element read, not only its children's.
 - Add `bank1-statements`: it signs in once, verifying the device with a push if the site asks
   (choosing **Confirm using our mobile app**, then **Next**, when it offers a choice), then
   saves each account's newest PDF statements: the **Statement** row, or for investments both

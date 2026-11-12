@@ -10,18 +10,26 @@
 
 import argparse
 import logging
-from collections.abc import Callable
 from pathlib import Path
 
-from playwright.sync_api import BrowserContext, Page
+from playwright.sync_api import Page
 
-from automation_common.browser import first_page, save_page_evidence
-from automation_common.config import ConfigError, process_dir
+from automation_common.browser import save_page_evidence
+from automation_common.config import process_dir
 from automation_common.notify import send_notification
-from automation_common.run import Notifier, Run, Status, Summary, pass_fail
+from automation_common.run import Notifier, Run, Status
 from bank1_portal import PROCESS
 from bank1_portal.capture import capture
-from bank1_portal.config import NOTIFICATIONS, Account, Config, load_config
+from bank1_portal.cli import (
+    Observer,
+    choose,
+    dump_observer,
+    final_event,
+    load_stage,
+    why,
+)
+from bank1_portal.cli import ignore as _ignore
+from bank1_portal.config import NOTIFICATIONS, Account, Config
 from bank1_portal.login import LoginError
 from bank1_portal.pages import FetchError
 from bank1_portal.parse import (
@@ -43,12 +51,9 @@ from bank1_portal.statements_fetch import (
 from bank1_portal.store import save_statement, statement_path
 
 COMMAND = "bank1-statements"
-TIMED_OUT = "verification timed out"
 LETTER_MIN_BYTES = 1_000  # a letter can be a short page; a statement is checked at 5,000
 
 log = logging.getLogger(__name__)
-
-Observer = Callable[[str], None]
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -63,71 +68,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
-def why(e: Exception) -> str:
-    """One short line for the summary. The run masks private values when it's written."""
-    first_line = (str(e).splitlines() or [""])[0][:200]
-    return f"{type(e).__name__}: {first_line}"
-
-
-def final_event(summary: Summary) -> str:
-    """Pass or fail, naming the verification when that's what stopped the run."""
-    if any(item.stage == "login" and item.status is Status.FAILED and TIMED_OUT in item.detail
-           for item in summary.items):
-        return "mfa_failed"
-    return pass_fail(summary)
-
-
-def load_stage(run: Run, data_dir: Path) -> Config | None:
-    try:
-        cfg = load_config(data_dir / "config.toml")
-    except ConfigError as e:
-        run.summary.record("config", "config.toml", Status.FAILED, str(e))
-        return None
-    run.notifications = cfg.notifications
-    # Private: never in logs. The labels stay readable, since the report needs them. A bare
-    # suffix isn't masked: four digits would also blank out dates and times in every log.
-    # It's never logged, and no message repeats it
-    run.masker.add(cfg.site.login_url)
-    run.masker.add(cfg.site.name_in_files)
-    for account in cfg.accounts:
-        run.masker.add(account.statements_url)
-        if account.match != account.suffix:
-            run.masker.add(account.match)
-    log.info("config OK: %d account(s): %s", len(cfg.accounts),
-             ", ".join(account.label for account in cfg.accounts))
-    return cfg
-
-
 def chosen_accounts(run: Run, cfg: Config, label: str | None,
                     dump: bool) -> tuple[Account, ...]:
     """The accounts this run works on: one by label, the first of each kind, or all."""
-    if label is not None:
-        chosen = tuple(account for account in cfg.accounts if account.label == label)
-        if not chosen:
-            run.summary.record("config", label, Status.FAILED,
-                               "no account with this label in the config")
-        return chosen
-    if dump:
-        firsts: dict[str, Account] = {}
-        for account in cfg.accounts:
-            firsts.setdefault(account.kind, account)
-        return tuple(firsts.values())
-    return cfg.accounts
-
-
-def dump_observer(run: Run, ctx: BrowserContext, name: str) -> Observer:
-    """--dump: save a page's outline and screenshot at each named step. Best effort."""
-    def observe(step: str) -> None:
-        try:
-            save_page_evidence(first_page(ctx), run.run_dir, f"dump_{name}_{step}")
-            log.info("dump: saved the %s page for %s", step, name)
-        except Exception as e:  # noqa: BLE001 - --dump's copies must never stop the run
-            log.warning("dump: saving the %s page failed: %s", step, why(e))
-    return observe
-
-
-def _ignore(_: str) -> None:
-    pass
+    return choose(run, cfg.accounts, label, dump)
 
 
 def _open(page: Page, account: Account, observer: Observer) -> Plan:
