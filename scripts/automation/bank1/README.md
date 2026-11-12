@@ -135,22 +135,21 @@ It was built from a working smoke test, which signed in, verified the device, an
 an activity CSV, unattended and on a locked session. The sign-in selectors and verification
 words come from that test.
 
-**Has run** (on the test workstation):
+**Has run:**
 
-- A full run of all 11 accounts, clean: one sign-in with a remembered device, every account's
-  statements page opened by its address and checked against its heading, every download (the
-  checking menu's standard PDF, and the card and investment download links), every PDF check,
-  and one sign-out
+- On the test workstation, a full run of all 11 accounts, clean: one sign-in with a remembered
+  device, every account's statements page opened by its address and checked against its
+  heading, every download (the checking menu's standard PDF, and the card and investment
+  download links), every PDF check, and one sign-out
 - Investments' **Single** and **Multi** statements and their letters, with the letters' file
   names from their titles
 - `--dump` on one account of each kind
+- On the robot, unattended through the agent: a full run with a new profile, verifying the
+  device by clicking **Confirm using our mobile app** and **Next**, sending the push, and
+  going on once it was approved
 
 **Not yet run:**
 
-- Sign-in and verification through this package's code, including clicking **Confirm using our
-  mobile app** and **Next**. The option's selectors come from a `--dump` outline of the real
-  chooser. Next's are candidates modeled on the site's other buttons. Nothing has clicked either
-  on the real site yet
 - Looking back a year when the newest year has no statement. The year filter's selectors come
   from the outline, but it has never been clicked
 - Verification timing out
@@ -175,8 +174,9 @@ Copy-Item bank1\config.example.toml C:\automation\bank1\config.toml
 
 ```
 
-Fill in `login_url`, `name_in_files`, and for each account its `statements_url` and `suffix`. Copy each
-statements address from Edge's address bar while that account's statements page is open.
+Fill in `login_url`, `name_in_files`, and for each account its `statements_url` and `suffix`.
+Copy each statements address from Edge's address bar while that account's statements page is
+open.
 
 ## Run
 
@@ -190,10 +190,10 @@ uv run bank1-statements                             # normal run
 
 `--dump` signs in, then opens the first account of each kind (or the one named), saves its page
 outline and screenshot as `dump_<label>_statements_page.txt` and `.png`, and reports which
-statements a run would save, and how many letters it would download. It downloads nothing, and clicks nothing on those pages but the year
-filter, when the newest year has no statement yet. It also saves the sign-in, verification
-chooser, Next, after-push, and dashboard pages as `dump_site_<step>`. The sign-in page is saved
-before anything is typed.
+statements a run would save, and how many letters it would download. It downloads nothing, and
+clicks nothing on those pages but the year filter, when the newest year has no statement yet.
+It also saves the sign-in, verification chooser, Next, after-push, and dashboard pages as
+`dump_site_<step>`. The sign-in page is saved before anything is typed.
 
 `--capture` opens the job's browser on the sign-in page and saves a snapshot each time the page
 changes, for up to 30 minutes or until you close the window. It types nothing and starts no
