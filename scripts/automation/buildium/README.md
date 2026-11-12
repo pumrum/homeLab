@@ -177,10 +177,11 @@ folder. See `config.example.toml`.
 
 | Page | What happens |
 | --- | --- |
-| Already signed in | Signs that session out first, because it may be another entity's |
+| Already signed in, with the app's Account menu showing | Signs that session out first, because it may be another entity's |
 | Sign-in form | Fills in the email and password once from `buildium/<key>`, then clicks `Sign in` |
 | The form stays gone with no app yet | Treated as MFA. Sends the push and waits up to 5 minutes |
-| The app | Signed in |
+| The app, with its Account menu showing | Signed in |
+| An app address with no Account menu yet | On the way to or from the sign-in server, so it keeps waiting |
 
 **MFA works in an unattended run.** The site emails a link. When the push arrives, open the email
 and the link, and the job's browser moves on by itself. If that's not done in time, the run ends
@@ -195,6 +196,12 @@ Sign-in, MFA, sign-out, the statement menus, and saving have all run on the real
 unattended. MFA timing out hasn't, and there's no plan to force it, so expect a possible fix if
 it ever happens. The code doesn't know the MFA page's structure, so anything that isn't the form
 or the app counts as MFA.
+
+In November 2026 the site moved the sign-in form to a separate sign-in server, with new field
+names. On the way there, the browser passes through an app address with nobody signed in, which
+used to look like a session left open and failed every run with `no Account menu`. Now the app
+counts only once its Account menu shows. **Not yet run:** this sign-in on the real site, and MFA
+through the sign-in server.
 
 The Account button's tooltip was seen covering `Sign out` when one sign-out timed out. Sign-out
 now moves the mouse to the item first, then uses `click_until`, and `run.log` says which way the

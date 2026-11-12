@@ -15,6 +15,10 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
   each `[[entities]]` block.
 - Fix sign-out failing when the Account button's tooltip covers `Sign out`. It now moves the
   mouse off the button and escalates the click, which also covers `buildium-statements`.
+- Fix every sign-in failing with `no Account menu` since the site moved its sign-in form to a
+  separate sign-in server. The app address it passes through on the way looked like a session
+  left open. The app now counts only once its Account menu shows, and the new form's fields and
+  `Sign in` button are found first. This covers every command in this package.
 - `[statements]` is now only required by `buildium-statements`.
 - The MFA push now names the entity's abbreviation instead of its key.
 - The push notifications' words can now be set in `config.toml`, as optional

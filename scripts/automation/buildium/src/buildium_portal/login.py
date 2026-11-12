@@ -4,6 +4,10 @@ All entities share one browser profile, so the site's memory of the device carri
 but only one can be signed in at a time. A run may also find a session left by a run that
 was stopped. So signing in always starts by signing out whoever is there.
 
+The sign-in form can be on a separate sign-in server. On the way there, and back after signing
+in, the browser passes through app addresses with nobody signed in, so the app counts only once
+its Account menu shows, never from the address alone.
+
 The MFA page's structure isn't known, so it's anything that isn't the sign-in form or the
 app once the page has settled.
 
@@ -20,7 +24,6 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import Error as PwError
 from playwright.sync_api import Page
-from playwright.sync_api import TimeoutError as PwTimeout
 
 from automation_common.browser import click_until, find_first
 from automation_common.secrets import Credential
@@ -31,10 +34,12 @@ log = logging.getLogger(__name__)
 APP_PATH = "/manager/app"
 LOGIN_PATH = "/authentication/login"
 
-EMAIL_FIELD = ["input#emailAddressInput", "input[type='email']"]
-PASSWORD_FIELD = ["input#passwordInput", "input[type='password']"]
-# Exact text, because "Sign in with Google" sits right below it with the same styling
+EMAIL_FIELD = ["input#userName", "input#emailAddressInput", "input[type='email']"]
+PASSWORD_FIELD = ["input#password", "input#passwordInput", "input[type='password']"]
+# Exact text, because "Sign in with Google" sits right below it, and has had the same class
 SIGN_IN_BUTTON = [
+    "button.login__button:has(.button-text:text-is('Sign in'))",
+    "button.login__button:text-is('Sign in')",
     "button.login__sign-in-button:text-is('Sign in')",
     "button.login__sign-in-button:has(:text-is('Sign in'))",
     "button[type='submit']:text-is('Sign in')",
@@ -111,6 +116,12 @@ def _path(page: Page) -> str:
     return urlsplit(page.url).path
 
 
+def _in_app(page: Page, site: Site) -> bool:
+    """Signed in: an app address with the Account menu showing (see the module's notes)."""
+    return (classify(page.url, site.login_url) is Step.SIGNED_IN
+            and find_first([page], ACCOUNT_MENU, 0)[0] is not None)
+
+
 def _check_bot_wall(page: Page) -> None:
     found, selector = find_first([page], BOT_CHECK, 0)
     if found is not None:
@@ -164,16 +175,16 @@ def sign_out(page: Page, site: Site, timeouts: Timeouts | None = None,
 
 
 def _open_login_form(page: Page, site: Site, t: Timeouts) -> Step:
-    """Load the sign-in page and wait until it shows the form or the app."""
+    """Load the sign-in page and wait until it shows the form or the app's menu."""
     page.goto(site.login_url, wait_until="domcontentloaded")
     deadline = time.monotonic() + t.field / 1000
     while True:
-        if classify(page.url, site.login_url) is Step.SIGNED_IN:
-            return Step.SIGNED_IN
         if find_first([page], EMAIL_FIELD, 0)[0] is not None:
             return Step.LOGIN
+        if _in_app(page, site):
+            return Step.SIGNED_IN
         if time.monotonic() > deadline:
-            raise LoginError(f"the sign-in form did not appear on {_path(page)}")
+            raise LoginError(f"neither the sign-in form nor the app appeared on {_path(page)}")
         page.wait_for_timeout(POLL_MS)
 
 
@@ -199,15 +210,20 @@ def _wait_after_submit(page: Page, site: Site, t: Timeouts) -> Step:
 
     The form also vanishes for a moment on the way into the app, so it must stay gone for
     a while before this counts as MFA, or every normal sign-in would send a notification.
+    An app address is on the way in, not MFA, until the app has had `after_submit` to load.
     """
     deadline = time.monotonic() + t.after_submit / 1000
     form_gone_since: float | None = None
     while True:
-        if classify(page.url, site.login_url) is Step.SIGNED_IN:
+        if _in_app(page, site):
             return Step.SIGNED_IN
         _check_bot_wall(page)
         now = time.monotonic()
-        if find_first([page], EMAIL_FIELD + PASSWORD_FIELD, 0)[0] is not None:
+        if classify(page.url, site.login_url) is Step.SIGNED_IN:
+            form_gone_since = None
+            if now > deadline:
+                raise LoginError(f"the app didn't finish loading on {_path(page)}")
+        elif find_first([page], EMAIL_FIELD + PASSWORD_FIELD, 0)[0] is not None:
             form_gone_since = None
             if now > deadline:
                 raise LoginError("the site did not accept the email and password")
@@ -223,11 +239,11 @@ def _wait_for_mfa(page: Page, site: Site, t: Timeouts, on_mfa: OnMfa) -> None:
     log.warning("sign-in: the site wants MFA on %s; waiting up to %d seconds",
                 _path(page), seconds)
     on_mfa()
-    try:
-        page.wait_for_url(lambda url: classify(url, site.login_url) is Step.SIGNED_IN,
-                          timeout=t.mfa)
-    except PwTimeout:
-        raise LoginError(f"MFA was not completed within {seconds} seconds") from None
+    deadline = time.monotonic() + t.mfa / 1000
+    while not _in_app(page, site):
+        if time.monotonic() > deadline:
+            raise LoginError(f"MFA was not completed within {seconds} seconds")
+        page.wait_for_timeout(POLL_MS)
 
 
 def sign_in(page: Page, site: Site, credential: Credential, timeouts: Timeouts | None = None,
