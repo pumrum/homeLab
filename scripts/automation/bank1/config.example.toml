@@ -10,10 +10,11 @@ login_url = "https://<address of the sign-in page>"
 # One block per account. A run saves its newest statement as
 # C:\automation\bank1\data\statements\<label>\<label>_<YYYY-MM>.pdf
 #   label           neutral: in file names, logs, and reports. Lowercase letters, digits, or _
-#   kind            "checking", "card", or "investment": which small extra step its page needs
+#   kind            "checking", "card", or "investment": which row of the list is its statement
 #   statements_url  the full address of its statements page, opened directly after sign-in
 #   suffix          its last four digits, in quotes. The statement PDF must show them
-#   match           optional: text its statements page must show. The suffix if left out
+#   match           optional: text the heading above its statements must show. The suffix
+#                   if left out
 
 [[accounts]]
 label = "entity1_checking"

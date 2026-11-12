@@ -25,8 +25,11 @@ C:\automation\bank1\data\statements\<label>\<label>_<YYYY-MM>.pdf
 November 5, 2026 saves `entity1_checking\entity1_checking_2026-10.pdf`, for example. Then it signs
 out.
 
-- **The newest statement is the row with the latest date,** wherever it is in the list. A row
-  showing a period, like `Oct 1, 2026 - Oct 27, 2026`, closes on its last date.
+- **The newest statement is the row of the account's type with the latest date,** wherever it
+  is in the list. Rows that share a date sit in a group, and only the group's first row shows
+  the date, so a row without one takes the date above it.
+- **The list shows one year at a time,** newest first. If that year has no statement yet, as
+  early in January, the run views the year before, once.
 - **Only the newest is downloaded.** Earlier files already on disk are left alone.
 - **Every run downloads again and replaces the file.** Nothing is compared or kept.
 - **A statement is checked before it replaces anything.** It must start with `%PDF`, be at least
@@ -36,23 +39,31 @@ out.
 - **If another statement closed in the same month as the newest,** it's saved under the same
   name, so the newest replaces it. `report.txt` notes how many there were.
 
-Each kind of account has one small extra step:
+The kind of account sets which row is its statement:
 
-| `kind` | Accounts | Extra step |
+| `kind` | Accounts | Its statement row |
 | --- | --- | --- |
-| `checking` | 4 business checking, 2 personal deposit | After the statement's link, choose **Standard** PDF, not Accessible, then Download |
-| `card` | 2 personal credit cards | None |
-| `investment` | 2 personal investment | Before picking the statement, choose **Single** statement, not Multiple |
+| `checking` | Business and personal checking | **Statement** |
+| `card` | Personal credit cards | **Statement** |
+| `investment` | Personal investment | **Single**, this account alone. Never **Multi**, which combines several accounts, or a letter |
 
-A missing choice fails that account. The steps are in `KIND_STEPS` in `statements_fetch.py`.
+Each row is downloaded one of two ways, whichever it has:
+
+- **A download menu,** as on checking accounts: the run opens it and chooses the standard
+  **PDF**, never **Accessible PDF**. A menu without the standard PDF fails that account.
+- **A download link,** as on cards and investments: the run clicks it.
+
+Each row also has a control that opens the document for viewing. The run never uses it.
+These are in `ROW_TYPE` and the selector lists in `statements_fetch.py`.
 
 ### Checking it's the right account
 
-Before anything downloads, the statements page must show the account's `match` text. That's its
-`suffix` unless `match` is set, and a number must stand alone, so `1234` doesn't match `91234`.
-If the page doesn't show it, or the address leads to the dashboard, a sign-in page, or no
-statement list, that account fails with `statements link no longer valid`, and you need to
-update its `statements_url`. The run doesn't look for the page through the site's menus.
+Before anything downloads, the heading above the statements, like `<name> (...1234)`, must show
+the account's `match` text. That's its `suffix` unless `match` is set, and a number must stand
+alone, so `1234` doesn't match `91234`. Only the heading counts: the page's side menu lists
+every account. If the heading doesn't show it, or the address leads to the dashboard, a
+sign-in page, or no statement list, that account fails with `statements link no longer valid`,
+and you need to update its `statements_url`. The run doesn't look for the page through the site's menus.
 That could come later if links turn out to expire often.
 
 ### What a run does when something's wrong
@@ -66,7 +77,7 @@ That could come later if links turn out to expire often.
 | CAPTCHA challenge showing | The run stops right away. Never worked around. `FAIL` |
 | No `bank1/login` credential | The run stops before opening the site. `FAIL` |
 | A statements link no longer leads to that account's page | That account fails. The rest still run. `FAIL` |
-| An expected Standard or Single choice is missing | That account fails. The rest still run. `FAIL` |
+| No row of the account's type this year or last, or a download menu without the standard PDF | That account fails. The rest still run. `FAIL` |
 | No PDF arrives, or the PDF names another account or date | Not saved. That account fails, and the file stays in `downloads\`. `FAIL` |
 | Sign-out fails | Only a warning in `run.log`. The statements are already saved, and the site ends idle sessions itself |
 
@@ -101,9 +112,15 @@ can wait 5 minutes for verification, plus up to about 2 minutes per account.
 
 ## What has and hasn't run on the real site
 
-Nothing in this package has run on the real site yet. It was built from a working smoke test,
-which signed in, verified the device, and downloaded an activity CSV, unattended and on a locked
-session. The sign-in selectors and verification words come from that test.
+It was built from a working smoke test, which signed in, verified the device, and downloaded
+an activity CSV, unattended and on a locked session. The sign-in selectors and verification
+words come from that test.
+
+**Has run** (`--dump`, on the test workstation):
+
+- Signing in with a remembered device, and signing out
+- Opening one checking, one card, and one investment statements page by its address, and
+  finding the rows
 
 **Not yet run:**
 
@@ -111,12 +128,12 @@ session. The sign-in selectors and verification words come from that test.
   mobile app** and **Next**. The option's selectors come from a `--dump` outline of the real
   chooser. Next's are candidates modeled on the site's other buttons. Nothing has clicked either
   on the real site yet
-- Everything on the statements pages: the row selectors, the download links, the Standard and
-  Single choices, how each kind delivers its PDF, and whether the page shows the suffix for the
-  `match` check. These are lists of candidates until a `--dump` and `--capture` run shows the
-  real pages
+- Picking the statement by its row type, and the account check against the heading. Both are
+  built from `--dump` outlines, but this code hasn't run on the real pages yet
+- Any download: the menu and its standard PDF, the download link, and how each delivers the PDF
+- Looking back a year when the newest year has no statement. The year filter's selectors come
+  from the outline, but it has never been clicked
 - The PDF check against a real statement: which date formats it shows
-- Sign-out: the selectors are guesses
 - Verification timing out
 
 ## Set up each machine
@@ -154,14 +171,14 @@ uv run bank1-statements                             # normal run
 
 `--dump` signs in, then opens the first account of each kind (or the one named), saves its page
 outline and screenshot as `dump_<label>_statements_page.txt` and `.png`, and reports which
-statement a run would save. It clicks nothing on those pages and downloads nothing. It also saves
-the sign-in, verification chooser, Next, after-push, and dashboard pages as `dump_site_<step>`. The
-sign-in page is saved before anything is typed.
+statement a run would save. It downloads nothing, and clicks nothing on those pages but the year
+filter, when the newest year has no statement yet. It also saves the sign-in, verification
+chooser, Next, after-push, and dashboard pages as `dump_site_<step>`. The sign-in page is saved
+before anything is typed.
 
 `--capture` opens the job's browser on the sign-in page and saves a snapshot each time the page
 changes, for up to 30 minutes or until you close the window. It types nothing and starts no
-trace. Use it to record the Standard or Single choices, which `--dump` can't open without starting
-a download. It's also the fallback for signing in by hand if a job's verification doesn't go
+trace. Use it to record a page `--dump` can't reach, like an open download menu. It's also the fallback for signing in by hand if a job's verification doesn't go
 through.
 
 These files hold real account names and numbers. Replace private values before sharing any of

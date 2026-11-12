@@ -1,9 +1,12 @@
 """Pure checks: which statement is newest, its file name, and whether a file is that statement.
 
-The newest statement is the row with the latest date, wherever it sits in the list, so a
-list in either order works. The saved PDF must then start with %PDF, be a sensible size,
-name the account's four-digit suffix, and show that closing date, before it replaces
-anything.
+The statements list is a table. Each row has a date cell and a type cell: "Statement", or
+for investments "Multi", "Single", or a letter's name. Rows that share a date sit in a group,
+and only the group's first row shows the date. The newest statement is the row of the wanted
+type with the latest date, wherever it sits in the list, so a list in either order works.
+
+The saved PDF must then start with %PDF, be a sensible size, name the account's four-digit
+suffix, and show that closing date, before it replaces anything.
 """
 
 import calendar
@@ -70,6 +73,34 @@ def newest_statement(rows: list[str]) -> Newest:
     same_month = sum(1 for d, i in dated
                      if i != index and (d.year, d.month) == (closing.year, closing.month))
     return Newest(index, closing, same_month)
+
+
+@dataclass(frozen=True)
+class Row:
+    date: str  # the date cell; empty on a group's later rows
+    type: str  # the type cell
+
+
+def _squash_type(text: str) -> str:
+    return " ".join(text.split()).casefold()
+
+
+def of_type(rows: list[Row], wanted: str) -> list[int]:
+    """Which rows have exactly the wanted type, ignoring case and spacing."""
+    return [i for i, row in enumerate(rows) if _squash_type(row.type) == _squash_type(wanted)]
+
+
+def newest_of_type(rows: list[Row], wanted: str) -> Newest:
+    """The newest row of the wanted type. A row with no date in its date cell takes the date
+    of the row above it, since it's part of that row's group. Raises if it can't tell."""
+    dates: list[str] = []
+    for row in rows:
+        dates.append(row.date if dates_in(row.date) else (dates[-1] if dates else ""))
+    chosen = of_type(rows, wanted)
+    if not chosen:
+        raise StatementError(f"no '{wanted}' statement in the {len(rows)} row(s)")
+    newest = newest_statement([dates[i] for i in chosen])
+    return Newest(chosen[newest.index], newest.closing, newest.same_month)
 
 
 def statement_file_name(label: str, closing: dt.date) -> str:

@@ -54,7 +54,7 @@ class Account:
     kind: Kind
     statements_url: str
     suffix: str  # the last four digits, checked in the statement's text
-    match: str  # text its statements page must show; the suffix unless set
+    match: str  # text the heading above its statements must show; the suffix unless set
 
     def __repr__(self) -> str:  # never show the private values, even in a traceback
         return f"Account({self.label!r}, {self.kind.value!r})"

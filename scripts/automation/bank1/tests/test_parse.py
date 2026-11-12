@@ -5,10 +5,12 @@ import datetime as dt
 import pytest
 
 from bank1_portal.parse import (
+    Row,
     StatementError,
     check_pdf_file,
     check_statement,
     dates_in,
+    newest_of_type,
     newest_statement,
     page_shows,
     pdf_text,
@@ -64,6 +66,39 @@ def test_two_statements_on_the_newest_day_are_refused():
 def test_a_list_with_no_dates_is_refused():
     with pytest.raises(StatementError, match="no statement date in any of the 2"):
         newest_statement(["Statement", "Download"])
+
+
+# An investment account's list, as on the real page: a group per date, whose first row
+# alone shows the date, with a Multi row, a Single row, and sometimes letters
+INVESTMENT_ROWS = [
+    Row("Oct 31, 2026", "Multi"),
+    Row("", "Single"),
+    Row("Sep 30, 2026", "Multi"),
+    Row("", "2026 Annual Disclosure Cover Letter"),
+    Row("", "Single"),
+]
+
+
+def test_a_row_without_a_date_takes_its_groups_date():
+    newest = newest_of_type(INVESTMENT_ROWS, "Single")
+    assert (newest.index, newest.closing, newest.same_month) == (1, OCT31, 0)
+
+
+def test_only_rows_of_the_wanted_type_count():
+    assert newest_of_type(INVESTMENT_ROWS, "multi").index == 0  # case doesn't matter
+    rows = [Row("Nov 2, 2026", "Notice"), Row("Oct 31, 2026", "Statement")]
+    assert newest_of_type(rows, "Statement").index == 1
+
+
+def test_no_row_of_the_wanted_type_is_refused():
+    with pytest.raises(StatementError, match="no 'Statement' statement in the 5 row"):
+        newest_of_type(INVESTMENT_ROWS, "Statement")
+
+
+def test_two_rows_of_the_wanted_type_on_one_day_are_refused():
+    rows = [Row("Oct 31, 2026", "Single"), Row("", "Single")]
+    with pytest.raises(StatementError, match="same day"):
+        newest_of_type(rows, "Single")
 
 
 def test_the_file_name_uses_the_closing_month():

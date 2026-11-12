@@ -120,21 +120,22 @@ def _ignore(_: str) -> None:
 
 
 def dump_stage(run: Run, page: Page, account: Account, observer: Observer) -> None:
-    """Open the page and report what a run would pick. Clicks nothing, downloads nothing."""
+    """Open the page and report what a run would pick. Downloads nothing, and clicks nothing
+    but the year filter, when the newest year has no statement yet."""
     try:
         go_to_statements(page, account)
         try:
-            rows = check_statements_page(page, account)
+            check_statements_page(page, account)
         finally:
             observer("statements")  # also when the list wasn't recognized
-        newest = find_newest(rows)
+        pick = find_newest(page, account)
     except Exception as e:  # noqa: BLE001 - one account's failure must not stop the others
         save_page_evidence(page, run.run_dir, run.next_failure_prefix())
         run.summary.record("dump", account.label, Status.FAILED, why(e))
         return
-    name = statement_file_name(account.label, newest.closing)
+    name = statement_file_name(account.label, pick.newest.closing)
     run.summary.record("dump", account.label, Status.OK,
-                       f"{len(rows)} statement(s), would save {name}")
+                       f"{pick.count} statement(s), would save {name}")
 
 
 def statement_stage(run: Run, page: Page, account: Account, data_dir: Path,

@@ -2,10 +2,10 @@
 
 FakeBank mirrors what's known of the real site: a sign-in form in an iframe whose fields sit
 in shadow roots, hidden copies of controls, a device-verification page, a dashboard, and one
-statements page per account in three kinds. Playwright answers its requests from here, and
-the PDFs come from a server on 127.0.0.1, so nothing leaves this machine. These run on
-machines with Edge, and are skipped elsewhere. Headless Edge treats PDFs differently, so
-also run them in visible windows:
+statements page per account in three kinds, modeled on --dump outlines of the real ones.
+Playwright answers its requests from here, and the PDFs come from a server on 127.0.0.1, so
+nothing leaves this machine. These run on machines with Edge, and are skipped elsewhere.
+Headless Edge treats PDFs differently, so also run them in visible windows:
 
     $env:AUTOMATION_TEST_HEADED = "1"; uv run pytest bank1/tests/test_flow.py
 """
@@ -42,16 +42,23 @@ HEADED = bool(os.environ.get("AUTOMATION_TEST_HEADED"))
 FAST = Timeouts(field=2_000, after_submit=3_000, choice=1_500, verify=2_000, dashboard=1_000,
                 sign_out=1_500, poll=100)
 
-# id: (kind, page name, suffix, rows as (date shown, file on the PDF server))
+# id: (kind, page name, suffix, row controls, years newest first as
+#      (year, rows as (date cell, type cell, file on the PDF server)))
+# Rows that share a date sit in a group, and only the group's first row shows the date
 ACCOUNTS = {
-    "chk1": ("checking", "FakeChecking", "9871",
-             [("Sep 30, 2026", "chk1-sep"), ("Oct 31, 2026", "chk1-oct"),
-              ("Aug 31, 2026", "chk1-aug")]),
-    "card1": ("card", "FakeCard", "8972",
-              [("Oct 1, 2026 - Oct 27, 2026", "card1-oct"),
-               ("Sep 1, 2026 - Sep 27, 2026", "card1-sep")]),
-    "inv1": ("investment", "FakeInvest", "7983",
-             [("10/31/2026", "inv1-oct"), ("09/30/2026", "inv1-sep")]),
+    "chk1": ("checking", "FakeChecking", "9871", "menus",
+             [(2026, [("Sep 30, 2026", "Statement", "chk1-sep"),
+                      ("Oct 31, 2026", "Statement", "chk1-oct"),
+                      ("Aug 31, 2026", "Statement", "chk1-aug")])]),
+    "card1": ("card", "FakeCard", "8972", "links",
+              [(2026, [("Oct 27, 2026", "Statement", "card1-oct"),
+                       ("Sep 27, 2026", "Statement", "card1-sep")])]),
+    "inv1": ("investment", "FakeInvest", "7983", "links",
+             [(2026, [("Oct 31, 2026", "Multi", "inv1-oct-multi"),
+                      ("", "Single", "inv1-oct"),
+                      ("Sep 30, 2026", "Multi", "inv1-sep-multi"),
+                      ("", "2026 Annual Disclosure Cover Letter", "inv1-letter"),
+                      ("", "Single", "inv1-sep")])]),
 }
 
 COMPONENTS = """<script>
@@ -96,51 +103,83 @@ CHALLENGE = "<iframe title='recaptcha challenge expires in two minutes' src='abo
 
 SIGN_OUT = "<button onclick=\"__SIGN_OUT__\">Sign out</button>"
 
-STATEMENTS_PAGE = COMPONENTS + """__SIGN_OUT_BUTTON__
-<mds-account-header name="__NAME__ (...__SUFFIX__)"></mds-account-header>
-__TABS__
-<mds-list-item style="display:none">Hidden copy Dec 31, 2026 <button>Download</button>
-</mds-list-item>
-__ROWS__
-<div id="dialog"></div>
+# As on the real page: a side menu listing every account, the open account's heading, a
+# year filter, and a table that fills in a moment after the page loads. Each row has a date
+# cell, a type cell, and its controls. Checking rows have a view menu and a download menu
+# holding the standard and accessible PDFs; other rows have a view link and a download link.
+# Viewing fetches a "-view" file, which a run must never do
+STATEMENTS_PAGE = """__SIGN_OUT_BUTTON__
+<div id="statementsMenu">__MENU__</div>
+<div class="document-list-header STATEMENTS"><h2 id="pageTitle">__HEADING__</h2></div>
+<div id="accountsAccordian-STATEMENTS">
+  <span>Statements</span> View:
+  <div id="filterstyledselect-0">
+    <input id="header-filterstyledselect-0" readonly>
+    <button id="iconButton-filterstyledselect-0" onclick="toggleYears()">v</button>
+    <ul id="ul-list-container-filterstyledselect-0" role="listbox" style="display:none"></ul>
+  </div>
+  <div id="accountsTable-STATEMENTS"><table><tbody id="rows"></tbody></table></div>
+</div>
+<div id="accountsAccordian-TAX_DOCUMENTS"><table style="display:none">
+  <tr id="accountsTable-TAX_DOCUMENTS-row0"><td>Dec 31, 2026</td><td>Statement</td></tr>
+</table></div>
 <script>
-  const KIND = '__KIND__', BASE = '__BASE__';
-  function choose(el, group, attr) {
-    document.querySelectorAll(`[data-group=${group}]`).forEach(o => o.setAttribute(attr, 'false'));
-    el.setAttribute(attr, 'true');
+const YEARS = __YEARS__, CONTROLS = '__CONTROLS__', BASE = '__BASE__', STANDARD = __STANDARD__;
+const list = document.getElementById('ul-list-container-filterstyledselect-0');
+const said = (text) =>
+  `<span class="accessible-text" style="position:absolute;clip:rect(0 0 0 0)">${text}</span>`;
+const go = (file) => { location = `${BASE}/${file}.pdf`; return false; };
+function toggleYears() { list.style.display = list.style.display === 'none' ? 'block' : 'none'; }
+function toggle(id) {
+  const menu = document.getElementById(id);
+  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+  return false;
+}
+function controls(id, i, file, date) {
+  if (CONTROLS === 'links') {
+    return `<a id="${id}-cell3-requestThisDocumentAnchor-pdf" href="#"
+              onclick="return go('${file}-view')">[view]${said(date + ' , opens document')}</a>
+            <a id="${id}-cell3-requestThisDocumentAnchor-download" href="#"
+              onclick="return go('${file}')">[save]${said(date + ' Saves document')}</a>`;
   }
-  function single() {
-    const tab = document.querySelector('[data-group=mode][aria-selected=true]');
-    return tab ? tab.dataset.value === 'single' : true;
-  }
-  function download(file) {
-    if (KIND === 'investment') {
-      location = single() ? `${BASE}/${file}.pdf` : `${BASE}/${file}-all.zip`;
-    } else if (KIND === 'checking') {
-      document.getElementById('dialog').innerHTML = `<div role="dialog">__CHOICES__
-        <button onclick="get('${file}')">Download</button></div>`;
-    } else {
-      location = `${BASE}/${file}.pdf`;
-    }
-  }
-  function get(file) {
-    const picked = document.querySelector('[data-group=format][aria-checked=true]');
-    const format = picked ? picked.dataset.value : 'none';
-    location = `${BASE}/${file}-${format}.pdf`;
-  }
+  const standard = STANDARD ? `<li><a id="item-0-${i}-downloadPDFOption" href="#"
+      onclick="return go('${file}-standard')">PDF</a></li>` : '';
+  return `<div id="requestThisDocumentDropdown-${id}-cell3">
+      <a id="header-requestThisDocumentDropdown-${id}-cell3" class="header" href="#"
+        onclick="return toggle('${id}-view')">[view]${said(date + ' Opens document menu')}</a>
+      <div id="${id}-view" style="display:none"><ul>
+        <li><a id="item-0-${i}-requestPDFOption" href="#"
+          onclick="return go('${file}-view')">PDF</a></li></ul></div></div>
+    <div id="${id}-cell3-downloadDocumentDropdown">
+      <a id="header-${id}-cell3-downloadDocumentDropdown" class="header" href="#"
+        onclick="return toggle('${id}-save')">
+          [save]${said(date + ' Opens menu to save document')}</a>
+      <div id="${id}-save" style="display:none"><ul>${standard}
+        <li><a id="item-1-${i}-downloadAccessiblePDFOption" href="#"
+          onclick="return go('${file}-accessible')">Accessible PDF</a></li></ul></div></div>`;
+}
+function show(year) {
+  const box = document.getElementById('header-filterstyledselect-0');
+  box.value = year;
+  box.setAttribute('aria-label', ` View:: ${year}`);
+  list.style.display = 'none';
+  const rows = (YEARS.find(([y]) => y === year) || [0, []])[1];
+  let date = '';
+  const body = document.getElementById('rows');
+  body.innerHTML = '';
+  setTimeout(() => {
+    body.innerHTML = rows.map(([cell, type, file], i) => {
+      const id = `accountsTable-STATEMENTS-row${i}`;
+      date = cell || date;
+      return `<tr id="${id}"><td id="${id}-cell0">${cell}</td><td id="${id}-cell1">${type}</td>
+        <td id="${id}-cell2">--</td><td id="${id}-cell3">${controls(id, i, file, date)}</td></tr>`;
+    }).join('');
+  }, 300);
+}
+list.innerHTML = YEARS.map(([y]) => `<li><a role="option" href="#"
+  onclick="show(${y}); return false"><span class="primary">${y}</span></a></li>`).join('');
+show(YEARS[0][0]);
 </script>"""
-
-TABS = """<div role="tablist">
-<div role="tab" data-group="mode" data-value="single" aria-selected="false"
-     onclick="choose(this, 'mode', 'aria-selected')">Single statement</div>
-<div role="tab" data-group="mode" data-value="multiple" aria-selected="true"
-     onclick="choose(this, 'mode', 'aria-selected')">Multiple statements</div></div>"""
-
-FORMAT_CHOICES = """
-<div role="radio" data-group="format" data-value="standard" aria-checked="false"
-     onclick="choose(this, 'format', 'aria-checked')">Standard PDF</div>
-<div role="radio" data-group="format" data-value="accessible" aria-checked="true"
-     onclick="choose(this, 'format', 'aria-checked')">Accessible PDF</div>"""
 
 
 class PdfServer:
@@ -205,8 +244,7 @@ class FakeBank:
 
     def __init__(self, signed_in=False, verify=False, approve=False, reject=False,
                  challenge=False, sign_out_works=True, expired=(), show=None,
-                 no_format_choice=False, chooser="push",
-                 next_button=True):
+                 no_standard=False, new_year=False, chooser="push", next_button=True):
         self.signed_in = signed_in
         self.verify = verify  # the site asks to verify the device
         self.approve = approve  # the person approves it on the phone
@@ -214,8 +252,9 @@ class FakeBank:
         self.challenge = challenge
         self.sign_out_works = sign_out_works
         self.expired = set(expired)  # account ids whose links now go to the dashboard
-        self.show = show or {}  # account id: the name its page shows instead
-        self.no_format_choice = no_format_choice
+        self.show = show or {}  # account id: the heading its page shows instead
+        self.no_standard = no_standard  # the download menu has only the accessible PDF
+        self.new_year = new_year  # the list opens on a year with no statements yet
         # The verification page: "push" shows the real chooser, "other" a chooser without the
         # push option, None skips the chooser because the site sent the push itself
         self.chooser = chooser
@@ -237,16 +276,16 @@ class FakeBank:
                                 "location='/logoff'" if self.sign_out_works else "")
 
     def _statements(self, route, account_id):
-        kind, name, suffix, rows = ACCOUNTS[account_id]
-        items = "\n".join(f"<mds-list-item><span>Statement {date}</span> "
-                          f"<button onclick=\"download('{file}')\">Download</button>"
-                          f"</mds-list-item>" for date, file in rows)
+        kind, name, suffix, controls, years = ACCOUNTS[account_id]
+        if self.new_year:
+            years = [(years[0][0] + 1, []), *years]
+        menu = "".join(f"<a href='#'>{n} (...{x})</a>" for _, n, x, _, _ in ACCOUNTS.values())
         page = (STATEMENTS_PAGE.replace("__SIGN_OUT_BUTTON__", self._sign_out_button())
-                .replace("__NAME__", self.show.get(account_id, name))
-                .replace("__SUFFIX__", suffix).replace("__KIND__", kind)
-                .replace("__TABS__", TABS if kind == "investment" else "")
-                .replace("__ROWS__", items).replace("__BASE__", self.server.base)
-                .replace("__CHOICES__", "" if self.no_format_choice else FORMAT_CHOICES))
+                .replace("__MENU__", menu)
+                .replace("__HEADING__", self.show.get(account_id, f"{name} (...{suffix})"))
+                .replace("__YEARS__", json.dumps(years)).replace("__CONTROLS__", controls)
+                .replace("__BASE__", self.server.base)
+                .replace("__STANDARD__", "false" if self.no_standard else "true"))
         return self._html(route, page)
 
     def handle(self, route):
@@ -570,14 +609,20 @@ def test_a_normal_run_saves_each_accounts_newest_statement_and_signs_out(whole_r
     assert whole_run.notes == [{"title": "bank1-statements", "message": "PASS"}]
 
 
-def test_each_kind_takes_its_own_step(whole_run):
+def test_each_kind_downloads_only_its_own_statement(whole_run):
     assert whole_run.start(FakeBank()) == 0
-    fetched = whole_run.server.fetches
-    assert "/chk1-oct-standard.pdf" in fetched  # the standard PDF, not the accessible one
-    assert "/chk1-oct-accessible.pdf" not in fetched
-    assert "/inv1-oct.pdf" in fetched  # a single statement, not all of them
-    assert not any(path.endswith(".zip") for path in fetched)
-    assert "/card1-oct.pdf" in fetched
+    assert sorted(whole_run.server.fetches) == [
+        "/card1-oct.pdf",
+        "/chk1-oct-standard.pdf",  # the standard PDF, not the accessible one
+        "/inv1-oct.pdf",  # the Single statement, not the Multi one or the letter
+    ]  # and nothing opened for viewing
+
+
+def test_a_new_year_with_no_statements_yet_looks_back_one_year(whole_run):
+    assert whole_run.start(FakeBank(new_year=True)) == 0
+    assert _saved(whole_run.data) == EVERY_FILE
+    log = (_run_dir(whole_run.data) / "run.log").read_text(encoding="utf-8")
+    assert "none in 2027 yet; viewing 2026" in log
 
 
 def test_private_values_stay_out_of_the_run_folder(whole_run):
@@ -653,10 +698,11 @@ def test_an_expired_link_fails_only_that_account_and_says_so(whole_run):
 
 
 def test_a_page_for_another_account_is_never_downloaded(whole_run):
-    site = FakeBank(show={"card1": "FakeSavings"})  # the card's match names FakeCard
+    # Its side menu lists every account, so only the heading counts
+    site = FakeBank(show={"card1": "FakeSavings (...8972)", "chk1": "FakeCard (...8972)"})
     assert whole_run.start(site) == 1
-    assert "the page doesn't show this account" in _report(whole_run.data)
-    assert "/card1-oct.pdf" not in whole_run.server.fetches
+    assert _report(whole_run.data).count("the page is for another account") == 2
+    assert _saved(whole_run.data) == [EVERY_FILE[2]]
 
 
 def test_a_pdf_for_another_account_never_replaces_a_good_file(whole_run, pdf_of):
@@ -677,10 +723,11 @@ def test_an_error_page_instead_of_a_pdf_fails_only_that_account(whole_run):
     assert _saved(whole_run.data) == [EVERY_FILE[0], EVERY_FILE[2]]
 
 
-def test_a_missing_format_choice_fails_clearly(whole_run):
-    assert whole_run.start(FakeBank(no_format_choice=True)) == 1
-    assert "expected a standard PDF choice" in _report(whole_run.data)
+def test_a_download_menu_without_the_standard_pdf_fails_clearly(whole_run):
+    assert whole_run.start(FakeBank(no_standard=True)) == 1
+    assert "the download menu has no standard PDF choice" in _report(whole_run.data)
     assert _saved(whole_run.data) == EVERY_FILE[1:]
+    assert "/chk1-oct-accessible.pdf" not in whole_run.server.fetches
 
 
 def test_a_failed_sign_out_is_only_a_warning(whole_run):
@@ -713,7 +760,9 @@ def test_dump_saves_one_page_of_each_kind_and_downloads_nothing(whole_run):
         assert (run_dir / f"dump_{name}.png").exists()
     assert whole_run.server.fetches == []
     assert _saved(whole_run.data) == before
-    assert f"would save {CHK}_2026-10.pdf" in _report(whole_run.data)
+    report = _report(whole_run.data)
+    assert f"would save {CHK}_2026-10.pdf" in report
+    assert f"2 statement(s), would save {INV}_2026-10.pdf" in report
     assert PASSWORD not in _written(whole_run.data)
 
 
