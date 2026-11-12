@@ -143,6 +143,28 @@ def test_a_block_covers_from_the_start_cell_right_to_the_edge_and_down():
     assert (row_count, col_count) == (100, 26)
 
 
+def test_a_block_with_a_width_writes_and_clears_only_those_columns():
+    writes, _, col_count = _block(rows=(("x", "y"), ("z",)), width=3)
+    update, clear = writes[0]
+    for request in (update, clear):
+        assert request["updateCells"]["range"]["startColumnIndex"] == 1
+        assert request["updateCells"]["range"]["endColumnIndex"] == 4
+    assert clear["updateCells"]["range"]["startRowIndex"] == 6
+    assert col_count == 26
+
+
+def test_a_block_with_a_width_grows_a_narrow_tab_to_fit_it():
+    writes, _, col_count = _block(col_count=2, rows=(("x",),), width=3)
+    assert writes[0][0] == {"appendDimension": {"sheetId": 7, "dimension": "COLUMNS",
+                                                "length": 2}}
+    assert col_count == 4
+
+
+def test_a_row_wider_than_the_block_is_refused():
+    with pytest.raises(SheetError, match="2 column"):
+        _block(rows=(("x", "y", "z"),), width=2)
+
+
 def test_block_values_keep_their_types_and_text_stays_literal():
     day = dt.date(2026, 3, 15)
     rows = [["=1+1", "", None, 12, Decimal("-1250.50"), 1.5, day, True, False]]
