@@ -12,7 +12,9 @@ from bank1_portal.parse import (
     dates_in,
     page_shows,
     pdf_text,
+    period_ends,
     plan_items,
+    shows_number_ending,
     slug,
     statement_file_name,
 )
@@ -179,3 +181,55 @@ def test_another_accounts_statement_is_refused_without_naming_the_suffix(text_of
 def test_a_statement_for_another_period_is_refused(text_of):
     with pytest.raises(StatementError, match="2026-10-31"):
         check_statement(text_of(closing="September 30, 2026"), "1111", OCT31)
+    with pytest.raises(StatementError, match="2026-10-31"):
+        check_statement(text_of(closing="November 30, 2026"), "1111", OCT31)
+
+
+# As a real investment statement shows them: the account number in two groups, and a period
+# ending on the last business day, a day before the date in the list
+REAL_SHAPE = """Account Statement
+October 01 - October 30, 2026
+123-45678
+Beginning value $1,234,567.89"""
+
+
+def test_a_period_ending_a_few_days_before_the_lists_date_passes():
+    check_statement(REAL_SHAPE, "5678", OCT31)
+
+
+def test_a_date_from_the_previous_period_doesnt_count():
+    with_previous = REAL_SHAPE + "\nPrevious statement: September 30, 2026"
+    check_statement(with_previous, "5678", OCT31)
+    with pytest.raises(StatementError, match="2026-09-30"):
+        check_statement(with_previous, "5678", dt.date(2026, 9, 30))
+
+
+def test_period_ends_reads_each_form():
+    assert period_ends("October 01 - October 30, 2026") == [dt.date(2026, 10, 30)]
+    assert period_ends("10/01/2026 to 10/30/2026") == [dt.date(2026, 10, 30)]
+    assert period_ends("Oct 1, 2026 through Oct 30, 2026") == [dt.date(2026, 10, 30)]
+    assert period_ends("Closing date October 30, 2026") == []
+
+
+def test_a_period_ending_too_early_is_refused():
+    with pytest.raises(StatementError, match="up to 5 days before"):
+        check_statement(REAL_SHAPE.replace("October 30", "October 24"), "5678", OCT31)
+
+
+@pytest.mark.parametrize(("text", "found"), [
+    ("Account 123-45678", True),
+    ("Account number: XXXX XXXX XXXX 5678", True),
+    ("Account (...5678)", True),
+    ("Account #:12345678", True),
+    ("Account 123-45679", False),
+    ("Account 123-456789", False),
+    ("Balance 5,678.00", False),
+    ("Balance $5678", False),
+    ("Change 15678.25", False),
+])
+def test_the_suffix_must_end_a_number_not_an_amount(text, found):
+    assert check_statement_shows(text) is found
+
+
+def check_statement_shows(text):
+    return shows_number_ending(text, "5678")

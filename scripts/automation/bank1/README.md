@@ -46,10 +46,18 @@ The kind of account sets which rows are its statements, and what each adds to th
 - **The list shows one year at a time,** newest first. If that year has no statement yet, as
   early in January, the run views the year before, once. Older statements aren't downloaded.
 - **Every run downloads the newest statements again and replaces the files.**
-- **Each file is checked before it replaces anything.** It must start with `%PDF`. A statement
-  must be at least 5,000 bytes, and its text must show the account's `suffix` and the closing
-  date from the list. A letter must be at least 1,000 bytes. A file that fails stays in the run
-  folder under `downloads\`, and that file fails. The account's other files still go ahead.
+- **Each file is checked before it replaces anything.** It must start with `%PDF`. A letter
+  must be at least 1,000 bytes. A statement must be at least 5,000 bytes, and its text must
+  show:
+  - **A number ending in the account's `suffix`,** like `123-45678` for `5678`. An amount, like
+    `5,678.00`, doesn't count.
+  - **A period ending on the list's date or up to 5 days before it.** The list can show a
+    statement a day or two after its period ends: a period of `October 01 - October 30, 2026`
+    is listed as Oct 31. Only the period's end counts, since a statement also mentions the
+    previous period's. A PDF with no period printed is checked against any date in it.
+
+  A file that fails stays in the run folder under `downloads\`, and that file fails. The
+  account's other files still go ahead.
 - **Logs and reports never show a file name,** since it holds the bank's name and a suffix, or
   a letter's title. They show the label and a number instead: `<label> single`,
   `<label> letter 1`.
@@ -125,12 +133,16 @@ It was built from a working smoke test, which signed in, verified the device, an
 an activity CSV, unattended and on a locked session. The sign-in selectors and verification
 words come from that test.
 
-**Has run** (`--dump`, on the test workstation):
+**Has run** (on the test workstation):
 
-- Signing in with a remembered device, and signing out
+- Signing in with a remembered device, and signing out, once per run
 - Opening one checking, one card, and one investment statements page by its address, checking
   the heading names that account, and picking what a run would save: the newest
-  **Statement**, or **Single** and **Multi**, and the letters
+  **Statement**, or **Single** and **Multi**, and the letters (`--dump`)
+- Downloading an investment's **Single** and **Multi** statements and four letters through
+  their download links. The letters saved. The statements failed the old PDF check, which this
+  check replaces: it was rebuilt from how those two PDFs show the account number and period,
+  and passes both, but hasn't run on the site yet
 
 **Not yet run:**
 
@@ -139,10 +151,10 @@ words come from that test.
   chooser. Next's are candidates modeled on the site's other buttons. Nothing has clicked either
   on the real site yet
 - The letter file names: they come from each row's title, untested against real titles
-- Any download: the menu and its standard PDF, the download link, and how each delivers the PDF
+- A checking account's download menu and its standard PDF, and a card's download link
+- The PDF check against checking and card statements
 - Looking back a year when the newest year has no statement. The year filter's selectors come
   from the outline, but it has never been clicked
-- The PDF check against a real statement: which date formats it shows
 - Verification timing out
 
 ## Set up each machine
