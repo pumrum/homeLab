@@ -128,8 +128,9 @@ words come from that test.
 **Has run** (`--dump`, on the test workstation):
 
 - Signing in with a remembered device, and signing out
-- Opening one checking, one card, and one investment statements page by its address, and
-  finding the rows
+- Opening one checking, one card, and one investment statements page by its address, checking
+  the heading names that account, and picking what a run would save: the newest
+  **Statement**, or **Single** and **Multi**, and the letters
 
 **Not yet run:**
 
@@ -137,8 +138,6 @@ words come from that test.
   mobile app** and **Next**. The option's selectors come from a `--dump` outline of the real
   chooser. Next's are candidates modeled on the site's other buttons. Nothing has clicked either
   on the real site yet
-- Picking the statements and letters by their row types, and the account check against the
-  heading. Both are built from `--dump` outlines, but this code hasn't run on the real pages yet
 - The letter file names: they come from each row's title, untested against real titles
 - Any download: the menu and its standard PDF, the download link, and how each delivers the PDF
 - Looking back a year when the newest year has no statement. The year filter's selectors come
