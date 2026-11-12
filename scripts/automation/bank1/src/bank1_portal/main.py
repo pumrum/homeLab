@@ -157,7 +157,7 @@ def _names(account: Account, items: list[Item]) -> list[str]:
 
 def _target(cfg: Config, account: Account, data_dir: Path, item: Item) -> Path:
     name = statement_file_name(cfg.site.name_in_files, account.suffix, item.closing, item.part)
-    return statement_path(data_dir, account.label, name)
+    return statement_path(data_dir, name)
 
 
 def _skip(item: Item, target: Path) -> bool:

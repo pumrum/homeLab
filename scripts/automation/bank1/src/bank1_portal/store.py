@@ -7,8 +7,9 @@ import os
 from pathlib import Path
 
 
-def statement_path(data_dir: Path, label: str, file_name: str) -> Path:
-    return data_dir / "data" / "statements" / label / file_name
+def statement_path(data_dir: Path, file_name: str) -> Path:
+    """Every account's files sit together: each name holds its account's suffix."""
+    return data_dir / "data" / "statements" / file_name
 
 
 def save_statement(download: Path, target: Path) -> None:

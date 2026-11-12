@@ -11,11 +11,12 @@ from bank1_portal.main import chosen_accounts, final_event, parse_args
 
 def _cfg():
     accounts = [
-        {"label": label, "kind": kind, "suffix": "9871",
+        {"label": label, "kind": kind, "suffix": f"987{n}",
          "statements_url": f"https://bank.example.invalid/statements/{label}"}
-        for label, kind in [("entity1_checking", "checking"), ("entity2_checking", "checking"),
-                            ("personal_card_1", "card"), ("personal_invest_1", "investment"),
-                            ("personal_card_2", "card")]
+        for n, (label, kind) in enumerate([
+            ("entity1_checking", "checking"), ("entity2_checking", "checking"),
+            ("personal_card_1", "card"), ("personal_invest_1", "investment"),
+            ("personal_card_2", "card")])
     ]
     return parse_config({"site": {"login_url": "https://bank.example.invalid/logon",
                                   "name_in_files": "FakeBank"},

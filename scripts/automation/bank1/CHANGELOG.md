@@ -11,8 +11,8 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
   **Single** and **Multi**. It also saves the letters in the list, like disclosures: the newest
   every run, older ones once. Files are named as this bank's statements already were, as
   `<YYYY-MM-DD>_<name>_<suffix>.pdf`, with `-single`, `-multi`, or a letter's title added when
-  needed, under `data\statements\<label>\`. Each account's statements page is opened by its
-  direct address and checked against the heading above the list before anything downloads. Each
+  needed, all in `data\statements\`. Each account's statements page is opened by its direct
+  address and checked against the heading above the list before anything downloads. Each
   statement PDF must show the account's suffix and closing date before it replaces a file. One
   file's failure doesn't stop the others. If the newest year has no statement yet, the run looks
   at the year before. A verification timeout stops the run before any account is tried. `--dump`

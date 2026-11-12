@@ -74,7 +74,7 @@ def test_a_suffix_without_quotes_is_refused():
         parse_config(doc(suffix=1111))
 
 
-def test_labels_and_addresses_must_each_be_used_once():
+def test_labels_addresses_and_suffixes_must_each_be_used_once():
     two = doc()
     two["accounts"].append(dict(two["accounts"][0]))
     with pytest.raises(ConfigError, match="duplicate label"):
@@ -82,6 +82,10 @@ def test_labels_and_addresses_must_each_be_used_once():
     two["accounts"][1]["label"] = "entity2_checking"
     with pytest.raises(ConfigError, match="same \"statements_url\""):
         parse_config(two)
+    two["accounts"][1]["statements_url"] = "https://bank.example.invalid/statements/a2"
+    with pytest.raises(ConfigError, match="same \"suffix\"") as e:
+        parse_config(two)
+    assert "1111" not in str(e.value)  # a private value
 
 
 def test_a_misspelled_notification_variable_fails():

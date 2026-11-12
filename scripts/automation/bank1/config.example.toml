@@ -9,12 +9,13 @@ login_url = "https://<address of the sign-in page>"
 # The bank's name in saved file names, as in 2026-10-31_<name>_1234.pdf. No "_"
 name_in_files = "<bank name>"
 
-# One block per account. A run saves its newest statement as
-# C:\automation\bank1\data\statements\<label>\<label>_<YYYY-MM>.pdf
-#   label           neutral: in file names, logs, and reports. Lowercase letters, digits, or _
+# One block per account. A run saves its newest statements, every account's in one folder, as
+# C:\automation\bank1\data\statements\<YYYY-MM-DD>_<name_in_files>_<suffix>.pdf
+#   label           neutral: in logs and reports. Lowercase letters, digits, or _
 #   kind            "checking", "card", or "investment": which row of the list is its statement
 #   statements_url  the full address of its statements page, opened directly after sign-in
-#   suffix          its last four digits, in quotes. The statement PDF must show them
+#   suffix          its last four digits, in quotes. In its file names, so each account's
+#                   must differ. The statement PDF must show a number ending in them
 #   match           optional: text the heading above its statements must show. The suffix
 #                   if left out
 

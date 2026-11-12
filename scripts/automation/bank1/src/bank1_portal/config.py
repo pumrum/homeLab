@@ -22,7 +22,7 @@ from automation_common.config import (
 )
 from automation_common.notify import STANDARD_NOTIFICATIONS, Template, parse_notifications
 
-_LABEL = re.compile(r"^[a-z0-9_]+$")  # goes in folder and file names
+_LABEL = re.compile(r"^[a-z0-9_]+$")  # goes in logs, reports, and run file names
 _SUFFIX = re.compile(r"^[0-9]{4}$")
 _PLACEHOLDERS = ("<", ">")  # not "...": a page may show an account as ...1234
 _FILE_NAME_PART = re.compile(r'^[^\\/:*?"<>|_]+$')  # "_" separates the parts of a file name
@@ -112,6 +112,11 @@ def _reject_repeats(accounts: list[Account]) -> None:
     urls = [account.statements_url for account in accounts]
     if len(set(urls)) != len(urls):
         raise ConfigError('[[accounts]]: two accounts have the same "statements_url"')
+    # Every account's files share one folder, told apart by the suffix in their names
+    suffixes = [account.suffix for account in accounts]
+    if len(set(suffixes)) != len(suffixes):
+        raise ConfigError('[[accounts]]: two accounts have the same "suffix", so their files '
+                          "would overwrite each other")
 
 
 def parse_config(doc: Mapping[str, Any]) -> Config:

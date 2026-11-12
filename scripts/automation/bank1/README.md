@@ -18,13 +18,15 @@ opens the account's statements page by its direct address, checks that it's this
 page, finds its newest statements and any letters, downloads them, checks them, and saves them.
 Then it signs out.
 
-Files are named the way this bank's statements were already being named, with the full closing
-date, the bank's name from `name_in_files` in the config, and the account's four-digit suffix:
+Every account's files go in one folder, `C:\automation\bank1\data\statements\`. They're named
+the way this bank's statements were already being named, with the full closing date, the bank's
+name from `name_in_files` in the config, and the account's four-digit suffix, so each account's
+suffix must differ:
 
 ```text
-C:\automation\bank1\data\statements\<label>\2026-10-31_<name>_1234.pdf
-C:\automation\bank1\data\statements\<label>\2026-10-31_<name>_1234-single.pdf
-C:\automation\bank1\data\statements\<label>\2026-09-30_<name>_1234-single-2026-annual-disclosure-cover-letter.pdf
+2026-10-31_<name>_1234.pdf
+2026-10-31_<name>_1234-single.pdf
+2026-09-30_<name>_1234-single-2026-annual-disclosure-cover-letter.pdf
 ```
 
 The kind of account sets which rows are its statements, and what each adds to the name:

@@ -605,17 +605,17 @@ def _saved(data):
     root = data / "data" / "statements"
     if not root.exists():
         return []
-    return sorted(p.relative_to(root).as_posix() for p in root.rglob("*.pdf"))
+    return sorted(p.relative_to(root).as_posix() for p in root.rglob("*"))  # all in one folder
 
 
 LETTER = "2026-annual-disclosure-cover-letter"
 FILES = {
-    CHK: [f"{CHK}/2026-10-31_{NAME}_9871.pdf", f"{CHK}/2026-10-31_{NAME}_9871-privacy-notice.pdf"],
-    CARD: [f"{CARD}/2026-10-27_{NAME}_8972.pdf"],
-    INV: [f"{INV}/2026-09-30_{NAME}_7983-multi-{LETTER}.pdf",
-          f"{INV}/2026-09-30_{NAME}_7983-single-{LETTER}.pdf",
-          f"{INV}/2026-10-31_{NAME}_7983-multi.pdf",
-          f"{INV}/2026-10-31_{NAME}_7983-single.pdf"],
+    CHK: [f"2026-10-31_{NAME}_9871.pdf", f"2026-10-31_{NAME}_9871-privacy-notice.pdf"],
+    CARD: [f"2026-10-27_{NAME}_8972.pdf"],
+    INV: [f"2026-09-30_{NAME}_7983-multi-{LETTER}.pdf",
+          f"2026-09-30_{NAME}_7983-single-{LETTER}.pdf",
+          f"2026-10-31_{NAME}_7983-multi.pdf",
+          f"2026-10-31_{NAME}_7983-single.pdf"],
 }
 EVERY_FILE = sorted(sum(FILES.values(), []))
 
