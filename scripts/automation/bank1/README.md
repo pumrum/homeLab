@@ -137,14 +137,13 @@ words come from that test.
 
 **Has run** (on the test workstation):
 
-- Signing in with a remembered device, and signing out, once per run
-- Opening one checking, one card, and one investment statements page by its address, checking
-  the heading names that account, and picking what a run would save: the newest
-  **Statement**, or **Single** and **Multi**, and the letters (`--dump`)
-- Downloading an investment's **Single** and **Multi** statements and four letters through
-  their download links. The letters saved. The statements failed the old PDF check, which this
-  check replaces: it was rebuilt from how those two PDFs show the account number and period,
-  and passes both, but hasn't run on the site yet
+- A full run of all 11 accounts, clean: one sign-in with a remembered device, every account's
+  statements page opened by its address and checked against its heading, every download (the
+  checking menu's standard PDF, and the card and investment download links), every PDF check,
+  and one sign-out
+- Investments' **Single** and **Multi** statements and their letters, with the letters' file
+  names from their titles
+- `--dump` on one account of each kind
 
 **Not yet run:**
 
@@ -152,9 +151,6 @@ words come from that test.
   mobile app** and **Next**. The option's selectors come from a `--dump` outline of the real
   chooser. Next's are candidates modeled on the site's other buttons. Nothing has clicked either
   on the real site yet
-- The letter file names: they come from each row's title, untested against real titles
-- A checking account's download menu and its standard PDF, and a card's download link
-- The PDF check against checking and card statements
 - Looking back a year when the newest year has no statement. The year filter's selectors come
   from the outline, but it has never been clicked
 - Verification timing out
@@ -219,7 +215,7 @@ command = "bank1-statements"
 timeout_minutes = 40
 ```
 
-The limit allows 5 minutes of verification and 10 accounts at their slowest. Raise it if you add
+The limit allows 5 minutes of verification and 11 accounts at their slowest. Raise it if you add
 accounts.
 
 ## Add another command
