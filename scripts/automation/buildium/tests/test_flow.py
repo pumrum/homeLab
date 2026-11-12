@@ -9,6 +9,7 @@ import datetime as dt
 import http.server
 import json
 import threading
+import time
 from decimal import Decimal
 from types import SimpleNamespace
 from urllib.parse import urlsplit
@@ -99,6 +100,7 @@ __CHALLENGE__
 # Mirrors the sign-in server's page: a real form, and the Google button now has the class the
 # old Sign in button had
 AUTH_LOGIN_PAGE = """<h1 class="login__sign-in-text">Sign in</h1>
+__ERROR__
 <form onsubmit="send(); return false">
   <label class="form__label">Email Address</label>
   <input id="userName" class="form-element__input" type="text">
@@ -124,6 +126,10 @@ __CHALLENGE__
     if (reply.go) location = reply.go;
   }
 </script>"""
+# After a refused sign-in the server reloads the page with the reason in the address and a box
+FORM_ERROR = """<div class="form-error-alert"><div class="alert alert--error">
+  <span class="alert__label">__TEXT__</span></div></div>"""
+CAPTCHA_FAILED = "Captcha verification failed. Please try again."
 # Long enough that a check of the address alone would see it
 PASSING_THROUGH_MS = 400
 CHALLENGE = """<iframe title="recaptcha challenge expires in two minutes" src="about:blank"
@@ -235,8 +241,9 @@ class FakeSite:
 
     def __init__(self, signed_in_as=None, mfa=False, mfa_clears=False, reject=False,
                  challenge=False, sign_out_works=True, pdf_for=None, pad_dates=False,
-                 sign_out_cover="", auth_server=False):
+                 sign_out_cover="", auth_server=False, refuse_with=None):
         self.user = signed_in_as
+        self.refuse_with = refuse_with  # the sign-in server's error box text
         self.auth_server = auth_server
         self.mfa = mfa  # True, or the set of users who get asked
         self.mfa_clears = mfa_clears  # someone opens the emailed link
@@ -262,7 +269,10 @@ class FakeSite:
 
     def _auth(self, route, path):
         if path == AUTH_LOGIN:
-            page = AUTH_LOGIN_PAGE.replace("__CHALLENGE__", CHALLENGE if self.challenge else "")
+            refused = "error=" in urlsplit(route.request.url).query
+            error = FORM_ERROR.replace("__TEXT__", self.refuse_with) if refused else ""
+            page = (AUTH_LOGIN_PAGE.replace("__CHALLENGE__", CHALLENGE if self.challenge else "")
+                    .replace("__ERROR__", error))
             return self._html(route, page)
         if path == APP_LOGIN:
             if self.user:
@@ -324,6 +334,9 @@ class FakeSite:
     def _api_login(self, route, fields):
         self.logins.append(fields)
         email = fields["email"]
+        if self.refuse_with:
+            return route.fulfill(status=200, content_type="application/json",
+                                 body=json.dumps({"go": f"{AUTH}{AUTH_LOGIN}?error=refused"}))
         if self.reject or email not in USERS:
             return route.fulfill(status=200, content_type="application/json", body="{}")
         self.user = email
@@ -410,6 +423,26 @@ def test_sign_out_reaches_the_sign_in_server(open_site):
     sign_out(page, SITE, FAST)
     assert site.user is None
     page.wait_for_url(f"{AUTH}{AUTH_LOGIN}")
+
+
+def test_a_bot_check_refusal_fails_at_once_without_trying_again(open_site):
+    site = FakeSite(auth_server=True, refuse_with=CAPTCHA_FAILED)
+    slow = Timeouts(field=2_000, after_submit=60_000, mfa_settle_s=0.3, mfa=1_500, menu=500,
+                    sign_out=1_500)
+    started = time.monotonic()
+    with pytest.raises(LoginError, match="bot check") as caught:
+        sign_in(open_site(site), SITE, CRED, slow)
+    assert time.monotonic() - started < 20  # not the minute after_submit allows
+    assert len(site.logins) == 1
+    assert CRED.password not in str(caught.value)
+
+
+def test_another_sign_in_error_is_reported_without_its_text(open_site):
+    site = FakeSite(auth_server=True, refuse_with="Something made-up went wrong")
+    with pytest.raises(LoginError, match="showed an error") as caught:
+        sign_in(open_site(site), SITE, CRED, FAST)
+    assert "made-up" not in str(caught.value)
+    assert len(site.logins) == 1
 
 
 def test_an_app_that_never_shows_its_menu_isnt_signed_in(open_site):

@@ -62,6 +62,8 @@ BOT_CHECK = [
     "iframe[src*='hcaptcha.com']",
     "iframe[src*='challenges.cloudflare.com']",
 ]
+# The sign-in server's own error box, shown above the form after a failed sign-in
+FORM_ERROR = [".form-error-alert .alert__label", ".form-error-alert .alert"]
 POLL_MS = 100
 
 
@@ -197,6 +199,24 @@ def _to_a_clean_login_form(page: Page, site: Site, t: Timeouts) -> None:
         raise SignOutError("still signed in after signing out")
 
 
+def _check_form_error(page: Page) -> None:
+    """Raise as soon as the site says why it refused, instead of waiting for the form to go.
+
+    The message is fixed text, never the page's, which could change to include anything.
+    """
+    found, _ = find_first([page], FORM_ERROR, 0)
+    if found is None:
+        return
+    try:
+        text = found.inner_text(timeout=1_000)
+    except PwError:
+        text = ""
+    if "captcha" in text.casefold():
+        raise LoginError("the site's bot check (reCAPTCHA) refused the sign-in, so it stopped "
+                         "without trying again")
+    raise LoginError("the site showed an error after the email and password were sent")
+
+
 def _required(page: Page, candidates: list[str], what: str, t: Timeouts):
     found, selector = find_first([page], candidates, t.field)
     if found is None:
@@ -224,6 +244,7 @@ def _wait_after_submit(page: Page, site: Site, t: Timeouts) -> Step:
             if now > deadline:
                 raise LoginError(f"the app didn't finish loading on {_path(page)}")
         elif find_first([page], EMAIL_FIELD + PASSWORD_FIELD, 0)[0] is not None:
+            _check_form_error(page)
             form_gone_since = None
             if now > deadline:
                 raise LoginError("the site did not accept the email and password")

@@ -19,6 +19,8 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
   separate sign-in server. The app address it passes through on the way looked like a session
   left open. The app now counts only once its Account menu shows, and the new form's fields and
   `Sign in` button are found first. This covers every command in this package.
+- A sign-in the site refuses now fails as soon as the sign-in server shows its error. A refusal
+  by its reCAPTCHA says so, instead of `the site did not accept the email and password`.
 - `[statements]` is now only required by `buildium-statements`.
 - The MFA push now names the entity's abbreviation instead of its key.
 - The push notifications' words can now be set in `config.toml`, as optional

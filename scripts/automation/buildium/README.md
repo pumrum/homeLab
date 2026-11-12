@@ -200,8 +200,14 @@ or the app counts as MFA.
 In November 2026 the site moved the sign-in form to a separate sign-in server, with new field
 names. On the way there, the browser passes through an app address with nobody signed in, which
 used to look like a session left open and failed every run with `no Account menu`. Now the app
-counts only once its Account menu shows. **Not yet run:** this sign-in on the real site, and MFA
-through the sign-in server.
+counts only once its Account menu shows.
+
+The first real run with this found the form and sent the email and password once, and the sign-in
+server refused them with `Captcha verification failed`. Its reCAPTCHA scores each sign-in without
+showing a challenge, and it judged the job's browser to be automated. The run now stops at once
+with `the site's bot check (reCAPTCHA) refused the sign-in`, instead of waiting 30 seconds and
+blaming the password. Bot checks are never worked around, so a run can't sign in while the site
+refuses it. **Not yet run:** a sign-in the server accepts, and MFA through the sign-in server.
 
 The Account button's tooltip was seen covering `Sign out` when one sign-out timed out. Sign-out
 now moves the mouse to the item first, then uses `click_until`, and `run.log` says which way the
