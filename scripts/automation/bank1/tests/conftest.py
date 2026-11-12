@@ -54,3 +54,9 @@ def pdf_of():
 @pytest.fixture
 def text_of():
     return statement_text
+
+
+@pytest.fixture
+def letter_pdf():
+    """A synthetic letter: a short PDF with no account details."""
+    return make_pdf("Important information about your account", pad=1_500)

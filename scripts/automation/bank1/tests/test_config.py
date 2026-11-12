@@ -15,7 +15,17 @@ def doc(**account):
     entry = {"label": "entity1_checking", "kind": "checking",
              "statements_url": "https://bank.example.invalid/statements/a1", "suffix": "1111"}
     entry |= account
-    return {"site": {"login_url": "https://bank.example.invalid/logon"}, "accounts": [entry]}
+    return {"site": {"login_url": "https://bank.example.invalid/logon",
+                     "name_in_files": "FakeBank"}, "accounts": [entry]}
+
+
+@pytest.mark.parametrize("name", ["Fake_Bank", "Fake/Bank", "Fake:Bank", "<bank name>"])
+def test_the_name_in_file_names_must_be_safe_and_filled_in(name):
+    bad = doc()
+    bad["site"]["name_in_files"] = name
+    with pytest.raises(ConfigError, match=r"\[site\]") as e:
+        parse_config(bad)
+    assert "Fake" not in str(e.value)  # a private value
 
 
 def test_a_good_config_loads_and_match_defaults_to_the_suffix():

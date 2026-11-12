@@ -1,4 +1,4 @@
-"""bank1-statements: sign in once, then save each account's newest PDF statement.
+"""bank1-statements: sign in once, then save each account's newest PDF statements and letters.
 
     uv run bank1-statements                   normal run: every account, saved under data
     uv run bank1-statements --account LABEL   only that account
@@ -23,18 +23,28 @@ from bank1_portal import PROCESS
 from bank1_portal.capture import capture
 from bank1_portal.config import NOTIFICATIONS, Account, Config, load_config
 from bank1_portal.login import LoginError
-from bank1_portal.parse import check_pdf_file, check_statement, pdf_text, statement_file_name
+from bank1_portal.pages import FetchError
+from bank1_portal.parse import (
+    Item,
+    check_pdf_file,
+    check_statement,
+    pdf_text,
+    statement_file_name,
+)
 from bank1_portal.session import open_browser, profile_dir, signed_in_page
 from bank1_portal.statements_fetch import (
+    Plan,
     check_statements_page,
-    fetch_statement,
-    find_newest,
+    download,
     go_to_statements,
+    plan,
+    still_on_page,
 )
 from bank1_portal.store import save_statement, statement_path
 
 COMMAND = "bank1-statements"
 TIMED_OUT = "verification timed out"
+LETTER_MIN_BYTES = 1_000  # a letter can be a short page; a statement is checked at 5,000
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +88,7 @@ def load_stage(run: Run, data_dir: Path) -> Config | None:
     # suffix isn't masked: four digits would also blank out dates and times in every log.
     # It's never logged, and no message repeats it
     run.masker.add(cfg.site.login_url)
+    run.masker.add(cfg.site.name_in_files)
     for account in cfg.accounts:
         run.masker.add(account.statements_url)
         if account.match != account.suffix:
@@ -119,45 +130,104 @@ def _ignore(_: str) -> None:
     pass
 
 
-def dump_stage(run: Run, page: Page, account: Account, observer: Observer) -> None:
-    """Open the page and report what a run would pick. Downloads nothing, and clicks nothing
+def _open(page: Page, account: Account, observer: Observer) -> Plan:
+    go_to_statements(page, account)
+    try:
+        check_statements_page(page, account)
+    finally:
+        observer("statements")  # also when the list wasn't recognized
+    return plan(page, account)
+
+
+def _key(item: Item) -> tuple:
+    return item.closing, item.part, item.letter
+
+
+def _names(account: Account, items: list[Item]) -> list[str]:
+    """Each row's name in the report. A letter's title stays out: it may name the bank."""
+    names, letters = [], 0
+    for item in items:
+        if item.letter:
+            letters += 1
+            names.append(f"{account.label} letter {letters}")
+        else:
+            names.append(f"{account.label} {item.part}".strip())
+    return names
+
+
+def _target(cfg: Config, account: Account, data_dir: Path, item: Item) -> Path:
+    name = statement_file_name(cfg.site.name_in_files, account.suffix, item.closing, item.part)
+    return statement_path(data_dir, account.label, name)
+
+
+def _skip(item: Item, target: Path) -> bool:
+    """An older letter already saved doesn't change, so it isn't downloaded again."""
+    return item.letter and not item.newest and target.exists()
+
+
+def dump_stage(run: Run, page: Page, cfg: Config, account: Account, data_dir: Path,
+               observer: Observer) -> None:
+    """Open the page and report what a run would save. Downloads nothing, and clicks nothing
     but the year filter, when the newest year has no statement yet."""
     try:
-        go_to_statements(page, account)
-        try:
-            check_statements_page(page, account)
-        finally:
-            observer("statements")  # also when the list wasn't recognized
-        pick = find_newest(page, account)
+        found = _open(page, account, observer)
     except Exception as e:  # noqa: BLE001 - one account's failure must not stop the others
         save_page_evidence(page, run.run_dir, run.next_failure_prefix())
         run.summary.record("dump", account.label, Status.FAILED, why(e))
         return
-    name = statement_file_name(account.label, pick.newest.closing)
+    statements = [item for item in found.items if not item.letter]
+    letters = [item for item in found.items if item.letter]
+    new = sum(not _skip(item, _target(cfg, account, data_dir, item)) for item in letters)
+    kinds = ", ".join(item.part or "statement" for item in statements)
     run.summary.record("dump", account.label, Status.OK,
-                       f"{pick.count} statement(s), would save {name}")
+                       f"would save {kinds} closing {statements[0].closing} and "
+                       f"{new} of {len(letters)} letter(s)")
 
 
-def statement_stage(run: Run, page: Page, account: Account, data_dir: Path,
+def statement_stage(run: Run, page: Page, cfg: Config, account: Account, data_dir: Path,
                     observer: Observer) -> None:
-    """Download, check, and save one account's statement. Records the result; never raises."""
-    download = run.run_dir / "downloads" / f"{account.label}.pdf"
-    step = "download"
+    """Save the account's newest statements and its letters. Records each; never raises."""
     try:
-        newest = fetch_statement(page, account, download, observer)
-        step = "check"
-        check_pdf_file(download)
-        check_statement(pdf_text(download), account.suffix, newest.closing)
-        step = "save"
-        name = statement_file_name(account.label, newest.closing)
-        save_statement(download, statement_path(data_dir, account.label, name))
+        found = _open(page, account, observer)
     except Exception as e:  # noqa: BLE001 - one account's failure must not stop the others
         save_page_evidence(page, run.run_dir, run.next_failure_prefix())
-        # A file that failed its checks stays in the run folder's downloads for a look
-        run.summary.record("statement", account.label, Status.FAILED, f"{step}: {why(e)}")
+        run.summary.record("statement", account.label, Status.FAILED, f"open: {why(e)}")
         return
-    note = f"; {newest.same_month} other(s) closed that month" if newest.same_month else ""
-    run.summary.record("statement", account.label, Status.OK, f"saved {name}{note}")
+    rows = {_key(item): found.rows[item.index] for item in found.items}
+    for number, (item, name) in enumerate(zip(found.items, _names(account, found.items),
+                                              strict=True), start=1):
+        target = _target(cfg, account, data_dir, item)
+        if _skip(item, target):
+            run.summary.record("statement", name, Status.UNCHANGED, "already saved")
+            continue
+        # A file that fails its checks stays in the run folder's downloads for a look
+        dest = run.run_dir / "downloads" / f"{account.label}_{number}.pdf"
+        step = "download"
+        try:
+            if _key(item) not in rows:
+                raise FetchError("the row was gone after the page reopened")
+            download(page, rows[_key(item)], dest)
+            step = "check"
+            if item.letter:
+                check_pdf_file(dest, LETTER_MIN_BYTES)
+            else:
+                check_pdf_file(dest)
+                check_statement(pdf_text(dest), account.suffix, item.closing)
+            step = "save"
+            save_statement(dest, target)
+            run.summary.record("statement", name, Status.OK, f"saved {item.closing}")
+        except Exception as e:  # noqa: BLE001 - one row's failure must not stop the others
+            save_page_evidence(page, run.run_dir, run.next_failure_prefix())
+            run.summary.record("statement", name, Status.FAILED, f"{step}: {why(e)}")
+        # A PDF shown in the page has the list reloaded afterward, which resets its year
+        # filter, so the rows are found again after every download
+        try:
+            still_on_page(page, account)
+            again = plan(page, account)
+            rows = {_key(i): again.rows[i.index] for i in again.items}
+        except Exception as e:  # noqa: BLE001 - the rest of this account can't be reached
+            run.summary.record("statement", account.label, Status.FAILED, f"reopen: {why(e)}")
+            return
 
 
 def browser_stage(run: Run, cfg: Config, accounts: tuple[Account, ...], data_dir: Path,
@@ -173,9 +243,10 @@ def browser_stage(run: Run, cfg: Config, accounts: tuple[Account, ...], data_dir
                 while remaining:
                     account = remaining.pop(0)
                     if dump:
-                        dump_stage(run, page, account, dump_observer(run, ctx, account.label))
+                        dump_stage(run, page, cfg, account, data_dir,
+                                   dump_observer(run, ctx, account.label))
                     else:
-                        statement_stage(run, page, account, data_dir, _ignore)
+                        statement_stage(run, page, cfg, account, data_dir, _ignore)
         return
     except LoginError as e:
         stage, reason = "login", why(e)

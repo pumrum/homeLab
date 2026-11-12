@@ -34,7 +34,8 @@ HOST = "https://bank.example.invalid"
 LOGIN = "/logon"
 DASHBOARD = "/web/dashboard"
 VERIFY = "/web/verify"
-SITE = Site(f"{HOST}{LOGIN}")
+NAME = "FakeBankName"  # the bank's name in file names: private, so never in a log
+SITE = Site(f"{HOST}{LOGIN}", NAME)
 USER = "fake-user"
 PASSWORD = "made-up-password"
 CRED = Credential(USER, PASSWORD)
@@ -49,16 +50,18 @@ ACCOUNTS = {
     "chk1": ("checking", "FakeChecking", "9871", "menus",
              [(2026, [("Sep 30, 2026", "Statement", "chk1-sep"),
                       ("Oct 31, 2026", "Statement", "chk1-oct"),
+                      ("", "Privacy Notice", "chk1-notice"),
                       ("Aug 31, 2026", "Statement", "chk1-aug")])]),
     "card1": ("card", "FakeCard", "8972", "links",
               [(2026, [("Oct 27, 2026", "Statement", "card1-oct"),
                        ("Sep 27, 2026", "Statement", "card1-sep")])]),
     "inv1": ("investment", "FakeInvest", "7983", "links",
              [(2026, [("Oct 31, 2026", "Multi", "inv1-oct-multi"),
-                      ("", "Single", "inv1-oct"),
+                      ("", "Single", "inv1-oct-single"),
                       ("Sep 30, 2026", "Multi", "inv1-sep-multi"),
-                      ("", "2026 Annual Disclosure Cover Letter", "inv1-letter"),
-                      ("", "Single", "inv1-sep")])]),
+                      ("", "2026 Annual Disclosure Cover Letter", "inv1-sep-multi-letter"),
+                      ("", "Single", "inv1-sep-single"),
+                      ("", "2026 Annual Disclosure Cover Letter", "inv1-sep-single-letter")])]),
 }
 
 COMPONENTS = """<script>
@@ -183,11 +186,12 @@ show(YEARS[0][0]);
 
 
 class PdfServer:
-    """Serves files over a real connection on 127.0.0.1, as attachments."""
+    """Serves files over a real connection on 127.0.0.1, as attachments unless told inline."""
 
     def __init__(self):
         self.files = {}
         self.fetches = []
+        self.inline = False  # shown in the page, which leads it away from the list
         owner = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -198,7 +202,8 @@ class PdfServer:
                 self.send_response(200 if path in owner.files else 404)
                 self.send_header("Content-Type", "application/pdf")
                 self.send_header("Content-Length", str(len(body)))
-                self.send_header("Content-Disposition", 'attachment; filename="statement.pdf"')
+                how = "inline" if owner.inline else "attachment"
+                self.send_header("Content-Disposition", f'{how}; filename="statement.pdf"')
                 self.end_headers()
                 self.wfile.write(body)
 
@@ -503,6 +508,7 @@ def test_sign_out_clicks_sign_out_and_waits_for_the_page_to_move(open_site):
 CONFIG = f"""
 [site]
 login_url = "{HOST}{LOGIN}"
+name_in_files = "{NAME}"
 
 [[accounts]]
 label = "entity1_checking"
@@ -530,7 +536,7 @@ INV = "personal_invest_1"
 
 
 @pytest.fixture
-def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch, pdf_of):
+def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch, pdf_of, letter_pdf):
     """Everything real but the network, the window, and the stored credential."""
     def launch(site):
         def launch_edge(pw, profile):
@@ -543,15 +549,21 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch, pdf_of):
         return launch_edge
 
     notes = []
+    letter = letter_pdf
     good = {
         "/chk1-oct-standard.pdf": pdf_of(suffix="9871", closing="10/31/2026"),
         "/chk1-oct-accessible.pdf": pdf_of(suffix="9871", closing="10/31/2026"),
+        "/chk1-notice-standard.pdf": letter,
         "/card1-oct.pdf": pdf_of(suffix="8972", opening="Oct 1, 2026", closing="Oct 27, 2026"),
-        "/inv1-oct.pdf": pdf_of(suffix="7983", closing="October 31, 2026"),
+        "/inv1-oct-single.pdf": pdf_of(suffix="7983", closing="October 31, 2026"),
+        "/inv1-oct-multi.pdf": pdf_of(suffix="7983", closing="October 31, 2026"),
+        "/inv1-sep-multi-letter.pdf": letter,
+        "/inv1-sep-single-letter.pdf": letter,
     }
 
-    def start(site, *args, files=None):
+    def start(site, *args, files=None, inline=False):
         site.use(pdf_server, good if files is None else good | files)
+        pdf_server.inline = inline
         monkeypatch.setattr(session, "launch_edge", launch(site))
         monkeypatch.setattr(capture_module, "launch_edge", launch(site))
         monkeypatch.setattr(login_module, "Timeouts", lambda: FAST)
@@ -596,8 +608,24 @@ def _saved(data):
     return sorted(p.relative_to(root).as_posix() for p in root.rglob("*.pdf"))
 
 
-EVERY_FILE = [f"{CHK}/{CHK}_2026-10.pdf", f"{CARD}/{CARD}_2026-10.pdf",
-              f"{INV}/{INV}_2026-10.pdf"]
+LETTER = "2026-annual-disclosure-cover-letter"
+FILES = {
+    CHK: [f"{CHK}/2026-10-31_{NAME}_9871.pdf", f"{CHK}/2026-10-31_{NAME}_9871-privacy-notice.pdf"],
+    CARD: [f"{CARD}/2026-10-27_{NAME}_8972.pdf"],
+    INV: [f"{INV}/2026-09-30_{NAME}_7983-multi-{LETTER}.pdf",
+          f"{INV}/2026-09-30_{NAME}_7983-single-{LETTER}.pdf",
+          f"{INV}/2026-10-31_{NAME}_7983-multi.pdf",
+          f"{INV}/2026-10-31_{NAME}_7983-single.pdf"],
+}
+EVERY_FILE = sorted(sum(FILES.values(), []))
+
+
+def _files(*labels):
+    return sorted(sum((FILES[label] for label in labels), []))
+
+
+def _path(data, name):
+    return data / "data" / "statements" / name
 
 
 def test_a_normal_run_saves_each_accounts_newest_statement_and_signs_out(whole_run):
@@ -609,13 +637,54 @@ def test_a_normal_run_saves_each_accounts_newest_statement_and_signs_out(whole_r
     assert whole_run.notes == [{"title": "bank1-statements", "message": "PASS"}]
 
 
-def test_each_kind_downloads_only_its_own_statement(whole_run):
+def test_each_kind_downloads_its_own_statements_and_letters(whole_run):
     assert whole_run.start(FakeBank()) == 0
     assert sorted(whole_run.server.fetches) == [
         "/card1-oct.pdf",
+        "/chk1-notice-standard.pdf",
         "/chk1-oct-standard.pdf",  # the standard PDF, not the accessible one
-        "/inv1-oct.pdf",  # the Single statement, not the Multi one or the letter
+        "/inv1-oct-multi.pdf",
+        "/inv1-oct-single.pdf",
+        "/inv1-sep-multi-letter.pdf",
+        "/inv1-sep-single-letter.pdf",
     ]  # and nothing opened for viewing
+    report = _report(whole_run.data)
+    for line in (f"OK        statement: {INV} single  (saved 2026-10-31)",
+                 f"OK        statement: {INV} multi  (saved 2026-10-31)",
+                 f"OK        statement: {INV} letter 1  (saved 2026-09-30)",
+                 f"OK        statement: {CHK}  (saved 2026-10-31)",
+                 f"OK        statement: {CHK} letter 1  (saved 2026-10-31)"):
+        assert line in report
+
+
+def test_pdfs_shown_in_the_page_are_saved_even_when_the_list_reloads_to_a_new_year(whole_run):
+    # After a PDF shown in the page, the list reloads, back on the newest year, which is empty
+    site = FakeBank(new_year=True)
+    assert whole_run.start(site, "--account", INV, inline=True) == 0
+    assert _saved(whole_run.data) == _files(INV)
+    assert site.paths.count("/web/statements/inv1") == 5  # one load, then one per PDF
+
+
+def test_a_page_that_moved_on_after_a_download_is_reopened(open_site):
+    site = FakeBank()
+    page = open_site(site)
+    sign_in(page, SITE, CRED, FAST)
+    account = SimpleNamespace(label=INV, statements_url=f"{HOST}/web/statements/inv1",
+                              match="7983")
+    assert statements_fetch.still_on_page(page, account) is True  # it was on the dashboard
+    assert statements_fetch.still_on_page(page, account) is False  # now on the list
+
+
+def test_an_older_letter_is_saved_once_and_the_newest_ones_every_run(whole_run):
+    assert whole_run.start(FakeBank()) == 0
+    whole_run.server.fetches.clear()
+    assert whole_run.start(FakeBank()) == 0
+    fetched = whole_run.server.fetches
+    assert "/chk1-notice-standard.pdf" in fetched  # in the newest group
+    assert "/inv1-sep-multi-letter.pdf" not in fetched
+    assert "/inv1-sep-single-letter.pdf" not in fetched
+    assert f"UNCHANGED statement: {INV} letter 1  (already saved)" in _report(whole_run.data)
+    assert _saved(whole_run.data) == EVERY_FILE
 
 
 def test_a_new_year_with_no_statements_yet_looks_back_one_year(whole_run):
@@ -630,14 +699,14 @@ def test_private_values_stay_out_of_the_run_folder(whole_run):
     assert whole_run.start(FakeBank()) == 0
     written = _written(whole_run.data)
     for private in (SITE.login_url, "/web/statements/", "9871", "8972", "7983", "FakeCard",
-                    USER, PASSWORD):
+                    NAME, "Disclosure", "Notice", USER, PASSWORD):
         assert private not in written
     assert CHK in written
 
 
 def test_a_second_run_overwrites_the_first(whole_run, pdf_of):
     assert whole_run.start(FakeBank()) == 0
-    target = whole_run.data / "data" / "statements" / CARD / f"{CARD}_2026-10.pdf"
+    target = _path(whole_run.data, FILES[CARD][0])
     newer = pdf_of(suffix="8972", closing="Oct 27, 2026", pad=7_000)
     assert whole_run.start(FakeBank(), files={"/card1-oct.pdf": newer}) == 0
     assert target.read_bytes() == newer
@@ -653,13 +722,13 @@ def test_verification_sends_a_push_and_the_run_continues_once_approved(whole_run
 
 
 def test_a_verification_timeout_stops_everything_and_keeps_the_evidence(whole_run, pdf_of):
-    target = whole_run.data / "data" / "statements" / CHK / f"{CHK}_2026-10.pdf"
+    target = _path(whole_run.data, FILES[CHK][0])
     target.parent.mkdir(parents=True)
     target.write_bytes(b"the good file from last month's run")
     site = FakeBank(verify=True)
     assert whole_run.start(site) == 1
     assert target.read_bytes() == b"the good file from last month's run"
-    assert _saved(whole_run.data) == [f"{CHK}/{CHK}_2026-10.pdf"]
+    assert _saved(whole_run.data) == [FILES[CHK][0]]
     assert not any(p.startswith("/web/statements/") for p in site.paths)
     assert whole_run.notes[-1] == {"title": "bank1-statements",
                                    "message": "FAIL: verification timed out"}
@@ -693,7 +762,7 @@ def test_an_expired_link_fails_only_that_account_and_says_so(whole_run):
     assert whole_run.start(FakeBank(expired={"card1"})) == 1
     report = _report(whole_run.data)
     assert "statements link no longer valid: landed on the dashboard" in report
-    assert _saved(whole_run.data) == [EVERY_FILE[0], EVERY_FILE[2]]
+    assert _saved(whole_run.data) == _files(CHK, INV)
     assert (_run_dir(whole_run.data) / "trace.zip").exists()
 
 
@@ -702,31 +771,31 @@ def test_a_page_for_another_account_is_never_downloaded(whole_run):
     site = FakeBank(show={"card1": "FakeSavings (...8972)", "chk1": "FakeCard (...8972)"})
     assert whole_run.start(site) == 1
     assert _report(whole_run.data).count("the page is for another account") == 2
-    assert _saved(whole_run.data) == [EVERY_FILE[2]]
+    assert _saved(whole_run.data) == _files(INV)
 
 
 def test_a_pdf_for_another_account_never_replaces_a_good_file(whole_run, pdf_of):
     assert whole_run.start(FakeBank()) == 0
-    target = whole_run.data / "data" / "statements" / INV / f"{INV}_2026-10.pdf"
+    target = _path(whole_run.data, FILES[INV][3])  # the Single statement
     good = target.read_bytes()
-    wrong = {"/inv1-oct.pdf": pdf_of(suffix="9999", closing="October 31, 2026")}
+    wrong = {"/inv1-oct-single.pdf": pdf_of(suffix="9999", closing="October 31, 2026")}
     assert whole_run.start(FakeBank(), files=wrong) == 1
     assert target.read_bytes() == good
     assert "check: StatementError: the PDF doesn't show this account's suffix" in _report(
         whole_run.data)
-    assert (_run_dir(whole_run.data) / "downloads" / f"{INV}.pdf").exists()
+    assert (_run_dir(whole_run.data) / "downloads" / f"{INV}_1.pdf").exists()
 
 
 def test_an_error_page_instead_of_a_pdf_fails_only_that_account(whole_run):
     assert whole_run.start(FakeBank(), files={"/card1-oct.pdf": b"<html>Try later</html>"}) == 1
     assert "download: PdfCaptureError" in _report(whole_run.data)
-    assert _saved(whole_run.data) == [EVERY_FILE[0], EVERY_FILE[2]]
+    assert _saved(whole_run.data) == _files(CHK, INV)
 
 
 def test_a_download_menu_without_the_standard_pdf_fails_clearly(whole_run):
     assert whole_run.start(FakeBank(no_standard=True)) == 1
     assert "the download menu has no standard PDF choice" in _report(whole_run.data)
-    assert _saved(whole_run.data) == EVERY_FILE[1:]
+    assert _saved(whole_run.data) == _files(CARD, INV)
     assert "/chk1-oct-accessible.pdf" not in whole_run.server.fetches
 
 
@@ -739,7 +808,7 @@ def test_a_failed_sign_out_is_only_a_warning(whole_run):
 
 def test_account_runs_only_that_one(whole_run):
     assert whole_run.start(FakeBank(), "--account", CARD) == 0
-    assert _saved(whole_run.data) == [EVERY_FILE[1]]
+    assert _saved(whole_run.data) == _files(CARD)
 
 
 def test_an_unknown_account_fails_without_opening_a_browser(whole_run):
@@ -761,8 +830,8 @@ def test_dump_saves_one_page_of_each_kind_and_downloads_nothing(whole_run):
     assert whole_run.server.fetches == []
     assert _saved(whole_run.data) == before
     report = _report(whole_run.data)
-    assert f"would save {CHK}_2026-10.pdf" in report
-    assert f"2 statement(s), would save {INV}_2026-10.pdf" in report
+    assert "would save statement closing 2026-10-31 and 1 of 1 letter(s)" in report
+    assert "would save single, multi closing 2026-10-31 and 0 of 2 letter(s)" in report
     assert PASSWORD not in _written(whole_run.data)
 
 

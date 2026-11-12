@@ -6,6 +6,8 @@
 
 [site]
 login_url = "https://<address of the sign-in page>"
+# The bank's name in saved file names, as in 2026-10-31_<name>_1234.pdf. No "_"
+name_in_files = "<bank name>"
 
 # One block per account. A run saves its newest statement as
 # C:\automation\bank1\data\statements\<label>\<label>_<YYYY-MM>.pdf

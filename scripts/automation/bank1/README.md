@@ -9,52 +9,60 @@ Everywhere else, accounts are known by neutral labels.
 
 | Command | What it does |
 | --- | --- |
-| `bank1-statements` | Downloads each account's newest PDF statement |
+| `bank1-statements` | Downloads each account's newest PDF statements, and its letters |
 
 ## bank1-statements
 
 A run signs in once, then goes through the accounts in the config one at a time. For each, it
 opens the account's statements page by its direct address, checks that it's this account's
-page, finds the newest statement, downloads it, checks it, and saves it as:
+page, finds its newest statements and any letters, downloads them, checks them, and saves them.
+Then it signs out.
+
+Files are named the way this bank's statements were already being named, with the full closing
+date, the bank's name from `name_in_files` in the config, and the account's four-digit suffix:
 
 ```text
-C:\automation\bank1\data\statements\<label>\<label>_<YYYY-MM>.pdf
+C:\automation\bank1\data\statements\<label>\2026-10-31_<name>_1234.pdf
+C:\automation\bank1\data\statements\<label>\2026-10-31_<name>_1234-single.pdf
+C:\automation\bank1\data\statements\<label>\2026-09-30_<name>_1234-single-2026-annual-disclosure-cover-letter.pdf
 ```
 
-`YYYY-MM` is the month the statement closed, read from the statement list on the page. A run on
-November 5, 2026 saves `entity1_checking\entity1_checking_2026-10.pdf`, for example. Then it signs
-out.
+The kind of account sets which rows are its statements, and what each adds to the name:
 
-- **The newest statement is the row of the account's type with the latest date,** wherever it
-  is in the list. Rows that share a date sit in a group, and only the group's first row shows
-  the date, so a row without one takes the date above it.
+| `kind` | Accounts | Statement rows | Added to the name |
+| --- | --- | --- | --- |
+| `checking` | Business and personal checking | **Statement** | Nothing |
+| `card` | Personal credit cards | **Statement** | Nothing |
+| `investment` | Personal investment | **Single**, this account alone, and **Multi**, which combines several accounts | `-single`, `-multi` |
+
+- **The newest statements are the ones with the latest date,** wherever they are in the list.
+  Rows that share a date sit in a group, and only the group's first row shows the date, so a
+  row without one takes the date above it. An investment must have both its **Single** and
+  **Multi** rows on that date.
+- **Any other row is a letter,** like a disclosure or a notice. It's named after the statement
+  row above it and its own title, so the copies filed under **Multi** and under **Single** both
+  stay. Letters in the newest group are downloaded every run. Older ones are downloaded once,
+  then left alone, since they don't change.
 - **The list shows one year at a time,** newest first. If that year has no statement yet, as
-  early in January, the run views the year before, once.
-- **Only the newest is downloaded.** Earlier files already on disk are left alone.
-- **Every run downloads again and replaces the file.** Nothing is compared or kept.
-- **A statement is checked before it replaces anything.** It must start with `%PDF`, be at least
-  5,000 bytes, and its text must show the account's four-digit `suffix` and the closing date
-  from the list. A file that fails stays in the run folder under `downloads\`, and that account
-  fails.
-- **If another statement closed in the same month as the newest,** it's saved under the same
-  name, so the newest replaces it. `report.txt` notes how many there were.
-
-The kind of account sets which row is its statement:
-
-| `kind` | Accounts | Its statement row |
-| --- | --- | --- |
-| `checking` | Business and personal checking | **Statement** |
-| `card` | Personal credit cards | **Statement** |
-| `investment` | Personal investment | **Single**, this account alone. Never **Multi**, which combines several accounts, or a letter |
+  early in January, the run views the year before, once. Older statements aren't downloaded.
+- **Every run downloads the newest statements again and replaces the files.**
+- **Each file is checked before it replaces anything.** It must start with `%PDF`. A statement
+  must be at least 5,000 bytes, and its text must show the account's `suffix` and the closing
+  date from the list. A letter must be at least 1,000 bytes. A file that fails stays in the run
+  folder under `downloads\`, and that file fails. The account's other files still go ahead.
+- **Logs and reports never show a file name,** since it holds the bank's name and a suffix, or
+  a letter's title. They show the label and a number instead: `<label> single`,
+  `<label> letter 1`.
 
 Each row is downloaded one of two ways, whichever it has:
 
 - **A download menu,** as on checking accounts: the run opens it and chooses the standard
-  **PDF**, never **Accessible PDF**. A menu without the standard PDF fails that account.
+  **PDF**, never **Accessible PDF**. A menu without the standard PDF fails that file.
 - **A download link,** as on cards and investments: the run clicks it.
 
 Each row also has a control that opens the document for viewing. The run never uses it.
-These are in `ROW_TYPE` and the selector lists in `statements_fetch.py`.
+These are in `ROW_TYPES` and the selector lists in `statements_fetch.py`, and which rows to
+save is in `plan_items` in `parse.py`.
 
 ### Checking it's the right account
 
@@ -63,8 +71,8 @@ the account's `match` text. That's its `suffix` unless `match` is set, and a num
 alone, so `1234` doesn't match `91234`. Only the heading counts: the page's side menu lists
 every account. If the heading doesn't show it, or the address leads to the dashboard, a
 sign-in page, or no statement list, that account fails with `statements link no longer valid`,
-and you need to update its `statements_url`. The run doesn't look for the page through the site's menus.
-That could come later if links turn out to expire often.
+and you need to update its `statements_url`. The run doesn't look for the page through the
+site's menus. That could come later if links turn out to expire often.
 
 ### What a run does when something's wrong
 
@@ -77,8 +85,9 @@ That could come later if links turn out to expire often.
 | CAPTCHA challenge showing | The run stops right away. Never worked around. `FAIL` |
 | No `bank1/login` credential | The run stops before opening the site. `FAIL` |
 | A statements link no longer leads to that account's page | That account fails. The rest still run. `FAIL` |
-| No row of the account's type this year or last, or a download menu without the standard PDF | That account fails. The rest still run. `FAIL` |
-| No PDF arrives, or the PDF names another account or date | Not saved. That account fails, and the file stays in `downloads\`. `FAIL` |
+| No statement row this year or last, or an investment missing **Single** or **Multi** on the newest date | That account fails. The rest still run. `FAIL` |
+| A download menu without the standard PDF | That file fails. The rest still run. `FAIL` |
+| No PDF arrives, or a statement names another account or date | Not saved. That file fails, and it stays in `downloads\`. `FAIL` |
 | Sign-out fails | Only a warning in `run.log`. The statements are already saved, and the site ends idle sessions itself |
 
 **Every failure saves what's on screen** to the newest `C:\automation\bank1\runs\<timestamp>\`
@@ -128,8 +137,9 @@ words come from that test.
   mobile app** and **Next**. The option's selectors come from a `--dump` outline of the real
   chooser. Next's are candidates modeled on the site's other buttons. Nothing has clicked either
   on the real site yet
-- Picking the statement by its row type, and the account check against the heading. Both are
-  built from `--dump` outlines, but this code hasn't run on the real pages yet
+- Picking the statements and letters by their row types, and the account check against the
+  heading. Both are built from `--dump` outlines, but this code hasn't run on the real pages yet
+- The letter file names: they come from each row's title, untested against real titles
 - Any download: the menu and its standard PDF, the download link, and how each delivers the PDF
 - Looking back a year when the newest year has no statement. The year filter's selectors come
   from the outline, but it has never been clicked
@@ -156,7 +166,7 @@ Copy-Item bank1\config.example.toml C:\automation\bank1\config.toml
 
 ```
 
-Fill in `login_url`, and for each account its `statements_url` and `suffix`. Copy each
+Fill in `login_url`, `name_in_files`, and for each account its `statements_url` and `suffix`. Copy each
 statements address from Edge's address bar while that account's statements page is open.
 
 ## Run
@@ -171,15 +181,15 @@ uv run bank1-statements                             # normal run
 
 `--dump` signs in, then opens the first account of each kind (or the one named), saves its page
 outline and screenshot as `dump_<label>_statements_page.txt` and `.png`, and reports which
-statement a run would save. It downloads nothing, and clicks nothing on those pages but the year
+statements a run would save, and how many letters it would download. It downloads nothing, and clicks nothing on those pages but the year
 filter, when the newest year has no statement yet. It also saves the sign-in, verification
 chooser, Next, after-push, and dashboard pages as `dump_site_<step>`. The sign-in page is saved
 before anything is typed.
 
 `--capture` opens the job's browser on the sign-in page and saves a snapshot each time the page
 changes, for up to 30 minutes or until you close the window. It types nothing and starts no
-trace. Use it to record a page `--dump` can't reach, like an open download menu. It's also the fallback for signing in by hand if a job's verification doesn't go
-through.
+trace. Use it to record a page `--dump` can't reach, like an open download menu. It's also the
+fallback for signing in by hand if a job's verification doesn't go through.
 
 These files hold real account names and numbers. Replace private values before sharing any of
 them, and never commit them.

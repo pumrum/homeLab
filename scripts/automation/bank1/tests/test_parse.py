@@ -10,10 +10,10 @@ from bank1_portal.parse import (
     check_pdf_file,
     check_statement,
     dates_in,
-    newest_of_type,
-    newest_statement,
     page_shows,
     pdf_text,
+    plan_items,
+    slug,
     statement_file_name,
 )
 
@@ -36,73 +36,97 @@ def test_a_period_gives_both_ends():
     assert dates_in("Oct 1, 2026 - Oct 31, 2026") == [dt.date(2026, 10, 1), OCT31]
 
 
-@pytest.mark.parametrize("rows", [
-    ["Oct 31, 2026 Download", "Sep 30, 2026 Download", "Aug 31, 2026 Download"],
-    ["Aug 31, 2026 Download", "Sep 30, 2026 Download", "Oct 31, 2026 Download"],
-    ["Sep 30, 2026", "Oct 31, 2026", "Year-end summary", "Aug 31, 2026"],
+STATEMENT = {"Statement": ""}
+INVESTMENT = {"Single": "single", "Multi": "multi"}
+
+
+def _plain(dates):
+    return [Row(d, "Statement") for d in dates]
+
+
+@pytest.mark.parametrize("dates", [
+    ["Oct 31, 2026", "Sep 30, 2026", "Aug 31, 2026"],
+    ["Aug 31, 2026", "Sep 30, 2026", "Oct 31, 2026"],
+    ["Sep 30, 2026", "Oct 31, 2026", "Aug 31, 2026"],
 ])
-def test_the_newest_is_the_latest_date_in_any_order(rows):
-    newest = newest_statement(rows)
-    assert rows[newest.index].startswith("Oct 31")
-    assert newest.closing == OCT31
-    assert newest.same_month == 0
+def test_the_newest_statement_is_the_latest_date_in_any_order(dates):
+    [item] = plan_items(_plain(dates), STATEMENT)
+    assert dates[item.index] == "Oct 31, 2026"
+    assert (item.closing, item.part, item.letter, item.newest) == (OCT31, "", False, True)
 
 
 def test_a_row_with_a_period_closes_on_its_last_date():
-    newest = newest_statement(["Sep 1, 2026 - Sep 30, 2026", "Oct 1, 2026 - Oct 31, 2026"])
-    assert (newest.index, newest.closing) == (1, OCT31)
-
-
-def test_another_statement_in_the_same_month_is_counted():
-    newest = newest_statement(["Oct 31, 2026", "Oct 2, 2026", "Sep 30, 2026"])
-    assert (newest.closing, newest.same_month) == (OCT31, 1)
+    [item] = plan_items(_plain(["Sep 1, 2026 - Sep 30, 2026", "Oct 1, 2026 - Oct 31, 2026"]),
+                        STATEMENT)
+    assert (item.index, item.closing) == (1, OCT31)
 
 
 def test_two_statements_on_the_newest_day_are_refused():
-    with pytest.raises(StatementError, match="same day"):
-        newest_statement(["Oct 31, 2026", "10/31/2026"])
+    with pytest.raises(StatementError, match="two 'Statement' statements close on the same day"):
+        plan_items(_plain(["Oct 31, 2026", "10/31/2026"]), STATEMENT)
 
 
-def test_a_list_with_no_dates_is_refused():
-    with pytest.raises(StatementError, match="no statement date in any of the 2"):
-        newest_statement(["Statement", "Download"])
+def test_a_list_with_no_statement_is_refused():
+    with pytest.raises(StatementError, match="no 'Statement' statement in the 2 row"):
+        plan_items([Row("Oct 31, 2026", "Notice"), Row("", "Download")], STATEMENT)
 
 
 # An investment account's list, as on the real page: a group per date, whose first row
-# alone shows the date, with a Multi row, a Single row, and sometimes letters
+# alone shows the date, with a Multi row and a Single row, each followed by any letters
 INVESTMENT_ROWS = [
     Row("Oct 31, 2026", "Multi"),
     Row("", "Single"),
     Row("Sep 30, 2026", "Multi"),
     Row("", "2026 Annual Disclosure Cover Letter"),
     Row("", "Single"),
+    Row("", "2026 Annual Disclosure Cover Letter"),
+    Row("Aug 31, 2026", "Multi"),
+    Row("", "Single"),
 ]
+SEP30 = dt.date(2026, 9, 30)
 
 
-def test_a_row_without_a_date_takes_its_groups_date():
-    newest = newest_of_type(INVESTMENT_ROWS, "Single")
-    assert (newest.index, newest.closing, newest.same_month) == (1, OCT31, 0)
+def test_an_investment_saves_single_and_multi_and_files_each_letter_under_its_statement():
+    items = plan_items(INVESTMENT_ROWS, INVESTMENT)
+    assert [(i.index, i.closing, i.part, i.letter, i.newest) for i in items] == [
+        (1, OCT31, "single", False, True),
+        (0, OCT31, "multi", False, True),
+        (3, SEP30, "multi-2026-annual-disclosure-cover-letter", True, False),
+        (5, SEP30, "single-2026-annual-disclosure-cover-letter", True, False),
+    ]
 
 
-def test_only_rows_of_the_wanted_type_count():
-    assert newest_of_type(INVESTMENT_ROWS, "multi").index == 0  # case doesn't matter
-    rows = [Row("Nov 2, 2026", "Notice"), Row("Oct 31, 2026", "Statement")]
-    assert newest_of_type(rows, "Statement").index == 1
+def test_a_letter_in_the_newest_group_is_marked_newest():
+    rows = [Row("Oct 31, 2026", "Statement"), Row("", "Privacy Notice"),
+            Row("Sep 30, 2026", "Statement")]
+    assert [(i.part, i.letter, i.newest) for i in plan_items(rows, STATEMENT)] == [
+        ("", False, True), ("privacy-notice", True, True)]
 
 
-def test_no_row_of_the_wanted_type_is_refused():
-    with pytest.raises(StatementError, match="no 'Statement' statement in the 5 row"):
-        newest_of_type(INVESTMENT_ROWS, "Statement")
+def test_a_missing_statement_type_on_the_newest_day_is_refused():
+    rows = [Row("Oct 31, 2026", "Single"), Row("Sep 30, 2026", "Multi"), Row("", "Single")]
+    with pytest.raises(StatementError, match="no 'Multi' statement on 2026-10-31"):
+        plan_items(rows, INVESTMENT)
 
 
-def test_two_rows_of_the_wanted_type_on_one_day_are_refused():
-    rows = [Row("Oct 31, 2026", "Single"), Row("", "Single")]
-    with pytest.raises(StatementError, match="same day"):
-        newest_of_type(rows, "Single")
+def test_type_names_ignore_case_and_spacing():
+    [item] = plan_items([Row("Oct 31, 2026", "  statement ")], STATEMENT)
+    assert item.index == 0
 
 
-def test_the_file_name_uses_the_closing_month():
-    assert statement_file_name("entity1_checking", OCT31) == "entity1_checking_2026-10.pdf"
+@pytest.mark.parametrize(("title", "expected"), [
+    ("2026 Annual Disclosure Cover Letter", "2026-annual-disclosure-cover-letter"),
+    ("Privacy Notice (Updated)", "privacy-notice-updated"),
+    ("  ", ""),
+])
+def test_a_letters_title_becomes_a_safe_file_name_part(title, expected):
+    assert slug(title) == expected
+
+
+def test_file_names_follow_the_existing_scheme():
+    assert statement_file_name("FakeBank", "9871", OCT31) == "2026-10-31_FakeBank_9871.pdf"
+    assert (statement_file_name("FakeBank", "7983", OCT31, "single")
+            == "2026-10-31_FakeBank_7983-single.pdf")
 
 
 @pytest.mark.parametrize(("text", "match", "found"), [

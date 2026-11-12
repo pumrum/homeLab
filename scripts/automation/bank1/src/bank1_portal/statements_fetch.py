@@ -1,4 +1,4 @@
-"""Browser step: from a signed-in page, open one account's statements page and save the newest.
+"""Browser step: from a signed-in page, open one account's statements page and its rows.
 
 Each account's statements page is reached by its own direct address from the private config.
 The run first makes sure it landed on that account's statements page, by the account heading
@@ -8,11 +8,15 @@ is the only place to check: the page's side menu lists every account.
 
 The list is a table filtered by year, newest year first. Each row has a date cell, a type
 cell, and its controls. Rows that share a date sit in a group, and only the group's first
-row shows the date. The kind of account sets which type of row is its statement:
+row shows the date. The kind of account sets which types of row are its statements, and
+what each adds to the file name:
 
     checking     "Statement"
     card         "Statement"
-    investment   "Single", this account alone, not "Multi", which combines several accounts
+    investment   "Single", this account alone, as -single, and "Multi", which combines
+                 several accounts, as -multi
+
+Any other row is a letter, like a disclosure. Which rows to save is decided in parse.py.
 
 Early in a year, the newest year may hold no statement yet, so the run then views the year
 before, once.
@@ -38,7 +42,7 @@ from automation_common.browser import capture_pdf, click_until, find_first
 from bank1_portal.config import Account, Kind
 from bank1_portal.login import PASSWORD_FIELD, USERNAME_FIELD, on_dashboard
 from bank1_portal.pages import FetchError, element_text
-from bank1_portal.parse import Newest, Row, newest_of_type, of_type, page_shows
+from bank1_portal.parse import Item, Row, of_type, page_shows, plan_items
 
 log = logging.getLogger(__name__)
 
@@ -47,10 +51,11 @@ STEP_TIMEOUT_MS = 10_000
 DOWNLOAD_TIMEOUT_MS = 60_000
 POLL_MS = 500
 
-ROW_TYPE = {
-    Kind.CHECKING: "Statement",
-    Kind.CARD: "Statement",
-    Kind.INVESTMENT: "Single",
+# Each kind's statement rows, and what each adds to the file name
+ROW_TYPES = {
+    Kind.CHECKING: {"Statement": ""},
+    Kind.CARD: {"Statement": ""},
+    Kind.INVESTMENT: {"Single": "single", "Multi": "multi"},
 }
 
 # The heading above the list names the account whose statements these are
@@ -80,10 +85,9 @@ def _year_option(year: int) -> list[str]:
 
 
 @dataclass(frozen=True)
-class Pick:
-    row: Locator
-    newest: Newest
-    count: int  # rows of the wanted type in the year shown
+class Plan:
+    rows: list[Locator]
+    items: list[Item]
 
 
 class LinkError(FetchError):
@@ -155,14 +159,18 @@ def _year_shown(page: Page) -> int | None:
     return None
 
 
-def _view_year_before(page: Page, wanted: str) -> None:
+def _has_statement(cells: list[Row], types: dict[str, str]) -> bool:
+    return any(of_type(cells, wanted) for wanted in types)
+
+
+def _view_year_before(page: Page, types: dict[str, str]) -> None:
     """Switch the list to the year before the one shown, and wait for its rows."""
     year = _year_shown(page)
     if year is None:
-        raise FetchError(f"no '{wanted}' statement this year, and no year filter to look back")
+        raise FetchError("no statement this year, and no year filter to look back")
     opener = find_first([page], YEAR_FILTER_OPEN, STEP_TIMEOUT_MS)[0]
     if opener is None:
-        raise FetchError(f"no '{wanted}' statement in {year}, and the year filter is missing")
+        raise FetchError(f"no statement in {year}, and the year filter is missing")
     option = None
 
     def options_showing() -> bool:
@@ -171,39 +179,38 @@ def _view_year_before(page: Page, wanted: str) -> None:
         return option is not None
 
     if click_until(opener, options_showing, "year filter") is None or option is None:
-        raise FetchError(f"no '{wanted}' statement in {year}, and {year - 1} can't be chosen")
+        raise FetchError(f"no statement in {year}, and {year - 1} can't be chosen")
     log.info("statement: none in %d yet; viewing %d", year, year - 1)
     option.click()
     deadline = time.monotonic() + STEP_TIMEOUT_MS / 1000
-    while _year_shown(page) != year - 1 or not of_type(_read_rows(page)[1], wanted):
+    while _year_shown(page) != year - 1 or not _has_statement(_read_rows(page)[1], types):
         if time.monotonic() > deadline:
-            raise FetchError(f"no '{wanted}' statement in {year} or {year - 1}")
+            raise FetchError(f"no statement in {year} or {year - 1}")
         page.wait_for_timeout(POLL_MS)
 
 
-def find_newest(page: Page, account: Account) -> Pick:
-    """The newest statement of the account's kind, looking back one year if needed."""
-    wanted = ROW_TYPE[account.kind]
+def plan(page: Page, account: Account) -> Plan:
+    """The rows to save: the newest statements of the account's kind, and the letters.
+    Looks back one year if the year shown has no statement yet."""
+    types = ROW_TYPES[account.kind]
     # The table can fill in after the page appears, so wait a little before looking back
     deadline = time.monotonic() + STEP_TIMEOUT_MS / 1000
     rows, cells = _read_rows(page)
-    while not of_type(cells, wanted) and time.monotonic() < deadline:
+    while not _has_statement(cells, types) and time.monotonic() < deadline:
         page.wait_for_timeout(POLL_MS)
         rows, cells = _read_rows(page)
-    if not of_type(cells, wanted):
-        _view_year_before(page, wanted)
+    if not _has_statement(cells, types):
+        _view_year_before(page, types)
         rows, cells = _read_rows(page)
-    newest = newest_of_type(cells, wanted)
-    count = len(of_type(cells, wanted))
-    log.info("statement: %d '%s' row(s) of %d; the newest closed %s", count, wanted, len(rows),
-             newest.closing)
-    if newest.same_month:
-        log.warning("statement: %d other statement(s) also closed in %s", newest.same_month,
-                    f"{newest.closing:%Y-%m}")
-    return Pick(rows[newest.index], newest, count)
+    items = plan_items(cells, types)
+    letters = sum(item.letter for item in items)
+    log.info("statement: %d row(s); the newest statements closed %s; %d letter(s)", len(rows),
+             items[0].closing, letters)
+    return Plan(rows, items)
 
 
-def _download(page: Page, row: Locator, dest: Path, observer: Callable[[str], None]) -> None:
+def download(page: Page, row: Locator, dest: Path,
+             observer: Callable[[str], None] = _ignore) -> None:
     """The row's download menu and its standard PDF, or else its download link."""
     menu, selector = find_first([row], DOWNLOAD_MENU, 0)
     if menu is not None:
@@ -222,18 +229,17 @@ def _download(page: Page, row: Locator, dest: Path, observer: Callable[[str], No
         return
     link, selector = find_first([row], DOWNLOAD_LINK, STEP_TIMEOUT_MS)
     if link is None:
-        raise FetchError("the newest statement has no download menu or link")
+        raise FetchError("the row has no download menu or link")
     log.info("statement: clicking the download link (%s)", selector)
     capture_pdf(page, link.click, dest, DOWNLOAD_TIMEOUT_MS)
 
 
-def fetch_statement(page: Page, account: Account, dest: Path,
-                    observer: Callable[[str], None] = _ignore) -> Newest:
-    """Save the account's newest statement to `dest`, and return which one it was."""
+def still_on_page(page: Page, account: Account) -> bool:
+    """After a download, reopen the statements page if the download led away from it.
+    True if it did, since its rows then need finding again."""
+    if find_first([page], STATEMENTS_SECTION, 0)[0] is not None:
+        return False
+    log.warning("statement: the page moved on after a download; reopening it")
     go_to_statements(page, account)
     check_statements_page(page, account)
-    observer("statements")
-    pick = find_newest(page, account)
-    log.info("statement: downloading the one closing %s", pick.newest.closing)
-    _download(page, pick.row, dest, observer)
-    return pick.newest
+    return True

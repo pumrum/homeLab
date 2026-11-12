@@ -1,8 +1,8 @@
 """Load and validate C:\\automation\\bank1\\config.toml.
 
 Everything that identifies an account lives in this private file: its statements address,
-its four-digit suffix, and any text its page is checked for. The code, logs, and reports
-only ever use the neutral label.
+its four-digit suffix, and any text its page is checked for, plus the bank's name as used in
+saved file names. The code, logs, and reports only ever use the neutral label.
 """
 
 import re
@@ -25,6 +25,7 @@ from automation_common.notify import STANDARD_NOTIFICATIONS, Template, parse_not
 _LABEL = re.compile(r"^[a-z0-9_]+$")  # goes in folder and file names
 _SUFFIX = re.compile(r"^[0-9]{4}$")
 _PLACEHOLDERS = ("<", ">")  # not "...": a page may show an account as ...1234
+_FILE_NAME_PART = re.compile(r'^[^\\/:*?"<>|_]+$')  # "_" separates the parts of a file name
 
 NOTIFICATIONS = {
     **STANDARD_NOTIFICATIONS,
@@ -46,6 +47,7 @@ class Site:
     """The part of the config every command in this package shares."""
 
     login_url: str
+    name_in_files: str  # the bank's name in saved file names, as in 2026-10-31_<name>_1234.pdf
 
 
 @dataclass(frozen=True)
@@ -118,11 +120,15 @@ def parse_config(doc: Mapping[str, Any]) -> Config:
     site = doc.get("site")
     if not isinstance(site, dict):
         raise ConfigError("a [site] section is required")
-    reject_unknown_keys(site, {"login_url"}, "[site]")
+    reject_unknown_keys(site, {"login_url", "name_in_files"}, "[site]")
+    name = _text(site, "name_in_files", "[site]")
+    if not _FILE_NAME_PART.match(name):
+        # The value is private, so the message never repeats it
+        raise ConfigError('[site]: "name_in_files" can\'t use _ \\ / : * ? " < > |')
     accounts = [_account(table, number)
                 for number, table in enumerate(require_tables(doc, "accounts"), start=1)]
     _reject_repeats(accounts)
-    return Config(Site(_url(site, "login_url", "[site]")), tuple(accounts),
+    return Config(Site(_url(site, "login_url", "[site]"), name), tuple(accounts),
                   parse_notifications(doc, NOTIFICATIONS))
 
 

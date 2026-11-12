@@ -17,7 +17,8 @@ def _cfg():
                             ("personal_card_1", "card"), ("personal_invest_1", "investment"),
                             ("personal_card_2", "card")]
     ]
-    return parse_config({"site": {"login_url": "https://bank.example.invalid/logon"},
+    return parse_config({"site": {"login_url": "https://bank.example.invalid/logon",
+                                  "name_in_files": "FakeBank"},
                          "accounts": accounts})
 
 

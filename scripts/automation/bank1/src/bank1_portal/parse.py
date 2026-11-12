@@ -1,9 +1,21 @@
-"""Pure checks: which statement is newest, its file name, and whether a file is that statement.
+"""Pure checks: which rows to save, their file names, and whether a file is that statement.
 
 The statements list is a table. Each row has a date cell and a type cell: "Statement", or
 for investments "Multi", "Single", or a letter's name. Rows that share a date sit in a group,
 and only the group's first row shows the date. The newest statement is the row of the wanted
 type with the latest date, wherever it sits in the list, so a list in either order works.
+
+Each account saves the statements of its kind that closed on the newest date: "Statement",
+or for investments both "Single" and "Multi". Any other row is a letter, like a disclosure,
+filed under the statement row above it. Letters in the newest group are saved every run;
+older ones only once, since they don't change.
+
+File names follow the scheme already used for this bank's statements, with the full closing
+date, the bank's name from the private config, and the account's suffix:
+
+    2026-10-31_<name>_1234.pdf                      a statement
+    2026-10-31_<name>_1234-single.pdf               an investment's Single or Multi statement
+    2026-09-30_<name>_1234-single-<letter's title>.pdf
 
 The saved PDF must then start with %PDF, be a sensible size, name the account's four-digit
 suffix, and show that closing date, before it replaces anything.
@@ -32,13 +44,6 @@ class StatementError(Exception):
     """A page or file isn't the expected statement. The message holds no private value."""
 
 
-@dataclass(frozen=True)
-class Newest:
-    index: int  # which row, in the order given
-    closing: dt.date
-    same_month: int  # other rows that closed in the same month
-
-
 def _date(year: int, month: int, day: int) -> dt.date | None:
     try:
         return dt.date(year, month, day)
@@ -60,21 +65,6 @@ def dates_in(text: str) -> list[dt.date]:
     return [d for d in found if d is not None]
 
 
-def newest_statement(rows: list[str]) -> Newest:
-    """The row whose latest date is the latest of all. Each row's latest date is its closing
-    date, since a period's start comes first. Raises if it can't tell."""
-    closings = [max(dates, default=None) for dates in map(dates_in, rows)]
-    dated = [(d, i) for i, d in enumerate(closings) if d is not None]
-    if not dated:
-        raise StatementError(f"no statement date in any of the {len(rows)} row(s)")
-    closing, index = max(dated)
-    if sum(1 for d, _ in dated if d == closing) > 1:
-        raise StatementError(f"two statements close on the same day ({closing})")
-    same_month = sum(1 for d, i in dated
-                     if i != index and (d.year, d.month) == (closing.year, closing.month))
-    return Newest(index, closing, same_month)
-
-
 @dataclass(frozen=True)
 class Row:
     date: str  # the date cell; empty on a group's later rows
@@ -90,21 +80,64 @@ def of_type(rows: list[Row], wanted: str) -> list[int]:
     return [i for i, row in enumerate(rows) if _squash_type(row.type) == _squash_type(wanted)]
 
 
-def newest_of_type(rows: list[Row], wanted: str) -> Newest:
-    """The newest row of the wanted type. A row with no date in its date cell takes the date
-    of the row above it, since it's part of that row's group. Raises if it can't tell."""
-    dates: list[str] = []
+@dataclass(frozen=True)
+class Item:
+    """One row to save."""
+
+    index: int  # which row, in the order given
+    closing: dt.date  # its group's date
+    part: str  # what follows the suffix in its file name: "", "single", or a letter's
+    letter: bool
+    newest: bool  # in the newest statement's group
+
+
+def slug(text: str, limit: int = 60) -> str:
+    """A file-name-safe version of a row's title: lowercase words joined by hyphens."""
+    words = re.findall(r"[a-z0-9]+", text.casefold())
+    return "-".join(words)[:limit].strip("-")
+
+
+def plan_items(rows: list[Row], types: dict[str, str]) -> list[Item]:
+    """The rows to save: each wanted statement type on the newest date, then every letter.
+
+    `types` maps each wanted row type to its part of the file name, like {"Single": "single"}.
+    Raises if a wanted type is missing on the newest date, or appears twice that day.
+    """
+    dates: list[dt.date | None] = []
     for row in rows:
-        dates.append(row.date if dates_in(row.date) else (dates[-1] if dates else ""))
-    chosen = of_type(rows, wanted)
-    if not chosen:
-        raise StatementError(f"no '{wanted}' statement in the {len(rows)} row(s)")
-    newest = newest_statement([dates[i] for i in chosen])
-    return Newest(chosen[newest.index], newest.closing, newest.same_month)
+        found = dates_in(row.date)
+        dates.append(max(found) if found else (dates[-1] if dates else None))
+    wanted = {_squash_type(t): part for t, part in types.items()}
+    statements = [i for i, row in enumerate(rows) if _squash_type(row.type) in wanted]
+    dated = [dates[i] for i in statements if dates[i] is not None]
+    if not dated:
+        names = " or ".join(f"'{t}'" for t in types)
+        raise StatementError(f"no {names} statement in the {len(rows)} row(s)")
+    closing = max(dated)
+    items: list[Item] = []
+    for type_name in types:
+        on_day = [i for i in statements if dates[i] == closing
+                  and _squash_type(rows[i].type) == _squash_type(type_name)]
+        if not on_day:
+            raise StatementError(f"no '{type_name}' statement on {closing}")
+        if len(on_day) > 1:
+            raise StatementError(f"two '{type_name}' statements close on the same day ({closing})")
+        items.append(Item(on_day[0], closing, types[type_name], False, True))
+    parent = ""
+    for i, row in enumerate(rows):
+        kind = _squash_type(row.type)
+        if kind in wanted:
+            parent = wanted[kind]
+        elif dates[i] is not None and slug(row.type):
+            part = "-".join(p for p in (parent, slug(row.type)) if p)
+            items.append(Item(i, dates[i], part, True, dates[i] == closing))
+    return items
 
 
-def statement_file_name(label: str, closing: dt.date) -> str:
-    return f"{label}_{closing:%Y-%m}.pdf"
+def statement_file_name(name: str, suffix: str, closing: dt.date, part: str = "") -> str:
+    """The scheme already used for this bank's statements: date, bank name, suffix."""
+    tail = f"-{part}" if part else ""
+    return f"{closing:%Y-%m-%d}_{name}_{suffix}{tail}.pdf"
 
 
 def _squash(text: str) -> str:
