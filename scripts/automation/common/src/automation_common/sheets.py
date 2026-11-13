@@ -56,7 +56,7 @@ class Worksheet(Protocol):
 
     def replace_block(self, start_cell: str, rows: Sequence[Sequence[Cell]],
                       date_columns: Mapping[int, str] | None = None,
-                      trim: bool = False) -> None: ...
+                      trim: bool = False, width: int | None = None) -> None: ...
 
     def write_cell(self, cell: str, value: Cell, pattern: str | None = None) -> None: ...
 
@@ -121,7 +121,7 @@ def _block_cell(value: Cell) -> dict[str, Any]:
 def block_requests(
     sheet_id: int, row_count: int, col_count: int, start_cell: str,
     rows: Sequence[Sequence[Cell]], date_columns: Mapping[int, str] | None = None,
-    trim: bool = False, chunk_rows: int = BLOCK_CHUNK_ROWS,
+    trim: bool = False, chunk_rows: int = BLOCK_CHUNK_ROWS, width: int | None = None,
 ) -> tuple[list[list[dict[str, Any]]], int, int]:
     """The writes that replace everything from `start_cell` right to the tab's edge and down.
 
@@ -130,6 +130,8 @@ def block_requests(
     the new rows don't reach, so the tab is never left empty on the way. `date_columns` maps a
     position within a row to the pattern its dates show in, like yyyy-mm-dd. Other cell
     formatting stays. `trim` deletes the rows below the block, so the tab shrinks with its data.
+    `width` limits the block to that many columns from `start_cell`, so columns to its right
+    are never written or cleared. No row may be wider.
     """
     try:
         row, col = a1_to_rowcol(start_cell)
@@ -137,13 +139,16 @@ def block_requests(
         raise SheetError(f'"{start_cell}" is not a cell like B5') from None
     first_row, first_col = row - 1, col - 1
     end_row = first_row + len(rows)
-    width = max((len(r) for r in rows), default=0)
+    widest = max((len(r) for r in rows), default=0)
+    if width is not None and (width < 1 or widest > width):
+        raise SheetError(f"a block {width} column(s) wide can't hold a row of {widest}")
     total_rows = max(row_count, end_row)
-    total_cols = max(col_count, first_col + width)
+    total_cols = max(col_count, first_col + (widest if width is None else width))
+    end_col = total_cols if width is None else first_col + width
 
     def block_range(start: int, end: int) -> dict[str, int]:
         return {"sheetId": sheet_id, "startRowIndex": start, "endRowIndex": end,
-                "startColumnIndex": first_col, "endColumnIndex": total_cols}
+                "startColumnIndex": first_col, "endColumnIndex": end_col}
 
     writes: list[list[dict[str, Any]]] = []
     for start in range(0, len(rows), chunk_rows):
@@ -274,14 +279,15 @@ class GoogleWorksheet:
 
     def replace_block(self, start_cell: str, rows: Sequence[Sequence[Cell]],
                       date_columns: Mapping[int, str] | None = None,
-                      trim: bool = False) -> None:
+                      trim: bool = False, width: int | None = None) -> None:
         """Replace everything from `start_cell` right and down (see block_requests).
 
         A block that fits in one write is all or nothing. A bigger one that fails partway
         holds new rows above old ones, so the caller must report that it failed.
         """
         writes, row_count, col_count = block_requests(
-            self._ws.id, self._row_count, self._col_count, start_cell, rows, date_columns, trim)
+            self._ws.id, self._row_count, self._col_count, start_cell, rows, date_columns, trim,
+            width=width)
         for requests in writes:
             if not requests:
                 continue

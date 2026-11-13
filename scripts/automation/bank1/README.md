@@ -10,6 +10,12 @@ Everywhere else, accounts are known by neutral labels.
 | Command | What it does |
 | --- | --- |
 | `bank1-statements` | Downloads each account's newest PDF statements, and its letters |
+| `bank1-activity` | Downloads each account's activity as a CSV, and writes it to its Google Sheet tab |
+
+The commands run on their own, as separate agent jobs, and on their own schedules. They share
+the sign-in, the browser profile, the `bank1/login` credential, and `config.toml`, so a mistake
+anywhere in that file stops both. The agent runs one job at a time, so they never share the
+browser at once.
 
 ## bank1-statements
 
@@ -109,6 +115,69 @@ These are the default words. `[notifications.<event>]` blocks in `config.toml` c
 `pass`, `fail`, and `mfa_failed` at the end of a run, and `mfa_needed` during it. See
 `config.example.toml`.
 
+## bank1-activity
+
+A run signs in once, then goes through the accounts with an `activity_url` in the config, one at
+a time. For each, it opens the account's activity download page by its direct address, checks
+it's this account's form, chooses **Choose a date range**, types the range, clicks **Download**,
+checks the CSV, saves it, and writes it to the account's tab. Then it signs out.
+
+- **The range** runs from the account's `activity_start` to the day of the run. The site's
+  download is current to the minute, so a run at 4 pm picks up what posted after an 8 am run.
+- **Every run replaces the sheet's block.** The run clears everything from the account's
+  `start_cell` down, across exactly as many columns as the CSV has, then writes the rows there.
+  Columns beside the block are never touched. Nothing is appended or compared, so running again
+  the same day, or from another machine, just repeats the overwrite.
+- **Every run saves a new CSV** per account in `C:\automation\bank1\data\activity\`, named as the
+  old process named them, with the run's start time:
+  `<abbreviation>_<suffix>_<yyyymmdd-HHmmss>_Activity.csv`, like
+  `ABC1_1234_20261113-143342_Activity.csv`. Older files are kept, so the folder grows by one file
+  per account each run. Nothing clears it.
+- **Oldest first, no header, as a paste of values.** The bank exports the newest first, so the
+  rows are reversed. Every column is written, and each value goes in as pasting the values by
+  hand would store it, but only where that can't change it. Plain numbers, like amounts,
+  balances, and check numbers, become numbers. `MM/DD/YYYY` dates become dates, shown the same
+  way. Anything else stays text exactly as exported, such as `007`, which a paste would turn
+  into `7`, or a description starting with `=`, which a paste would run as a formula. Cells keep
+  their other formatting. The rules are in `activity_sheet.py`.
+- **An account without `activity_sheet`** is downloaded, checked, and saved, but written nowhere.
+- **Investment accounts** have no `activity_url` yet: whether the site has an activity download
+  for them isn't known.
+
+Each CSV is checked before it replaces anything. A file that fails stays in the run folder under
+`downloads\`, the saved file and the sheet are left as they were, and that account fails:
+
+- **Its header must be the one expected for its kind,** in `COLUMNS` in `activity_parse.py`. A
+  change names the columns added, missing, or moved, so a new column on the site can't shift
+  every column in the sheet.
+- **It must hold at least one transaction,** so an empty download never clears a block.
+- **Every row must be dated in the range,** by `Posting Date` for checking, or by either
+  `Transaction Date` or `Post Date` for cards.
+
+The account's page is checked like a statements page: the form's **Account** drop-down must show
+the account's `match` (its `suffix` unless set). Only the account it shows counts, not the hidden
+list of every account behind it. If the address leads anywhere else, that account fails with
+`activity link no longer valid`, and you need to update its `activity_url`.
+
+The choice is picked by its words, never its place in the list, since the list differs between
+kinds. The dates are typed key by key, because the boxes show a pasted date but don't register
+it. The **File type** must already show **Spreadsheet (Excel, CSV)**, the site's default. The run
+never changes it. The selectors are in `activity_fetch.py`.
+
+| Situation | Result |
+| --- | --- |
+| An activity link no longer leads to that account's form | That account fails. The rest still run. `FAIL` |
+| No **Choose a date range** choice, or no date boxes after it | That account fails. `FAIL` |
+| The File type shows something other than a CSV | That account fails before Download. `FAIL` |
+| Download sends nothing within 60 seconds | That account fails. `FAIL` |
+| The CSV's columns changed, it's empty, or a row is out of range | Not saved or written. That account fails, and the file stays in `downloads\`. `FAIL` |
+| The sheet write fails | The CSV is still saved. That account fails. `FAIL` |
+| `activity_start` is after today | That account fails before its page opens. `FAIL` |
+| Sign-in, verification, or credential problems | As for `bank1-statements`: nothing is tried, and no file or sheet is touched |
+
+The summary shows each account's row count and date span, and whether it was written, saved
+only, or downloaded only. It never shows a tab name, a spreadsheet ID, or a transaction.
+
 ## How sign-in works
 
 | Page | What happens |
@@ -154,6 +223,26 @@ words come from that test.
   from the outline, but it has never been clicked
 - Verification timing out
 
+**`bank1-activity` has run on the real site:**
+
+- `--dump` on the test workstation for one checking and one card account: one sign-in with a
+  remembered device, each form opened by its address and checked against its Account drop-down,
+  **Choose a date range** chosen, both dates typed and read back, the File type showing a CSV,
+  and one sign-out
+- A full run on the test workstation with no sheets: six checking accounts and one card, each
+  downloaded, its header and every row's date checked, and saved under its timestamped name. The
+  checking and card headers in `COLUMNS` both matched the real exports
+- A full run on the test workstation writing to test copies of the three workbooks: each
+  account's block replaced from its start cell across only its columns, numbers and dates stored
+  as values with no leading `'`, and the sheets' own formulas still working
+
+**Not yet run:**
+
+- On the robot, unattended through the agent
+- Which date the site's range filters cards by. The check accepts either, and every card row so
+  far has passed
+- Verification timing out, and a link that no longer leads to the form
+
 ## Set up each machine
 
 Do these signed in as the Windows user that runs the job, in
@@ -178,6 +267,14 @@ Fill in `login_url`, `name_in_files`, and for each account its `statements_url` 
 Copy each statements address from Edge's address bar while that account's statements page is
 open.
 
+For `bank1-activity`, also fill in each account's `activity_url`, copied the same way from its
+download account activity page, `activity_start`, and `abbreviation`. For each account with a
+sheet, fill in its `activity_sheet`, and add a `[sheets.<name>]` block for each workbook. Share each workbook with
+the service account as an Editor. The service account key is the same one other automations
+use, `automation/google-service-account`, imported once per Windows user (see
+[`machine-prep.md`](../machine-prep.md)). On the test workstation, point `[sheets]` at test
+copies only, or leave every `activity_sheet` out to only download.
+
 ## Run
 
 ```powershell
@@ -194,6 +291,19 @@ statements a run would save, and how many letters it would download. It download
 clicks nothing on those pages but the year filter, when the newest year has no statement yet.
 It also saves the sign-in, verification chooser, Next, after-push, and dashboard pages as
 `dump_site_<step>`. The sign-in page is saved before anything is typed.
+
+```powershell
+uv run bank1-activity --dump                     # signs in, fills in one form of each kind
+uv run bank1-activity --download-only            # downloads into the run folder only
+uv run bank1-activity --account <label>          # only one account
+uv run bank1-activity                            # normal run
+```
+
+`bank1-activity --dump` signs in, then for the first account of each kind (or the one named)
+opens its form, chooses the date range, and types the dates, saving the page as
+`dump_<label>_activity` and `dump_<label>_form`, `_page.txt` and `.png`. It never clicks
+Download. `--download-only` does everything but save to `data\` and write the sheet: the CSV
+stays in the run folder as `downloads\<label>.csv`, and the report shows its row count and dates.
 
 `--capture` opens the job's browser on the sign-in page and saves a snapshot each time the page
 changes, for up to 30 minutes or until you close the window. It types nothing and starts no
@@ -217,6 +327,16 @@ timeout_minutes = 40
 
 The limit allows 5 minutes of verification and 11 accounts at their slowest. Raise it if you add
 accounts.
+
+```toml
+[[jobs]]
+name = "bank1-activity"
+command = "bank1-activity"
+timeout_minutes = 30
+```
+
+That allows 5 minutes of verification and 8 accounts at up to about 2 minutes each, plus the
+sheet writes.
 
 ## Add another command
 

@@ -10,6 +10,7 @@ dependencies = [
 
 [project.scripts]
 bank1-statements = "bank1_portal.main:main"
+bank1-activity = "bank1_portal.activity_main:main"
 
 [tool.uv.sources]
 automation-common = { workspace = true }

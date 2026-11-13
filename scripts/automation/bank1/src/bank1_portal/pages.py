@@ -30,7 +30,9 @@ VISIBLE_TEXT_JS = r"""
       }
     }
   };
-  walk(root || document.body || document.documentElement);
+  const start = root || document.body || document.documentElement;
+  if (start.shadowRoot) walk(start.shadowRoot);  // an element that is itself a component
+  walk(start);
   return out.join('\n');
 }
 """

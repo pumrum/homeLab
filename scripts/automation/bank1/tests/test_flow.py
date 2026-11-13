@@ -10,12 +10,13 @@ Headless Edge treats PDFs differently, so also run them in visible windows:
     $env:AUTOMATION_TEST_HEADED = "1"; uv run pytest bank1/tests/test_flow.py
 """
 
+import datetime as dt
 import http.server
 import json
 import os
 import threading
 from types import SimpleNamespace
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import keyring
 import pytest
@@ -23,9 +24,10 @@ from playwright.sync_api import Error as PwError
 from playwright.sync_api import sync_playwright
 
 from automation_common.secrets import Credential
+from bank1_portal import activity_fetch, session, statements_fetch
+from bank1_portal import activity_main as activity_module
 from bank1_portal import capture as capture_module
 from bank1_portal import login as login_module
-from bank1_portal import session, statements_fetch
 from bank1_portal.config import Site
 from bank1_portal.login import LoginError, Timeouts, VerificationTimeout, sign_in, sign_out
 from bank1_portal.main import main
@@ -185,6 +187,88 @@ show(YEARS[0][0]);
 </script>"""
 
 
+# The activity download page, as the old process's selectors describe it: a "Direct Download"
+# form whose controls are web components. The account drop-down shows the open account. The
+# Activity drop-down's options sit in its light DOM, each label in the option's shadow root, in
+# a different order for each kind. The date boxes are inputs two shadow roots down, and they
+# register a date only on a real change event, as the real ones ignore pasted values. A hidden
+# copy of the Download button sits in a mobile footer, and the side menu lists every account
+ACTIVITY_PAGE = """__SIGN_OUT_BUTTON__
+<div id="sideMenu">__MENU__</div>
+<div id="downloadAccountActivity">
+  <h2>Direct Download</h2>
+  <mds-select id="account-selector" data-label="__ACCOUNT__"></mds-select>
+  <mds-select id="downloadFileTypeOption" data-label="__FILE_TYPE__"></mds-select>
+  <mds-select id="downloadActivityOptionId" data-label="__FIRST__">__OPTIONS__</mds-select>
+  <div id="dates" style="display:none">
+    <mds-datepicker id="accountActivityFromDate"></mds-datepicker>
+    <mds-datepicker id="accountActivityToDate"></mds-datepicker>
+  </div>
+  <mds-button id="download" data-label="Download"></mds-button>
+  <div style="display:none"><mds-button id="download" data-label="Download"></mds-button></div>
+</div>
+<script>
+const registered = {};
+customElements.define('mds-select', class extends HTMLElement {
+  connectedCallback() {
+    const root = this.attachShadow({mode: 'open'});
+    root.innerHTML = `<button>${this.dataset.label}</button>` +
+      '<div class="list" hidden><slot></slot></div>';
+    root.querySelector('button').onclick = () => {
+      const list = root.querySelector('.list');
+      list.hidden = !list.hidden;
+    };
+  }
+});
+customElements.define('mds-select-option', class extends HTMLElement {
+  connectedCallback() {
+    this.attachShadow({mode: 'open'}).innerHTML = `<div>${this.dataset.label}</div>`;
+    this.onclick = () => {
+      this.parentElement.shadowRoot.querySelector('.list').hidden = true;
+      if (this.dataset.label === 'Choose a date range') {
+        document.getElementById('dates').style.display = 'block';
+      }
+    };
+  }
+});
+customElements.define('mds-text-input', class extends HTMLElement {
+  connectedCallback() {
+    const input = document.createElement('input');
+    input.id = this.id + '-input';
+    input.onchange = () => { registered[this.id] = input.value; };
+    this.attachShadow({mode: 'open'}).appendChild(input);
+  }
+});
+customElements.define('mds-datepicker', class extends HTMLElement {
+  connectedCallback() {
+    const field = document.createElement('mds-text-input');
+    field.id = this.id + '-input';
+    this.attachShadow({mode: 'open'}).appendChild(field);
+  }
+});
+customElements.define('mds-button', class extends HTMLElement {
+  connectedCallback() {
+    const root = this.attachShadow({mode: 'open'});
+    root.innerHTML = `<button>${this.dataset.label}</button>`;
+    root.querySelector('button').onclick = () => {
+      const from = registered['accountActivityFromDate-input'];
+      const to = registered['accountActivityToDate-input'];
+      if (!from || !to) return;  // as on the real page: nothing happens
+      const range = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+      location = `/api/activity/__ID__?${range}`;
+    };
+  }
+});
+</script>"""
+
+ACTIVITY_OPTIONS = {
+    "checking": ["Current display, including filters", "Since last statement",
+                 "Choose a date range", "All transactions"],
+    "card": ["Current display, including filters", "Last statement", "Year to date",
+             "Since last download", "Last 30 days", "Choose a date range"],
+}
+
+
 class PdfServer:
     """Serves files over a real connection on 127.0.0.1, as attachments unless told inline."""
 
@@ -258,12 +342,15 @@ class FakeBank:
         self.sign_out_works = sign_out_works
         self.expired = set(expired)  # account ids whose links now go to the dashboard
         self.show = show or {}  # account id: the heading its page shows instead
+        self.file_type = "Spreadsheet (Excel, CSV)"  # the activity form's File type
         self.no_standard = no_standard  # the download menu has only the accessible PDF
         self.new_year = new_year  # the list opens on a year with no statements yet
         # The verification page: "push" shows the real chooser, "other" a chooser without the
         # push option, None skips the chooser because the site sent the push itself
         self.chooser = chooser
         self.next_button = next_button  # the page after the push option has a Next button
+        self.activity = {}  # account id: the CSV its download sends
+        self.activity_requests = []  # (account id, from, to)
         self.pushes = 0
         self.app_sign_ins = 0
         self.logins = []
@@ -293,6 +380,24 @@ class FakeBank:
                 .replace("__STANDARD__", "false" if self.no_standard else "true"))
         return self._html(route, page)
 
+    def _activity_page(self, route, account_id):
+        kind, name, suffix, _, _ = ACCOUNTS[account_id]
+        options = "".join(f'<mds-select-option data-label="{label}"></mds-select-option>'
+                          for label in ACTIVITY_OPTIONS[kind])
+        menu = "".join(f"<a href='#'>{n} (...{x})</a>" for _, n, x, _, _ in ACCOUNTS.values())
+        page = (ACTIVITY_PAGE.replace("__SIGN_OUT_BUTTON__", self._sign_out_button())
+                .replace("__MENU__", menu)
+                .replace("__ACCOUNT__", self.show.get(account_id, f"{name} (...{suffix})"))
+                .replace("__FIRST__", ACTIVITY_OPTIONS[kind][0])
+                .replace("__FILE_TYPE__", self.file_type)
+                .replace("__OPTIONS__", options).replace("__ID__", account_id))
+        return self._html(route, page)
+
+    def _activity_csv(self, route, account_id, query):
+        self.activity_requests.append((account_id, query["from"][0], query["to"][0]))
+        return route.fulfill(status=200, content_type="text/csv", body=self.activity[account_id],
+                             headers={"Content-Disposition": 'attachment; filename="x.CSV"'})
+
     def handle(self, route):
         request = route.request
         if self.server and request.url.startswith(self.server.base):
@@ -301,6 +406,9 @@ class FakeBank:
             return route.continue_()
         path = urlsplit(request.url).path
         self.paths.append(path)
+        if path.startswith("/api/activity/") and self.signed_in:
+            return self._activity_csv(route, path.rsplit("/", 1)[-1],
+                                      parse_qs(urlsplit(request.url).query))
         if path == "/api/login":
             return self._api_login(route, json.loads(request.post_data))
         if path == "/logoff":
@@ -328,6 +436,8 @@ class FakeBank:
             account_id = path.rsplit("/", 1)[-1]
             if path.startswith("/web/statements/") and account_id not in self.expired:
                 return self._statements(route, account_id)
+            if path.startswith("/web/activity/") and account_id not in self.expired:
+                return self._activity_page(route, account_id)
             if path != DASHBOARD:
                 return self._go(route, DASHBOARD)
             return self._html(route, f"{self._sign_out_button()}<h1>Accounts</h1>")
@@ -849,3 +959,158 @@ def test_capture_saves_snapshots_and_types_nothing(whole_run, monkeypatch):
     assert (run_dir / "capture_001_page.txt").exists()
     assert site.logins == []
     assert not list(run_dir.glob("trace*"))
+
+
+# ---------------------------------------------- bank1-activity
+
+ACTIVITY_CONFIG = CONFIG.replace('suffix = "9871"\n', '''suffix = "9871"
+activity_url = "https://bank.example.invalid/web/activity/chk1"
+activity_start = "2026-07-01"
+abbreviation = "CHK-A"
+activity_sheet = { sheet = "recon", tab = "Made-up checking tab", start_cell = "A5" }
+''').replace('match = "FakeCard (...8972)"\n', '''match = "FakeCard (...8972)"
+activity_url = "https://bank.example.invalid/web/activity/card1"
+activity_start = "2026-07-01"
+abbreviation = "CARD-A"
+''') + '''
+[sheets.recon]
+spreadsheet_id = "made-up-spreadsheet-id"
+'''
+
+CHECKING_CSV = """Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #
+DEBIT,11/10/2026,"EXAMPLE VENDOR, INC",-12.50,ACH_DEBIT,100.00,
+CREDIT,07/02/2026,EXAMPLE DEPOSIT,500.00,ACH_CREDIT,112.50,
+"""
+CARD_CSV = """Transaction Date,Post Date,Description,Category,Type,Amount,Memo
+11/09/2026,11/10/2026,EXAMPLE STORE,Shopping,Sale,-20.00,
+"""
+ACTIVITY_TODAY = dt.date(2026, 11, 11)
+
+
+class ActivityBook:
+    def __init__(self):
+        self.writes = {}
+
+    def open(self, spreadsheet_id, tab, masker):
+        book = self
+
+        class Tab:
+            def replace_block(self, start_cell, rows, date_columns=None, trim=False,
+                              width=None):
+                book.writes[tab] = (spreadsheet_id, start_cell, rows, width)
+        return Tab()
+
+
+@pytest.fixture
+def activity_run(whole_run, monkeypatch):
+    (whole_run.data / "config.toml").write_text(ACTIVITY_CONFIG, encoding="utf-8")
+    book = ActivityBook()
+
+    def start(site, *args):
+        site.activity = {"chk1": CHECKING_CSV, "card1": CARD_CSV} | site.activity
+        site.use(whole_run.server, {})
+
+        def launch_edge(pw, profile):
+            ctx = pw.chromium.launch_persistent_context(
+                user_data_dir=str(profile), channel="msedge", headless=not HEADED,
+                accept_downloads=True)
+            ctx.route("**/*", site.handle)
+            ctx.set_default_timeout(3_000)
+            return ctx
+
+        monkeypatch.setattr(session, "launch_edge", launch_edge)
+        monkeypatch.setattr(login_module, "Timeouts", lambda: FAST)
+        monkeypatch.setattr(activity_fetch, "PAGE_TIMEOUT_MS", 2_000)
+        monkeypatch.setattr(activity_fetch, "STEP_TIMEOUT_MS", 1_500)
+        monkeypatch.setattr(activity_fetch, "DOWNLOAD_TIMEOUT_MS", 2_000)
+        return activity_module.main(
+            list(args), notifier=lambda note, masker: whole_run.notes.append(note) or True,
+            today=ACTIVITY_TODAY, open_ws=book.open)
+
+    return SimpleNamespace(start=start, data=whole_run.data, notes=whole_run.notes, book=book)
+
+
+ABBREVIATIONS = {CHK: ("CHK-A", "9871"), CARD: ("CARD-A", "8972")}
+
+
+def _activity_files(data, label):
+    abbreviation, suffix = ABBREVIATIONS[label]
+    stamp = _run_dir(data).name.replace("_", "-")  # the run's start time
+    return sorted(p.name for p in (data / "data" / "activity").glob(f"{abbreviation}_*")), (
+        f"{abbreviation}_{suffix}_{stamp}_Activity.csv")
+
+
+def _activity_text(data, label):
+    names, expected = _activity_files(data, label)
+    assert names == [expected]
+    return (data / "data" / "activity" / expected).read_text(encoding="utf-8")
+
+
+def test_an_activity_run_downloads_each_range_saves_it_and_writes_the_sheet(activity_run):
+    site = FakeBank()
+    assert activity_run.start(site) == 0
+    assert site.activity_requests == [("chk1", "07/01/2026", "11/11/2026"),
+                                      ("card1", "07/01/2026", "11/11/2026")]
+    assert _activity_text(activity_run.data, CHK) == CHECKING_CSV
+    assert _activity_text(activity_run.data, CARD) == CARD_CSV
+    spreadsheet_id, cell, rows, width = activity_run.book.writes["Made-up checking tab"]
+    assert (spreadsheet_id, cell, width) == ("made-up-spreadsheet-id", "A5", 7)
+    assert [row[1] for row in rows] == [dt.date(2026, 7, 2), dt.date(2026, 11, 10)]
+    assert list(activity_run.book.writes) == ["Made-up checking tab"]  # the card: no sheet
+    assert site.logins == [{"username": USER, "password": PASSWORD}]
+    assert site.signed_in is False
+    assert activity_run.notes == [{"title": "bank1-activity", "message": "PASS"}]
+    written = _written(activity_run.data)
+    for private in ("made-up-spreadsheet-id", "Made-up checking tab", "/web/activity/",
+                    "EXAMPLE"):
+        assert private not in written
+
+
+def test_a_stale_link_or_another_accounts_form_fails_only_that_account(activity_run):
+    site = FakeBank(expired={"chk1"}, show={"card1": "FakeCard (...1111)"})
+    assert activity_run.start(site) == 1
+    report = _report(activity_run.data)
+    assert "activity link no longer valid: landed on the dashboard" in report
+    assert "activity link no longer valid: the form is for another account" in report
+    assert site.activity_requests == [] and activity_run.book.writes == {}
+    assert not (activity_run.data / "data" / "activity").exists()
+    assert activity_run.notes == [{"title": "bank1-activity", "message": "FAIL"}]
+
+
+def test_a_changed_header_saves_nothing_and_writes_nothing(activity_run):
+    site = FakeBank()
+    site.activity = {"chk1": "Card," + CHECKING_CSV}
+    assert activity_run.start(site, "--account", CHK) == 1
+    assert "added Card" in _report(activity_run.data)
+    assert not (activity_run.data / "data" / "activity").exists()
+    assert activity_run.book.writes == {}
+
+
+def test_a_file_type_other_than_csv_fails_before_download(activity_run):
+    site = FakeBank()
+    site.file_type = "Quicken Web Connect (QFX)"
+    assert activity_run.start(site, "--account", CHK) == 1
+    assert 'the File type shows "Quicken Web Connect (QFX)", not a CSV' in _report(
+        activity_run.data)
+    assert site.activity_requests == []
+    assert not (activity_run.data / "data" / "activity").exists()
+
+
+def test_activity_dump_fills_in_each_form_but_downloads_nothing(activity_run):
+    site = FakeBank()
+    assert activity_run.start(site, "--dump") == 0
+    assert site.activity_requests == []
+    run_dir = _run_dir(activity_run.data)
+    for label in (CHK, CARD):
+        assert (run_dir / f"dump_{label}_form_page.txt").exists()
+        assert (run_dir / f"dump_{label}_activity_page.txt").exists()
+    assert "form filled for 07/01/2026 to 11/11/2026" in _report(activity_run.data)
+
+
+def test_download_only_keeps_the_file_in_the_run_folder(activity_run):
+    site = FakeBank()
+    assert activity_run.start(site, "--download-only") == 0
+    assert len(site.activity_requests) == 2
+    assert not (activity_run.data / "data" / "activity").exists()
+    assert activity_run.book.writes == {}
+    assert (_run_dir(activity_run.data) / "downloads" / f"{CHK}.csv").exists()
