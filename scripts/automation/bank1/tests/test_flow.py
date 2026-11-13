@@ -966,10 +966,12 @@ def test_capture_saves_snapshots_and_types_nothing(whole_run, monkeypatch):
 ACTIVITY_CONFIG = CONFIG.replace('suffix = "9871"\n', '''suffix = "9871"
 activity_url = "https://bank.example.invalid/web/activity/chk1"
 activity_start = "2026-07-01"
+abbreviation = "CHK-A"
 activity_sheet = { sheet = "recon", tab = "Made-up checking tab", start_cell = "A5" }
 ''').replace('match = "FakeCard (...8972)"\n', '''match = "FakeCard (...8972)"
 activity_url = "https://bank.example.invalid/web/activity/card1"
 activity_start = "2026-07-01"
+abbreviation = "CARD-A"
 ''') + '''
 [sheets.recon]
 spreadsheet_id = "made-up-spreadsheet-id"
@@ -1028,8 +1030,20 @@ def activity_run(whole_run, monkeypatch):
     return SimpleNamespace(start=start, data=whole_run.data, notes=whole_run.notes, book=book)
 
 
-def _activity_file(data, label):
-    return data / "data" / "activity" / f"{label}.csv"
+ABBREVIATIONS = {CHK: ("CHK-A", "9871"), CARD: ("CARD-A", "8972")}
+
+
+def _activity_files(data, label):
+    abbreviation, suffix = ABBREVIATIONS[label]
+    stamp = _run_dir(data).name.replace("_", "-")  # the run's start time
+    return sorted(p.name for p in (data / "data" / "activity").glob(f"{abbreviation}_*")), (
+        f"{abbreviation}_{suffix}_{stamp}_Activity.csv")
+
+
+def _activity_text(data, label):
+    names, expected = _activity_files(data, label)
+    assert names == [expected]
+    return (data / "data" / "activity" / expected).read_text(encoding="utf-8")
 
 
 def test_an_activity_run_downloads_each_range_saves_it_and_writes_the_sheet(activity_run):
@@ -1037,8 +1051,8 @@ def test_an_activity_run_downloads_each_range_saves_it_and_writes_the_sheet(acti
     assert activity_run.start(site) == 0
     assert site.activity_requests == [("chk1", "07/01/2026", "11/11/2026"),
                                       ("card1", "07/01/2026", "11/11/2026")]
-    assert _activity_file(activity_run.data, CHK).read_text(encoding="utf-8") == CHECKING_CSV
-    assert _activity_file(activity_run.data, CARD).read_text(encoding="utf-8") == CARD_CSV
+    assert _activity_text(activity_run.data, CHK) == CHECKING_CSV
+    assert _activity_text(activity_run.data, CARD) == CARD_CSV
     spreadsheet_id, cell, rows, width = activity_run.book.writes["Made-up checking tab"]
     assert (spreadsheet_id, cell, width) == ("made-up-spreadsheet-id", "A5", 7)
     assert [row[1] for row in rows] == ["07/02/2026", "11/10/2026"]
@@ -1068,7 +1082,7 @@ def test_a_changed_header_saves_nothing_and_writes_nothing(activity_run):
     site.activity = {"chk1": "Card," + CHECKING_CSV}
     assert activity_run.start(site, "--account", CHK) == 1
     assert "added Card" in _report(activity_run.data)
-    assert not _activity_file(activity_run.data, CHK).exists()
+    assert not (activity_run.data / "data" / "activity").exists()
     assert activity_run.book.writes == {}
 
 

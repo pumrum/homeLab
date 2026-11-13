@@ -107,7 +107,7 @@ def test_the_example_lists_every_kind_and_every_event_but_wont_run_as_is():
 SHEETS = {"recon": {"spreadsheet_id": "made-up-spreadsheet-id"}}
 SHEET = {"sheet": "recon", "tab": "Recon 1", "start_cell": "A5"}
 ACTIVITY = {"activity_url": "https://bank.example.invalid/activity/a1",
-            "activity_start": "2026-07-01"}
+            "activity_start": "2026-07-01", "abbreviation": "ABC-1"}
 
 
 def with_sheets(config):
@@ -122,6 +122,7 @@ def test_activity_settings_load_with_and_without_a_sheet():
     import datetime as dt
     alone = parse_config(doc(**ACTIVITY)).accounts[0].activity
     assert alone.start == dt.date(2026, 7, 1) and alone.destination is None
+    assert alone.abbreviation == "ABC-1"
     cfg = parse_config(with_sheets(doc(**ACTIVITY, activity_sheet=SHEET)))
     destination = cfg.accounts[0].activity.destination
     assert (destination.sheet, destination.spreadsheet_id, destination.tab,
@@ -138,8 +139,14 @@ def test_activity_reprs_never_show_private_values():
 @pytest.mark.parametrize(("change", "message"), [
     ({"activity_start": "2026-07-01"}, "needs an \"activity_url\""),
     ({"activity_sheet": SHEET}, "needs an \"activity_url\""),
+    ({"abbreviation": "ABC"}, "needs an \"activity_url\""),
+    ({**ACTIVITY, "abbreviation": "ABC_1"}, "letters, digits, or -"),
+    ({**ACTIVITY, "abbreviation": "ABC 1"}, "letters, digits, or -"),
+    ({"activity_url": "https://bank.example.invalid/activity/a1",
+      "activity_start": "2026-07-01"}, "abbreviation"),
     ({**ACTIVITY, "activity_start": "07/01/2026"}, "a date like"),
-    ({"activity_url": "https://bank.example.invalid/activity/a1"}, "activity_start"),
+    ({"activity_url": "https://bank.example.invalid/activity/a1", "abbreviation": "A"},
+     "activity_start"),
     ({**ACTIVITY, "activity_url": "http://bank.example.invalid/a"}, "https"),
     ({**ACTIVITY, "activity_sheet": SHEET | {"sheet": "other"}}, r"\[sheets.<name>\]"),
     ({**ACTIVITY, "activity_sheet": SHEET | {"start_cell": "a5"}}, "a cell like"),

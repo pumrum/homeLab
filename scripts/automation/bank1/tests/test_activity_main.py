@@ -33,7 +33,7 @@ def _cfg():
                    "statements_url": f"https://bank.example.invalid/statements/{label}"}
         if activity:
             account |= {"activity_url": f"https://bank.example.invalid/activity/{label}",
-                        "activity_start": "2026-07-01"}
+                        "activity_start": "2026-07-01", "abbreviation": f"ABC{n}"}
         if activity == "sheet":
             account["activity_sheet"] = {"sheet": "recon", "tab": f"Tab {label}",
                                          "start_cell": "B5"}
@@ -103,7 +103,15 @@ def site(monkeypatch):
 
 
 def _saved(tmp_path, label):
-    return tmp_path / "data" / "activity" / f"{label}.csv"
+    """The account's saved CSVs, oldest first."""
+    account = _account(label)
+    pattern = f"{account.activity.abbreviation}_{account.suffix}_*_Activity.csv"
+    return sorted((tmp_path / "data" / "activity").glob(pattern))
+
+
+def _text(paths):
+    assert len(paths) == 1, paths
+    return paths[0].read_text(encoding="utf-8")
 
 
 def _item(run):
@@ -136,7 +144,9 @@ def test_a_good_download_is_saved_then_written_oldest_first_as_text(run, tmp_pat
     book = FakeBook()
     activity_stage(run, None, _account("entity1_checking"), tmp_path, TODAY, False, book.open)
     assert ("fill", "07/01/2026", "11/11/2026") in site.steps
-    assert _saved(tmp_path, "entity1_checking").read_text(encoding="utf-8") == CSV
+    [saved] = _saved(tmp_path, "entity1_checking")
+    assert saved.name == f"ABC0_9870_{run.summary.started_at:%Y%m%d-%H%M%S}_Activity.csv"
+    assert saved.read_text(encoding="utf-8") == CSV
     [(spreadsheet_id, tab, cell, rows, width)] = book.writes
     assert (spreadsheet_id, tab, cell, width) == ("made-up-id", "Tab entity1_checking", "B5", 7)
     assert rows == [["CREDIT", "07/01/2026", "EXAMPLE DEPOSIT", "500.00", "ACH_CREDIT",
@@ -148,27 +158,27 @@ def test_a_good_download_is_saved_then_written_oldest_first_as_text(run, tmp_pat
     assert item.detail == "2 row(s) 07/01/2026 to 11/10/2026; saved and written to recon"
 
 
-def test_every_run_replaces_the_file_and_the_block(run, tmp_path, site):
+def test_every_run_replaces_the_block_and_its_file_from_the_same_run(run, tmp_path, site):
     book = FakeBook()
     account = _account("entity1_checking")
     activity_stage(run, None, account, tmp_path, TODAY, False, book.open)
     site.csv = CSV.replace("DEBIT,11/10/2026", "DEBIT,11/11/2026")
     activity_stage(run, None, account, tmp_path, TODAY, False, book.open)
-    assert "11/11/2026" in _saved(tmp_path, "entity1_checking").read_text(encoding="utf-8")
+    assert "11/11/2026" in _text(_saved(tmp_path, "entity1_checking"))
     assert len(book.writes) == 2 and book.writes[1][3][-1][1] == "11/11/2026"
 
 
 def test_an_account_without_a_sheet_is_only_saved(run, tmp_path, site):
     book = FakeBook()
     activity_stage(run, None, _account("entity2_checking"), tmp_path, TODAY, False, book.open)
-    assert _saved(tmp_path, "entity2_checking").exists() and book.writes == []
+    assert len(_saved(tmp_path, "entity2_checking")) == 1 and book.writes == []
     assert _item(run).detail.endswith("saved, no sheet")
 
 
 def test_download_only_saves_nothing_and_writes_nothing(run, tmp_path, site):
     book = FakeBook()
     activity_stage(run, None, _account("entity1_checking"), tmp_path, TODAY, True, book.open)
-    assert not _saved(tmp_path, "entity1_checking").exists() and book.writes == []
+    assert _saved(tmp_path, "entity1_checking") == [] and book.writes == []
     assert (run.run_dir / "downloads" / "entity1_checking.csv").exists()
     assert _item(run).status is Status.OK and "download only" in _item(run).detail
 
@@ -177,13 +187,14 @@ def test_download_only_saves_nothing_and_writes_nothing(run, tmp_path, site):
                                   "check_file_type",
                                   "download"])
 def test_a_failed_browser_step_touches_neither_file_nor_sheet(run, tmp_path, site, step):
-    target = _saved(tmp_path, "entity1_checking")
+    target = tmp_path / "data" / "activity" / "ABC0_9870_20261110-080000_Activity.csv"
     target.parent.mkdir(parents=True)
     target.write_text("the last good copy", encoding="utf-8")
     site.fail = step
     book = FakeBook()
     activity_stage(run, None, _account("entity1_checking"), tmp_path, TODAY, False, book.open)
-    assert target.read_text(encoding="utf-8") == "the last good copy" and book.writes == []
+    assert _saved(tmp_path, "entity1_checking") == [target] and book.writes == []
+    assert target.read_text(encoding="utf-8") == "the last good copy"
     assert _item(run).status is Status.FAILED
 
 
@@ -191,7 +202,7 @@ def test_a_file_that_fails_its_checks_is_kept_only_in_the_run_folder(run, tmp_pa
     site.csv = CSV.replace("Balance", "Running Balance")
     book = FakeBook()
     activity_stage(run, None, _account("entity1_checking"), tmp_path, TODAY, False, book.open)
-    assert not _saved(tmp_path, "entity1_checking").exists() and book.writes == []
+    assert _saved(tmp_path, "entity1_checking") == [] and book.writes == []
     assert (run.run_dir / "downloads" / "entity1_checking.csv").exists()
     assert _item(run).detail.startswith("check: ActivityError: the checking columns changed")
 
@@ -199,7 +210,7 @@ def test_a_file_that_fails_its_checks_is_kept_only_in_the_run_folder(run, tmp_pa
 def test_a_failed_write_keeps_the_saved_file_and_fails_the_account(run, tmp_path, site):
     activity_stage(run, None, _account("entity1_checking"), tmp_path, TODAY, False,
                    FakeBook(fail=True).open)
-    assert _saved(tmp_path, "entity1_checking").exists()
+    assert len(_saved(tmp_path, "entity1_checking")) == 1
     assert _item(run).status is Status.FAILED
     assert _item(run).detail.startswith("write:")
 

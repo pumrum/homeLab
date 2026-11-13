@@ -23,8 +23,10 @@ name_in_files = "<bank name>"
 #   activity_url    the full address of its "download account activity" page
 #   activity_start  the first day to download, as "YYYY-MM-DD"; the last is the day of the run.
 #                   Change it by hand each fiscal year
-#   activity_sheet  optional: where the activity goes. Leave it out to only save the CSV, as
-#                   C:\automation\bank1\data\activity\<label>.csv
+#   abbreviation    starts its saved files' names, like ABC1 in
+#                   ABC1_1234_20261113-143342_Activity.csv. Letters, digits, or -
+#   activity_sheet  optional: the sheet the activity goes to. Leave it out to only save the
+#                   CSV, which every run does, as a new file in C:\automation\bank1\data\activity\
 #     sheet         the name of a [sheets.<name>] block below
 #     tab           the tab's name
 #     start_cell    where the oldest row goes, like "A5". Each run replaces everything from here
@@ -37,6 +39,7 @@ statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
 activity_url = "https://<address of its activity download page>"
 activity_start = "<YYYY-MM-DD>"
+abbreviation = "<ABBREVIATION>"
 activity_sheet = { sheet = "recon", tab = "<tab name>", start_cell = "<cell, like A5>" }
 
 [[accounts]]
@@ -46,6 +49,7 @@ statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
 activity_url = "https://<address of its activity download page>"
 activity_start = "<YYYY-MM-DD>"
+abbreviation = "<ABBREVIATION>"
 activity_sheet = { sheet = "recon", tab = "<tab name>", start_cell = "<cell, like A5>" }
 
 [[accounts]]
@@ -55,6 +59,7 @@ statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
 activity_url = "https://<address of its activity download page>"
 activity_start = "<YYYY-MM-DD>"
+abbreviation = "<ABBREVIATION>"
 activity_sheet = { sheet = "recon", tab = "<tab name>", start_cell = "<cell, like A5>" }
 
 [[accounts]]
@@ -64,6 +69,7 @@ statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
 activity_url = "https://<address of its activity download page>"
 activity_start = "<YYYY-MM-DD>"
+abbreviation = "<ABBREVIATION>"
 activity_sheet = { sheet = "recon", tab = "<tab name>", start_cell = "<cell, like A5>" }
 
 [[accounts]]
@@ -73,6 +79,7 @@ statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
 activity_url = "https://<address of its activity download page>"
 activity_start = "<YYYY-MM-DD>"
+abbreviation = "<ABBREVIATION>"
 activity_sheet = { sheet = "recon", tab = "<tab name>", start_cell = "<cell, like A5>" }
 
 [[accounts]]
@@ -82,6 +89,7 @@ statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
 activity_url = "https://<address of its activity download page>"
 activity_start = "<YYYY-MM-DD>"
+abbreviation = "<ABBREVIATION>"
 activity_sheet = { sheet = "recon", tab = "<tab name>", start_cell = "<cell, like A5>" }
 
 [[accounts]]
@@ -91,6 +99,7 @@ statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
 activity_url = "https://<address of its activity download page>"
 activity_start = "<YYYY-MM-DD>"
+abbreviation = "<ABBREVIATION>"
 activity_sheet = { sheet = "recon", tab = "<tab name>", start_cell = "<cell, like A5>" }
 
 [[accounts]]
@@ -100,6 +109,7 @@ statements_url = "https://<address of its statements page>"
 suffix = "<last four digits>"
 activity_url = "https://<address of its activity download page>"
 activity_start = "<YYYY-MM-DD>"
+abbreviation = "<ABBREVIATION>"
 
 [[accounts]]
 label = "personal_invest_1"

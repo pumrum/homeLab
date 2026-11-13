@@ -124,12 +124,15 @@ checks the CSV, saves it, and writes it to the account's tab. Then it signs out.
 
 - **The range** runs from the account's `activity_start` to the day of the run. The site's
   download is current to the minute, so a run at 4 pm picks up what posted after an 8 am run.
-- **Every run replaces everything.** The CSV goes to
-  `C:\automation\bank1\data\activity\<label>.csv`, over the last one. In the sheet, the run
-  clears everything from the account's `start_cell` down, across exactly as many columns as the
-  CSV has, then writes the rows there. Columns beside the block are never touched. Nothing is
-  appended or compared, so running again the same day, or from another machine, just repeats the
-  overwrite.
+- **Every run replaces the sheet's block.** The run clears everything from the account's
+  `start_cell` down, across exactly as many columns as the CSV has, then writes the rows there.
+  Columns beside the block are never touched. Nothing is appended or compared, so running again
+  the same day, or from another machine, just repeats the overwrite.
+- **Every run saves a new CSV** per account in `C:\automation\bank1\data\activity\`, named as the
+  old process named them, with the run's start time:
+  `<abbreviation>_<suffix>_<yyyymmdd-HHmmss>_Activity.csv`, like
+  `ABC1_1234_20261113-143342_Activity.csv`. Older files are kept, so the folder grows by one file
+  per account each run. Nothing clears it.
 - **Oldest first, no header, as text.** The bank exports the newest first, so the rows are
   reversed. Every column is written, and every value goes in as literal text, exactly as
   exported, as the old process pasted it.
@@ -258,8 +261,8 @@ Copy each statements address from Edge's address bar while that account's statem
 open.
 
 For `bank1-activity`, also fill in each account's `activity_url`, copied the same way from its
-download account activity page, and `activity_start`. For each account with a sheet, fill in its
-`activity_sheet`, and add a `[sheets.<name>]` block for each workbook. Share each workbook with
+download account activity page, `activity_start`, and `abbreviation`. For each account with a
+sheet, fill in its `activity_sheet`, and add a `[sheets.<name>]` block for each workbook. Share each workbook with
 the service account as an Editor. The service account key is the same one other automations
 use, `automation/google-service-account`, imported once per Windows user (see
 [`machine-prep.md`](../machine-prep.md)). On the test workstation, point `[sheets]` at test

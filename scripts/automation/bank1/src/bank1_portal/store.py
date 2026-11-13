@@ -1,8 +1,10 @@
 """Move a checked file to its final place, replacing any file already there.
 
-Running again means wanting the freshest copy, so nothing is compared or kept.
+Running again means wanting the freshest copy, so nothing is compared or kept. Activity CSVs
+are named with the run's start time, so each run adds new ones beside the old.
 """
 
+import datetime as dt
 import os
 from pathlib import Path
 
@@ -17,9 +19,11 @@ def save_statement(download: Path, target: Path) -> None:
     os.replace(download, target)
 
 
-def activity_path(data_dir: Path, label: str) -> Path:
-    """One file per account, replaced by every run: the label holds nothing private."""
-    return data_dir / "data" / "activity" / f"{label}.csv"
+def activity_path(data_dir: Path, abbreviation: str, suffix: str, when: dt.datetime) -> Path:
+    """Named as the old process named them, stamped with the run's start time, so each run
+    adds a file per account: <abbreviation>_<suffix>_<yyyymmdd-HHmmss>_Activity.csv."""
+    name = f"{abbreviation}_{suffix}_{when:%Y%m%d-%H%M%S}_Activity.csv"
+    return data_dir / "data" / "activity" / name
 
 
 def save_activity(download: Path, target: Path) -> None:

@@ -31,7 +31,8 @@ _SUFFIX = re.compile(r"^[0-9]{4}$")
 _PLACEHOLDERS = ("<", ">")  # not "...": a page may show an account as ...1234
 _FILE_NAME_PART = re.compile(r'^[^\\/:*?"<>|_]+$')  # "_" separates the parts of a file name
 _CELL = re.compile(r"^[A-Z]{1,3}[1-9][0-9]*$")
-_ACCOUNT_KEYS = {"label", "kind", "statements_url", "suffix", "match",
+_ABBREVIATION = re.compile(r"^[A-Za-z0-9-]+$")  # "_" separates a saved file's name parts
+_ACCOUNT_KEYS = {"label", "kind", "statements_url", "suffix", "match", "abbreviation",
                  "activity_url", "activity_start", "activity_sheet"}
 
 NOTIFICATIONS = {
@@ -77,6 +78,7 @@ class Activity:
     url: str  # the account's activity download page
     start: dt.date  # the first day of the range; the last is the day of the run
     destination: Destination | None  # None: download only
+    abbreviation: str  # starts the saved file's name, like ABC1_1234_20261113-143342_Activity
 
     def __repr__(self) -> str:
         return f"Activity({self.start.isoformat()!r}, {self.destination!r})"
@@ -161,14 +163,18 @@ def _destination(table: Any, sheets: Mapping[str, str], where: str) -> Destinati
 def _activity(table: Mapping[str, Any], sheets: Mapping[str, str],
               where: str) -> Activity | None:
     if "activity_url" not in table:
-        for key in ("activity_start", "activity_sheet"):
+        for key in ("activity_start", "activity_sheet", "abbreviation"):
             if key in table:
                 raise ConfigError(f'{where}: "{key}" needs an "activity_url"')
         return None
     destination = (_destination(table["activity_sheet"], sheets, where)
                    if "activity_sheet" in table else None)
+    abbreviation = _text(table, "abbreviation", where)
+    if not _ABBREVIATION.match(abbreviation):
+        # The value is private, so the message never repeats it
+        raise ConfigError(f'{where}: "abbreviation" can only use letters, digits, or -')
     return Activity(_url(table, "activity_url", where), _date(table, "activity_start", where),
-                    destination)
+                    destination, abbreviation)
 
 
 def _account(table: Mapping[str, Any], number: int, sheets: Mapping[str, str]) -> Account:

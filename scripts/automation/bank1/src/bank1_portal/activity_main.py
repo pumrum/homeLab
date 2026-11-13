@@ -8,8 +8,9 @@
                                                    kind and save its structure; downloads nothing
 
 Each account's range runs from its activity_start to today. The site's download is current to
-the minute, so every run replaces the account's file and its whole block in the sheet: a later
-run the same day just picks up what has posted since. Nothing is appended or compared.
+the minute, so every run replaces the account's whole block in the sheet: a later run the same
+day just picks up what has posted since. Nothing is appended to the sheet or compared. Each run
+also saves a new CSV per account, stamped with the run's start time.
 """
 
 import argparse
@@ -125,7 +126,8 @@ def activity_stage(run: Run, page: Page, account: Account, data_dir: Path, today
         return
     try:
         step = "save"
-        save_activity(dest, activity_path(data_dir, account.label))
+        save_activity(dest, activity_path(data_dir, account.activity.abbreviation,
+                                          account.suffix, run.summary.started_at))
         destination = account.activity.destination
         if destination is None:
             run.summary.record("activity", account.label, Status.OK,
