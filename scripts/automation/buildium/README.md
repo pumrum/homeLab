@@ -149,9 +149,9 @@ with the same tab names.
 
 Exporting, cleaning, and writing the master have run on the real site and the real sheet, both
 by hand and started by the agent on the robot. So have turning on an entity's `gl_write_tab`, and
-the sheet check stopping a run on a deleted spreadsheet before it signed in. **Not yet run:**
-saving to the ledger folder, the dashboard time, and a write failing partway, which can't be
-forced safely.
+the sheet check stopping a run on a deleted spreadsheet before it signed in, saving to the
+ledger folder, and the dashboard time, by hand on the test workstation. **Not yet run:** a write
+failing partway, which can't be forced safely.
 
 ## buildium-statements
 
@@ -236,8 +236,9 @@ showing a challenge, and it judged the job's browser to be automated. The run no
 with `the site's bot check (reCAPTCHA) refused the sign-in`, instead of waiting 30 seconds and
 blaming the password. Bot checks are never worked around, so a run can't sign in while the site
 refuses it. A run by hand the next day signed in with no MFA, exported both methods, and signed
-out, so the refusal doesn't happen every time. **Not yet run:** MFA through the sign-in server,
-and a scheduled run since the change.
+out, so the refusal doesn't happen every time. After the job browser's history was cleared,
+a run by hand had no refusal, and the site asked for MFA for each entity, which went through.
+**Not yet run:** a scheduled run since the change.
 
 **`buildium-gl --interactive` is for testing while you watch.** When the bot check stops a
 sign-in, `run.log` and the console say which entity to sign in as, by key, such as
