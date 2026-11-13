@@ -890,9 +890,8 @@ def _ledgers(data):
     return sorted(p.name for p in folder.iterdir()) if folder.exists() else []
 
 
-# Each download's name in the run folder, and its name in the ledger folder
-LEDGER_FILES = {"entity1_Accrual.csv": "ONELLC_Accrual.csv", "entity1_Cash.csv": "ONELLC_Cash.csv",
-                "entity2_Accrual.csv": "TWOLLC_Accrual.csv", "entity2_Cash.csv": "TWOLLC_Cash.csv"}
+# Named by abbreviation, the same in the run folder's downloads and the ledger folder
+LEDGER_FILES = ["ONELLC_Accrual.csv", "ONELLC_Cash.csv", "TWOLLC_Accrual.csv", "TWOLLC_Cash.csv"]
 
 
 def _gl_run(whole_run, site, gl_csv_of, *args, files=None):
@@ -990,9 +989,9 @@ def test_a_dump_saves_every_export_with_a_profile_and_signs_out(whole_run, gl_cs
     site = FakeSite()
     assert _gl_run(whole_run, site, gl_csv_of) == 0
     run_dir = _run_dir(whole_run.data)
-    for key in ("entity1", "entity2"):
+    for key, abbreviation in (("entity1", "ONELLC"), ("entity2", "TWOLLC")):
         for method in ("Cash", "Accrual"):
-            assert (run_dir / "downloads" / f"{key}_{method}.csv").stat().st_size > 0
+            assert (run_dir / "downloads" / f"{abbreviation}_{method}.csv").stat().st_size > 0
             assert "columns: 53" in (run_dir / f"gl_profile_{key}_{method}.txt").read_text(
                 encoding="utf-8")
     for step in ("report", "dates", "export_menu_cash", "export_menu_accrual"):
@@ -1100,12 +1099,12 @@ def test_a_normal_run_replaces_the_master_after_every_entity_worked(whole_run, g
     assert "wrote 4 rows" in report
     # Raw exports stay, and only a --dump adds page copies and profiles
     run_dir = _run_dir(whole_run.data)
-    assert (run_dir / "downloads" / "entity2_Accrual.csv").exists()
-    # And each one also replaces its file in the ledger folder, named by abbreviation
-    assert _ledgers(whole_run.data) == sorted(LEDGER_FILES.values())
-    for download, saved in LEDGER_FILES.items():
-        assert ((whole_run.data / "data" / "ledgers" / saved).read_bytes()
-                == (run_dir / "downloads" / download).read_bytes())
+    assert sorted(p.name for p in (run_dir / "downloads").iterdir()) == LEDGER_FILES
+    # And each one also replaces its file in the ledger folder, byte for byte
+    assert _ledgers(whole_run.data) == LEDGER_FILES
+    for name in LEDGER_FILES:
+        assert ((whole_run.data / "data" / "ledgers" / name).read_bytes()
+                == (run_dir / "downloads" / name).read_bytes())
     assert "ledger files: data" in report and "(replaced 4 files)" in report
     assert not list(run_dir.glob("gl_profile_*"))
     assert not list(run_dir.glob("dump_*"))

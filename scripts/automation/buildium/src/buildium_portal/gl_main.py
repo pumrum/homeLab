@@ -107,7 +107,7 @@ def _ignore(_: str) -> None:
 def _export_one(run: Run, page: Page, entity: Entity, method: str,
                 observer: Callable[[str], None], dump: bool) -> bytes:
     # Saved straight to the run folder, and kept: it's what any later question gets checked with
-    dest = run.run_dir / "downloads" / f"{entity.key}_{method}.csv"
+    dest = run.run_dir / "downloads" / ledger_name(entity.abbreviation, method)
     started = time.monotonic()
     export_method(page, method, dest, observer)
     seconds = time.monotonic() - started

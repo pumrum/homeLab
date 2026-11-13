@@ -63,7 +63,7 @@ formula bar. The `'` isn't part of the value.
 
 A run that writes the sheet first saves every export, exactly as downloaded, to
 `C:\automation\buildium\data\ledgers\<abbreviation>_<method>.csv`, such as `ABCLLC_Cash.csv`.
-Each file replaces the last run's, and the run folder keeps its own copy, named by key. Files this
+Each file replaces the last run's, and the run folder keeps its own copy, named the same. Files this
 run doesn't write, such as a removed entity's or one from before an abbreviation changed, stay
 until you delete them. The abbreviation is masked in `report.txt` and `run.log`, so a file there
 shows as `***_Cash.csv`.
@@ -129,7 +129,7 @@ a deliberate exception to the usual rule of carrying on with the next item.
 | --- | --- | --- |
 | `report.txt`, `run.log` | Results, with each export's size and time, and row counts | Yes |
 | `gl_profile_<key>_<method>.txt` | `--dump` only: the export's structure, with values reduced to shapes such as `-9,999.99` | Yes |
-| `downloads\<key>_<method>.csv` | The raw export, kept for good | No, it holds real data |
+| `downloads\<abbreviation>_<method>.csv` | The raw export, kept for good | No, it holds real data |
 | `dump_<key>_<step>_page.txt`, `.png`, `.html` | `--dump` only: the page at each step | No, it holds real names and addresses |
 
 ### Set it up
