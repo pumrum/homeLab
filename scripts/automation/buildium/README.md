@@ -238,7 +238,7 @@ blaming the password. Bot checks are never worked around, so a run can't sign in
 refuses it. A run by hand the next day signed in with no MFA, exported both methods, and signed
 out, so the refusal doesn't happen every time. After the job browser's history was cleared,
 a run by hand had no refusal, and the site asked for MFA for each entity, which went through.
-**Not yet run:** a scheduled run since the change.
+A scheduled run on the robot has worked since.
 
 **`buildium-gl --interactive` is for testing while you watch.** When the bot check stops a
 sign-in, `run.log` and the console say which entity to sign in as, by key, such as
