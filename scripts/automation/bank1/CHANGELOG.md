@@ -5,6 +5,10 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
 
 ## Unreleased
 
+- `bank1-activity` can stamp each workbook with when it was refreshed, as buildium does: with
+  `updated_tab` and `updated_cell` in its `[sheets.<name>]` block, the cell gets the run's start
+  time, shown as `yyyy-mm-dd hh:mm:ss`, once every account writing to that workbook this run
+  has written. If one failed, the time is left as it was.
 - Fix sign-in when the site asks to verify the device: it renamed the push option from
   **Confirm using our mobile app** to **Get a notification**, and moved its list of options. The
   run looks for the new words first, then the old ones, and never chooses **Open our mobile

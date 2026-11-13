@@ -39,8 +39,10 @@ def _mask(run: Run, cfg: Config) -> None:
     # It's never logged, and no message repeats it
     run.masker.add(cfg.site.login_url)
     run.masker.add(cfg.site.name_in_files)
-    for spreadsheet_id in cfg.sheets.values():
-        run.masker.add(spreadsheet_id)
+    for workbook in cfg.sheets.values():
+        run.masker.add(workbook.spreadsheet_id)
+        if workbook.updated_tab is not None:
+            run.masker.add(workbook.updated_tab)
     for account in cfg.accounts:
         run.masker.add(account.statements_url)
         if account.match != account.suffix:

@@ -999,6 +999,8 @@ abbreviation = "CARD-A"
 ''') + '''
 [sheets.recon]
 spreadsheet_id = "made-up-spreadsheet-id"
+updated_tab = "Made-up dashboard"
+updated_cell = "B2"
 '''
 
 CHECKING_CSV = """Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #
@@ -1014,6 +1016,7 @@ ACTIVITY_TODAY = dt.date(2026, 11, 11)
 class ActivityBook:
     def __init__(self):
         self.writes = {}
+        self.stamps = {}
 
     def open(self, spreadsheet_id, tab, masker):
         book = self
@@ -1022,6 +1025,9 @@ class ActivityBook:
             def replace_block(self, start_cell, rows, date_columns=None, trim=False,
                               width=None):
                 book.writes[tab] = (spreadsheet_id, start_cell, rows, width)
+
+            def write_cell(self, cell, value, pattern=None):
+                book.stamps[tab] = (spreadsheet_id, cell, value, pattern)
         return Tab()
 
 
@@ -1081,6 +1087,10 @@ def test_an_activity_run_downloads_each_range_saves_it_and_writes_the_sheet(acti
     assert (spreadsheet_id, cell, width) == ("made-up-spreadsheet-id", "A5", 7)
     assert [row[1] for row in rows] == [dt.date(2026, 7, 2), dt.date(2026, 11, 10)]
     assert list(activity_run.book.writes) == ["Made-up checking tab"]  # the card: no sheet
+    spreadsheet_id, cell, value, pattern = activity_run.book.stamps["Made-up dashboard"]
+    assert (spreadsheet_id, cell, pattern) == ("made-up-spreadsheet-id", "B2",
+                                               "yyyy-mm-dd hh:mm:ss")
+    assert f"{value:%Y%m%d_%H%M%S}" == _run_dir(activity_run.data).name
     assert site.logins == [{"username": USER, "password": PASSWORD}]
     assert site.signed_in is False
     assert activity_run.notes == [{"title": "bank1-activity", "message": "PASS"}]
@@ -1097,6 +1107,7 @@ def test_a_stale_link_or_another_accounts_form_fails_only_that_account(activity_
     assert "activity link no longer valid: landed on the dashboard" in report
     assert "activity link no longer valid: the form is for another account" in report
     assert site.activity_requests == [] and activity_run.book.writes == {}
+    assert activity_run.book.stamps == {}  # its account failed, so its time stays
     assert not (activity_run.data / "data" / "activity").exists()
     assert activity_run.notes == [{"title": "bank1-activity", "message": "FAIL"}]
 

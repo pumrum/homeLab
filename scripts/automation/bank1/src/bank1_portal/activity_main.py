@@ -35,7 +35,12 @@ from bank1_portal.activity_fetch import (
     go_to_activity,
 )
 from bank1_portal.activity_parse import Activity, parse_activity, site_date
-from bank1_portal.activity_sheet import OpenWorksheet, write_activity
+from bank1_portal.activity_sheet import (
+    OpenWorksheet,
+    stamp_workbook,
+    workbooks_to_stamp,
+    write_activity,
+)
 from bank1_portal.cli import Observer, choose, dump_observer, final_event, ignore, load_stage, why
 from bank1_portal.config import NOTIFICATIONS, Account, Config
 from bank1_portal.login import LoginError
@@ -172,6 +177,27 @@ def browser_stage(run: Run, cfg: Config, accounts: tuple[Account, ...], data_dir
                            f"not attempted: {stage} failed")
 
 
+def stamp_stage(run: Run, cfg: Config, accounts: tuple[Account, ...],
+                open_ws: OpenWorksheet) -> None:
+    """Stamp each workbook whose accounts all wrote this run. Records each; never raises."""
+    ok = {item.item for item in run.summary.items
+          if item.stage == "activity" and item.status is Status.OK}
+    started = run.summary.started_at
+    shown = started.strftime("%Y-%m-%d %H:%M:%S")
+    for workbook, all_written in workbooks_to_stamp(cfg.sheets, accounts, ok):
+        if not all_written:
+            run.summary.record("stamp", workbook.name, Status.UNCHANGED,
+                               "update time left alone: an account writing to it failed")
+            continue
+        try:
+            stamp_workbook(workbook, started, run.masker, open_ws)
+        except Exception as e:  # noqa: BLE001 - recorded; the rows are already written
+            run.summary.record("stamp", workbook.name, Status.FAILED,
+                               f"the rows were written, but not the update time: {why(e)}")
+        else:
+            run.summary.record("stamp", workbook.name, Status.OK, f"updated {shown}")
+
+
 def main(argv: list[str] | None = None, *, notifier: Notifier = send_notification,
          today: dt.date | None = None, open_ws: OpenWorksheet = open_worksheet) -> int:
     args = parse_args(argv)
@@ -187,4 +213,6 @@ def main(argv: list[str] | None = None, *, notifier: Notifier = send_notificatio
             if accounts:
                 browser_stage(run, cfg, accounts, data_dir, today or dt.date.today(), args,
                               open_ws)
+                if not args.dump and not args.download_only:
+                    stamp_stage(run, cfg, accounts, open_ws)
     return run.exit_code
