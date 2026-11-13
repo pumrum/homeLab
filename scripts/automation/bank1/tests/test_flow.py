@@ -333,7 +333,8 @@ class FakeBank:
 
     def __init__(self, signed_in=False, verify=False, approve=False, reject=False,
                  challenge=False, sign_out_works=True, expired=(), show=None,
-                 no_standard=False, new_year=False, chooser="push", next_button=True):
+                 no_standard=False, new_year=False, chooser="notification",
+                 next_button=True):
         self.signed_in = signed_in
         self.verify = verify  # the site asks to verify the device
         self.approve = approve  # the person approves it on the phone
@@ -345,8 +346,9 @@ class FakeBank:
         self.file_type = "Spreadsheet (Excel, CSV)"  # the activity form's File type
         self.no_standard = no_standard  # the download menu has only the accessible PDF
         self.new_year = new_year  # the list opens on a year with no statements yet
-        # The verification page: "push" shows the real chooser, "other" a chooser without the
-        # push option, None skips the chooser because the site sent the push itself
+        # The verification page: "notification" shows the real chooser, "push" the chooser as
+        # it was before the site renamed its options, "other" a chooser without the push
+        # option, and None skips the chooser because the site sent the push itself
         self.chooser = chooser
         self.next_button = next_button  # the page after the push option has a Next button
         self.activity = {}  # account id: the CSV its download sends
@@ -450,26 +452,38 @@ class FakeBank:
         return ("<h1>Let's make sure it's you</h1><p>We sent a notification to your mobile "
                 "app.</p>" + (approve if self.approve else ""))
 
+    # Each chooser's list id, hidden copy's id, and (name, words under it, where it leads)
+    CHOOSERS = {
+        # As on the real page now
+        "notification": ("listContainer", "INAPP", [
+            ("Get a notification", "We&#39;ll send a push notification to your device.", "push"),
+            ("Open our mobile app", "Sign in to our mobile app on your device.", "app")]),
+        # As it was before the site renamed its options
+        "push": ("optionsList", "inAppSend", [
+            ("Confirm using our mobile app", "We will send a push notification to your device.",
+             "push"),
+            ("Sign into our mobile app", "Open our mobile app on your device.", "app")]),
+        "other": ("listContainer", "TEXT", [
+            ("Get a text message", "We&#39;ll text a code to your phone.", "push"),
+            ("Open our mobile app", "Sign in to our mobile app on your device.", "app")]),
+    }
+
     def _chooser(self):
-        push = ("Confirm using our mobile app" if self.chooser == "push"
-                else "Get a text message")
+        list_id, hidden_id, choices = self.CHOOSERS[self.chooser]
         # As on the real page: each option is a list item in mds-list's shadow root, its text
         # in a label that does nothing when clicked, beside a link holding only an arrow icon,
-        # named by its aria-label. A hidden mds-list-item holds the same words
+        # named by its aria-label. A hidden mds-list-item holds the first option's words
         options = "".join(
             f"<li><span class='accessible-text' style='position:absolute;clip:rect(0 0 0 0)'>"
-            f", {name}, {about}</span><label>{name}</label><span>{about}</span>"
-            f"<a href='{VERIFY}/{to}' aria-label='{name}. {about}'><span>&gt;</span></a></li>"
-            for name, about, to in [
-                (push, "We will send a push notification to your device.", "push"),
-                ("Sign into our mobile app", "Open our mobile app on your device.", "app"),
-            ])
+            f"{name}, {about}</span><label>{name}</label><span>{about}</span>"
+            f"<a href='{VERIFY}/{to}' aria-label='{name} , {about}'><span>&gt;</span></a></li>"
+            for name, about, to in choices)
         return ("<h1>Let's make sure it's you</h1><p>For your security, we need to confirm "
                 "your identity. Choose a confirmation method to continue.</p>"
-                "<mds-list id='optionsList'></mds-list>"
-                f"<mds-list-item id='inAppSend' hidden>{push}</mds-list-item>"
-                "<a href='#'>Need help? Call us</a>"
-                "<script>document.getElementById('optionsList').attachShadow({mode: 'open'})"
+                f"<mds-list id='{list_id}'></mds-list>"
+                f"<mds-list-item id='{hidden_id}' hidden>{choices[0][0]}</mds-list-item>"
+                "<a href='#'>Call us for a one-time code or use an existing code</a>"
+                f"<script>document.getElementById('{list_id}').attachShadow({{mode: 'open'}})"
                 f".innerHTML = \"<ul>{options}</ul>\"</script>")
 
     def _api_login(self, route, fields):
@@ -571,6 +585,16 @@ def test_verification_notifies_once_and_continues_when_approved(open_site):
     assert urlsplit(page.url).path == DASHBOARD
 
 
+def test_the_chooser_as_it_was_before_the_rename_still_works(open_site):
+    asked = []
+    site = FakeBank(verify=True, approve=True, chooser="push")
+    page = open_site(site)
+    sign_in(page, SITE, CRED, FAST, on_verify=lambda: asked.append(1))
+    assert asked == [1]
+    assert (site.pushes, site.app_sign_ins) == (1, 0)
+    assert urlsplit(page.url).path == DASHBOARD
+
+
 def test_no_next_button_after_the_push_option_fails_without_waiting(open_site):
     site = FakeBank(verify=True, approve=True, next_button=False)
     asked = []
@@ -591,7 +615,7 @@ def test_verification_without_a_chooser_just_waits(open_site):
 def test_a_chooser_without_the_push_option_fails_without_choosing(open_site):
     site = FakeBank(verify=True, approve=True, chooser="other")
     asked = []
-    with pytest.raises(LoginError, match="no 'Confirm using our mobile app' option"):
+    with pytest.raises(LoginError, match="no 'Get a notification' push option"):
         sign_in(open_site(site), SITE, CRED, FAST, on_verify=lambda: asked.append(1))
     assert asked == []
     assert (site.pushes, site.app_sign_ins) == (0, 0)
