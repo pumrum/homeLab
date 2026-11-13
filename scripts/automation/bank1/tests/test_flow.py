@@ -198,6 +198,7 @@ ACTIVITY_PAGE = """__SIGN_OUT_BUTTON__
 <div id="downloadAccountActivity">
   <h2>Direct Download</h2>
   <mds-select id="account-selector" data-label="__ACCOUNT__"></mds-select>
+  <mds-select id="downloadFileTypeOption" data-label="__FILE_TYPE__"></mds-select>
   <mds-select id="downloadActivityOptionId" data-label="__FIRST__">__OPTIONS__</mds-select>
   <div id="dates" style="display:none">
     <mds-datepicker id="accountActivityFromDate"></mds-datepicker>
@@ -341,6 +342,7 @@ class FakeBank:
         self.sign_out_works = sign_out_works
         self.expired = set(expired)  # account ids whose links now go to the dashboard
         self.show = show or {}  # account id: the heading its page shows instead
+        self.file_type = "Spreadsheet (Excel, CSV)"  # the activity form's File type
         self.no_standard = no_standard  # the download menu has only the accessible PDF
         self.new_year = new_year  # the list opens on a year with no statements yet
         # The verification page: "push" shows the real chooser, "other" a chooser without the
@@ -387,6 +389,7 @@ class FakeBank:
                 .replace("__MENU__", menu)
                 .replace("__ACCOUNT__", self.show.get(account_id, f"{name} (...{suffix})"))
                 .replace("__FIRST__", ACTIVITY_OPTIONS[kind][0])
+                .replace("__FILE_TYPE__", self.file_type)
                 .replace("__OPTIONS__", options).replace("__ID__", account_id))
         return self._html(route, page)
 
@@ -1067,6 +1070,16 @@ def test_a_changed_header_saves_nothing_and_writes_nothing(activity_run):
     assert "added Card" in _report(activity_run.data)
     assert not _activity_file(activity_run.data, CHK).exists()
     assert activity_run.book.writes == {}
+
+
+def test_a_file_type_other_than_csv_fails_before_download(activity_run):
+    site = FakeBank()
+    site.file_type = "Quicken Web Connect (QFX)"
+    assert activity_run.start(site, "--account", CHK) == 1
+    assert 'the File type shows "Quicken Web Connect (QFX)", not a CSV' in _report(
+        activity_run.data)
+    assert site.activity_requests == []
+    assert not (activity_run.data / "data" / "activity").exists()
 
 
 def test_activity_dump_fills_in_each_form_but_downloads_nothing(activity_run):

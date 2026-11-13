@@ -90,7 +90,8 @@ def site(monkeypatch):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(state.csv, encoding="utf-8")
 
-    for name in ("go_to_activity", "check_activity_page", "choose_date_range"):
+    for name in ("go_to_activity", "check_activity_page", "choose_date_range",
+                 "check_file_type"):
         monkeypatch.setattr(activity_main, name, step(name))
 
     def fill(page, start, end):
@@ -173,6 +174,7 @@ def test_download_only_saves_nothing_and_writes_nothing(run, tmp_path, site):
 
 
 @pytest.mark.parametrize("step", ["go_to_activity", "check_activity_page", "choose_date_range",
+                                  "check_file_type",
                                   "download"])
 def test_a_failed_browser_step_touches_neither_file_nor_sheet(run, tmp_path, site, step):
     target = _saved(tmp_path, "entity1_checking")

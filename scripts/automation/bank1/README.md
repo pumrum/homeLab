@@ -147,19 +147,21 @@ Each CSV is checked before it replaces anything. A file that fails stays in the 
 - **Every row must be dated in the range,** by `Posting Date` for checking, or by either
   `Transaction Date` or `Post Date` for cards.
 
-The account's page is checked like a statements page: the **Direct Download** form must show the
-account's `match` (its `suffix` unless set). The rest of the page can list every account, so only
-the form counts. If the address leads anywhere else, that account fails with `activity link no
-longer valid`, and you need to update its `activity_url`.
+The account's page is checked like a statements page: the form's **Account** drop-down must show
+the account's `match` (its `suffix` unless set). Only the account it shows counts, not the hidden
+list of every account behind it. If the address leads anywhere else, that account fails with
+`activity link no longer valid`, and you need to update its `activity_url`.
 
 The choice is picked by its words, never its place in the list, since the list differs between
 kinds. The dates are typed key by key, because the boxes show a pasted date but don't register
-it. The selectors are in `activity_fetch.py`.
+it. The **File type** must already show **Spreadsheet (Excel, CSV)**, the site's default. The run
+never changes it. The selectors are in `activity_fetch.py`.
 
 | Situation | Result |
 | --- | --- |
 | An activity link no longer leads to that account's form | That account fails. The rest still run. `FAIL` |
 | No **Choose a date range** choice, or no date boxes after it | That account fails. `FAIL` |
+| The File type shows something other than a CSV | That account fails before Download. `FAIL` |
 | Download sends nothing within 60 seconds | That account fails. `FAIL` |
 | The CSV's columns changed, it's empty, or a row is out of range | Not saved or written. That account fails, and the file stays in `downloads\`. `FAIL` |
 | The sheet write fails | The CSV is still saved. That account fails. `FAIL` |
@@ -214,17 +216,22 @@ words come from that test.
   from the outline, but it has never been clicked
 - Verification timing out
 
-**`bank1-activity` hasn't run on the real site at all.** It's built from the old process's
-selectors and a checking CSV from the smoke test, and tested against FakeBank. Not yet known:
+**`bank1-activity` has run on the real site:**
 
-- Where the form shows which account it's for. The check looks for an account drop-down in the
-  form, then falls back to the whole form's text
-- The card CSV's header. The code expects `Transaction Date, Post Date, Description, Category,
-  Type, Amount, Memo`; the first run will name any difference
+- `--dump` on the test workstation for one checking and one card account: one sign-in with a
+  remembered device, each form opened by its address and checked against its Account drop-down,
+  **Choose a date range** chosen, both dates typed and read back, the File type showing a CSV,
+  and one sign-out
+
+**Not yet run:**
+
+- A download. The checking header comes from the smoke test. The card header is a guess:
+  `Transaction Date, Post Date, Description, Category, Type, Amount, Memo`. The first card
+  download will name any difference
 - Which date the site's range filters cards by
-- Whether the Download button's file type defaults to CSV. A wrong type fails the header check
-- Whether the old process's sheet writes landed as text. `=ISTEXT()` on an amount it wrote shows
-  it
+- A sheet write. Whether the old process's writes landed as text is also unknown:
+  `=ISTEXT()` on an amount it wrote shows it
+- Verification timing out, and a link that no longer leads to the form
 
 ## Set up each machine
 

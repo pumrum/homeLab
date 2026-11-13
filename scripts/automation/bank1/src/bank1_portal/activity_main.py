@@ -27,6 +27,7 @@ from automation_common.sheets import open_worksheet
 from bank1_portal import PROCESS
 from bank1_portal.activity_fetch import (
     check_activity_page,
+    check_file_type,
     choose_date_range,
     download,
     fill_dates,
@@ -81,6 +82,7 @@ def _open_form(page: Page, account: Account, today: dt.date, observer: Observer)
         observer("activity")  # also when the form wasn't recognized
     choose_date_range(page)
     fill_dates(page, site_date(account.activity.start), site_date(today))
+    check_file_type(page)
 
 
 def dump_stage(run: Run, page: Page, account: Account, today: dt.date,

@@ -12,7 +12,9 @@ Then, on the form:
                   in the list differs between kinds of account
     From, To      the account's start date and today, typed key by key, as MM/DD/YYYY: the boxes
                   show a pasted date but don't register it, and Download then does nothing
-    Download      the file type is left as the site sets it; the CSV's header is checked after
+    File type     must already show "Spreadsheet (Excel, CSV)", the site's default; the run
+                  never changes it, and fails if it shows another type
+    Download      the file is saved straight to the run folder; its header is checked after
 
 The controls are web components, so the selectors reach into shadow roots, and pages hold
 hidden copies of controls, so only visible matches count. If the site changes, update the
@@ -56,6 +58,10 @@ RANGE_OPTION = [f"#downloadActivityOptionId mds-select-option:has-text('{DATE_RA
 FROM_DATE = ["#accountActivityFromDate-input-input", "#accountActivityFromDate input"]
 TO_DATE = ["#accountActivityToDate-input-input", "#accountActivityToDate input"]
 DOWNLOAD = ["#download button", "mds-button#download"]
+# The File type drop-down's shown choice, and the words it must hold
+FILE_TYPE = ["#selected-downloadFileTypeOption-option", "#downloadFileTypeOption button",
+             "#downloadFileTypeOption"]
+CSV_TYPE = "CSV"
 
 
 class LinkError(FetchError):
@@ -133,6 +139,19 @@ def fill_dates(page: Page, start: str, end: str) -> None:
             type_date(box, value)
         except RuntimeError:
             raise FetchError(f"the {what} box didn't take the date") from None
+
+
+def check_file_type(page: Page) -> None:
+    """The File type must show CSV. A form without the drop-down goes ahead: the header
+    check still catches a file of another type."""
+    shown, selector = find_first([page], FILE_TYPE, 0)
+    if shown is None:
+        log.warning("activity: no File type drop-down; relying on the header check")
+        return
+    text = " ".join(element_text(shown).split())
+    if CSV_TYPE not in text:
+        raise FetchError(f'the File type shows "{text[:60]}", not a CSV')
+    log.info("activity: the File type is a CSV (%s)", selector)
 
 
 def download(page: Page, dest: Path) -> None:
