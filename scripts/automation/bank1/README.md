@@ -247,11 +247,11 @@ words come from that test.
 - A full run on the test workstation writing to test copies of the three workbooks: each
   account's block replaced from its start cell across only its columns, numbers and dates stored
   as values with no leading `'`, and the sheets' own formulas still working
+- Each test workbook's update cell getting the run's start time on the test workstation
 
 **Not yet run:**
 
 - On the robot, unattended through the agent
-- Writing a workbook's update time
 - Which date the site's range filters cards by. The check accepts either, and every card row so
   far has passed
 - Verification timing out, and a link that no longer leads to the form
