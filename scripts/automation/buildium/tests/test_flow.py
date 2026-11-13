@@ -240,14 +240,13 @@ class PdfServer:
 class FakeSite:
     """One sign-in page and an app, answered by Playwright. One user at a time, like the site."""
 
-    def __init__(self, signed_in_as=None, mfa=False, mfa_clears=False, reject=False,
+    def __init__(self, signed_in_as=None, mfa=False, reject=False,
                  challenge=False, sign_out_works=True, pdf_for=None, pad_dates=False,
                  sign_out_cover="", auth_server=False, refuse_with=None):
         self.user = signed_in_as
         self.refuse_with = refuse_with  # the sign-in server's error box text
         self.auth_server = auth_server
         self.mfa = mfa  # True, or the set of users who get asked
-        self.mfa_clears = mfa_clears  # someone opens the emailed link
         self.reject = reject
         self.challenge = challenge
         self.sign_out_works = sign_out_works
@@ -323,9 +322,7 @@ class FakeSite:
             page = LOGIN_PAGE.replace("__CHALLENGE__", CHALLENGE if self.challenge else "")
             return self._html(route, page)
         if path == MFA:
-            clears = f"<script>setTimeout(() => location = '{HOME}', 200)</script>"
-            return self._html(route, "<h1>Check your email for a link</h1>"
-                              + (clears if self.mfa_clears else ""))
+            return self._html(route, "<h1>Check your email for a link</h1>")
         if path.startswith("/manager/app"):
             if self.user is None:
                 return self._go(route, APP_LOGIN if self.auth_server else LOGIN)
@@ -534,13 +531,17 @@ def test_a_session_that_wont_sign_out_is_not_used(open_site):
 
 
 def test_mfa_notifies_once_and_continues_when_the_link_is_opened(open_site):
-    site = FakeSite(mfa=True, mfa_clears=True)
+    site = FakeSite(mfa=True)
     page = open_site(site)
     calls = []
-    # A short settle, so the page is noticed before the link moves it on
-    sign_in(page, SITE, CRED, Timeouts(field=2_000, after_submit=2_000, mfa_settle_s=0.05,
-                                       mfa=3_000, menu=500, sign_out=1_500),
-            on_mfa=lambda: calls.append("notified"))
+
+    def notified():
+        # Someone gets the push and opens the link, which moves the page on a moment later.
+        # Only after the push, so the test doesn't depend on how fast the run notices MFA
+        calls.append("notified")
+        page.evaluate(f"setTimeout(() => location = '{HOME}', 200)")
+
+    sign_in(page, SITE, CRED, FAST, on_mfa=notified)
     assert urlsplit(page.url).path == HOME
     assert calls == ["notified"]
 
