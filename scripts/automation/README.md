@@ -28,6 +28,22 @@ uv run python tools\env_check.py           # Edge, policies, Credential Manager,
 uv run python tools\env_check.py --lock    # same, with Windows locked
 ```
 
+The full `uv run pytest` takes 15 minutes or more, because the flow tests drive real Edge. Run
+all of it only:
+
+- before opening a PR, or pushing to one for review
+- after rebasing on `main` or merging it in
+- after a change that could break more than the code being worked on, such as one in `common/`,
+  a package's shared sign-in or page code, or the workspace's dependencies
+
+While working on a change, run only the tests for the code that changed, plus ruff:
+
+```powershell
+uv run pytest bank1/tests/test_activity_parse.py    # one file
+uv run pytest bank1/tests -k "activity"             # tests whose names match
+uv run ruff check .
+```
+
 `env_check.py` also runs standalone from a repo clone before `uv sync`:
 
 ```powershell

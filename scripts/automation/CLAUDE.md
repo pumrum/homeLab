@@ -227,6 +227,8 @@ Use these from `automation_common` instead of writing your own:
   synthetic fixtures only (e.g. a made-up HTML page mirroring the real
   structure). No test touches the network or a real site.
 - Don't run anything against real sites unless asked.
+- The full suite takes 15 minutes or more. Run all of it only when `README.md`'s "Set up and
+  test" says to; while iterating, run only the tests for the code you changed.
 - In CI, a PR or a merge to `main` only runs the unit tests if it changes a non-doc file
   in this tree or `.github/workflows/checks.yml`. Anything else skips them, while
   `pre-commit` always runs. `Checks` doesn't run on a pushed branch until it has a PR, so
