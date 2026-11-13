@@ -232,13 +232,15 @@ words come from that test.
 - A full run on the test workstation with no sheets: six checking accounts and one card, each
   downloaded, its header and every row's date checked, and saved under its timestamped name. The
   checking and card headers in `COLUMNS` both matched the real exports
+- A full run on the test workstation writing to test copies of the three workbooks: each
+  account's block replaced from its start cell across only its columns, numbers and dates stored
+  as values with no leading `'`, and the sheets' own formulas still working
 
 **Not yet run:**
 
+- On the robot, unattended through the agent
 - Which date the site's range filters cards by. The check accepts either, and every card row so
   far has passed
-- A sheet write with numbers and dates written as values. The first write, as literal text,
-  showed every number and date with a leading `'`
 - Verification timing out, and a link that no longer leads to the form
 
 ## Set up each machine
