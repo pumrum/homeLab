@@ -4,11 +4,16 @@ All entities share one browser profile, so the site's memory of the device carri
 but only one can be signed in at a time. A run may also find a session left by a run that
 was stopped. So signing in always starts by signing out whoever is there.
 
+The sign-in form can be on a separate sign-in server. On the way there, and back after signing
+in, the browser passes through app addresses with nobody signed in, so the app counts only once
+its Account menu shows, never from the address alone.
+
 The MFA page's structure isn't known, so it's anything that isn't the sign-in form or the
 app once the page has settled.
 
-The page loads reCAPTCHA all the time, with a badge, so only a visible challenge counts as
-a person-check. It's never worked around.
+The page loads reCAPTCHA all the time, with a badge, so only a visible challenge or the sign-in
+server's refusal counts as a person-check. It's never worked around: a run stops, or with
+`wait_for_person` it waits for a person at the screen to sign in by hand.
 """
 
 import logging
@@ -20,7 +25,6 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import Error as PwError
 from playwright.sync_api import Page
-from playwright.sync_api import TimeoutError as PwTimeout
 
 from automation_common.browser import click_until, find_first
 from automation_common.secrets import Credential
@@ -31,10 +35,12 @@ log = logging.getLogger(__name__)
 APP_PATH = "/manager/app"
 LOGIN_PATH = "/authentication/login"
 
-EMAIL_FIELD = ["input#emailAddressInput", "input[type='email']"]
-PASSWORD_FIELD = ["input#passwordInput", "input[type='password']"]
-# Exact text, because "Sign in with Google" sits right below it with the same styling
+EMAIL_FIELD = ["input#userName", "input#emailAddressInput", "input[type='email']"]
+PASSWORD_FIELD = ["input#password", "input#passwordInput", "input[type='password']"]
+# Exact text, because "Sign in with Google" sits right below it, and has had the same class
 SIGN_IN_BUTTON = [
+    "button.login__button:has(.button-text:text-is('Sign in'))",
+    "button.login__button:text-is('Sign in')",
     "button.login__sign-in-button:text-is('Sign in')",
     "button.login__sign-in-button:has(:text-is('Sign in'))",
     "button[type='submit']:text-is('Sign in')",
@@ -57,11 +63,17 @@ BOT_CHECK = [
     "iframe[src*='hcaptcha.com']",
     "iframe[src*='challenges.cloudflare.com']",
 ]
+# The sign-in server's own error box, shown above the form after a failed sign-in
+FORM_ERROR = [".form-error-alert .alert__label", ".form-error-alert .alert"]
 POLL_MS = 100
 
 
 class LoginError(Exception):
     """Sign-in didn't finish. The message never holds the address's query or a secret."""
+
+
+class BotCheckError(LoginError):
+    """The site's bot check showed a challenge or refused the sign-in."""
 
 
 class SignOutError(Exception):
@@ -84,10 +96,12 @@ class Timeouts:
     mfa: int = 300_000  # someone opening the emailed link; leave room in the job's time limit
     menu: int = 3_000  # a menu opening after a click
     sign_out: int = 20_000  # leaving the app after Sign out
+    person: int = 600_000  # someone at the screen signing in by hand after a bot check
 
 
 Observer = Callable[[str], None]
 OnMfa = Callable[[], None]
+OnPersonNeeded = Callable[[], None]
 
 
 def _ignore(_: str) -> None:
@@ -111,10 +125,16 @@ def _path(page: Page) -> str:
     return urlsplit(page.url).path
 
 
+def _in_app(page: Page, site: Site) -> bool:
+    """Signed in: an app address with the Account menu showing (see the module's notes)."""
+    return (classify(page.url, site.login_url) is Step.SIGNED_IN
+            and find_first([page], ACCOUNT_MENU, 0)[0] is not None)
+
+
 def _check_bot_wall(page: Page) -> None:
     found, selector = find_first([page], BOT_CHECK, 0)
     if found is not None:
-        raise LoginError(f"the site is showing a CAPTCHA or bot check ({selector})")
+        raise BotCheckError(f"the site is showing a CAPTCHA or bot check ({selector})")
 
 
 def sign_out(page: Page, site: Site, timeouts: Timeouts | None = None,
@@ -164,16 +184,16 @@ def sign_out(page: Page, site: Site, timeouts: Timeouts | None = None,
 
 
 def _open_login_form(page: Page, site: Site, t: Timeouts) -> Step:
-    """Load the sign-in page and wait until it shows the form or the app."""
+    """Load the sign-in page and wait until it shows the form or the app's menu."""
     page.goto(site.login_url, wait_until="domcontentloaded")
     deadline = time.monotonic() + t.field / 1000
     while True:
-        if classify(page.url, site.login_url) is Step.SIGNED_IN:
-            return Step.SIGNED_IN
         if find_first([page], EMAIL_FIELD, 0)[0] is not None:
             return Step.LOGIN
+        if _in_app(page, site):
+            return Step.SIGNED_IN
         if time.monotonic() > deadline:
-            raise LoginError(f"the sign-in form did not appear on {_path(page)}")
+            raise LoginError(f"neither the sign-in form nor the app appeared on {_path(page)}")
         page.wait_for_timeout(POLL_MS)
 
 
@@ -184,6 +204,24 @@ def _to_a_clean_login_form(page: Page, site: Site, t: Timeouts) -> None:
     sign_out(page, site, t)
     if _open_login_form(page, site, t) is not Step.LOGIN:
         raise SignOutError("still signed in after signing out")
+
+
+def _check_form_error(page: Page) -> None:
+    """Raise as soon as the site says why it refused, instead of waiting for the form to go.
+
+    The message is fixed text, never the page's, which could change to include anything.
+    """
+    found, _ = find_first([page], FORM_ERROR, 0)
+    if found is None:
+        return
+    try:
+        text = found.inner_text(timeout=1_000)
+    except PwError:
+        text = ""
+    if "captcha" in text.casefold():
+        raise BotCheckError("the site's bot check (reCAPTCHA) refused the sign-in, so it "
+                            "stopped without trying again")
+    raise LoginError("the site showed an error after the email and password were sent")
 
 
 def _required(page: Page, candidates: list[str], what: str, t: Timeouts):
@@ -199,15 +237,21 @@ def _wait_after_submit(page: Page, site: Site, t: Timeouts) -> Step:
 
     The form also vanishes for a moment on the way into the app, so it must stay gone for
     a while before this counts as MFA, or every normal sign-in would send a notification.
+    An app address is on the way in, not MFA, until the app has had `after_submit` to load.
     """
     deadline = time.monotonic() + t.after_submit / 1000
     form_gone_since: float | None = None
     while True:
-        if classify(page.url, site.login_url) is Step.SIGNED_IN:
+        if _in_app(page, site):
             return Step.SIGNED_IN
         _check_bot_wall(page)
         now = time.monotonic()
-        if find_first([page], EMAIL_FIELD + PASSWORD_FIELD, 0)[0] is not None:
+        if classify(page.url, site.login_url) is Step.SIGNED_IN:
+            form_gone_since = None
+            if now > deadline:
+                raise LoginError(f"the app didn't finish loading on {_path(page)}")
+        elif find_first([page], EMAIL_FIELD + PASSWORD_FIELD, 0)[0] is not None:
+            _check_form_error(page)
             form_gone_since = None
             if now > deadline:
                 raise LoginError("the site did not accept the email and password")
@@ -223,28 +267,53 @@ def _wait_for_mfa(page: Page, site: Site, t: Timeouts, on_mfa: OnMfa) -> None:
     log.warning("sign-in: the site wants MFA on %s; waiting up to %d seconds",
                 _path(page), seconds)
     on_mfa()
-    try:
-        page.wait_for_url(lambda url: classify(url, site.login_url) is Step.SIGNED_IN,
-                          timeout=t.mfa)
-    except PwTimeout:
-        raise LoginError(f"MFA was not completed within {seconds} seconds") from None
+    deadline = time.monotonic() + t.mfa / 1000
+    while not _in_app(page, site):
+        if time.monotonic() > deadline:
+            raise LoginError(f"MFA was not completed within {seconds} seconds")
+        page.wait_for_timeout(POLL_MS)
+
+
+def _wait_for_person(page: Page, site: Site, t: Timeouts, why: BotCheckError,
+                     on_person_needed: OnPersonNeeded) -> None:
+    """Wait for someone at the screen to sign in by hand. Nothing is typed or clicked here."""
+    minutes = t.person // 60_000
+    log.warning("sign-in: %s; waiting up to %d minutes for a person to sign in by hand",
+                why, minutes)
+    on_person_needed()
+    deadline = time.monotonic() + t.person / 1000
+    while not _in_app(page, site):
+        if time.monotonic() > deadline:
+            raise LoginError(f"{why}, and nobody signed in by hand within {minutes} minutes")
+        page.wait_for_timeout(POLL_MS)
 
 
 def sign_in(page: Page, site: Site, credential: Credential, timeouts: Timeouts | None = None,
-            on_mfa: OnMfa | None = None, observer: Observer = _ignore) -> None:
+            on_mfa: OnMfa | None = None, observer: Observer = _ignore,
+            wait_for_person: OnPersonNeeded | None = None) -> None:
     """Sign out anyone still there, then sign this credential in, or raise.
 
     The email and password are sent at most once, so a wrong password can't lock the
-    account by repeating. Never retried by this function or its callers.
+    account by repeating. Never retried by this function or its callers. A bot check raises
+    BotCheckError, unless `wait_for_person` is given: then it's called, and the run waits for
+    someone at the screen to sign in by hand. That's for runs watched on screen, never a job.
     """
     t = timeouts or Timeouts()
     _to_a_clean_login_form(page, site, t)
-    _check_bot_wall(page)
-    observer("login")  # before typing, so a saved copy holds nothing typed
-    _required(page, EMAIL_FIELD, "email field", t).fill(credential.username)
-    _required(page, PASSWORD_FIELD, "password field", t).fill(credential.password)
-    _required(page, SIGN_IN_BUTTON, "Sign in button", t).click()
-    if _wait_after_submit(page, site, t) is not Step.SIGNED_IN:
+    try:
+        _check_bot_wall(page)
+        observer("login")  # before typing, so a saved copy holds nothing typed
+        _required(page, EMAIL_FIELD, "email field", t).fill(credential.username)
+        _required(page, PASSWORD_FIELD, "password field", t).fill(credential.password)
+        _required(page, SIGN_IN_BUTTON, "Sign in button", t).click()
+        step = _wait_after_submit(page, site, t)
+    except BotCheckError as e:
+        if wait_for_person is None:
+            raise
+        _wait_for_person(page, site, t, e, wait_for_person)
+        log.info("sign-in: signed in by hand")
+        return
+    if step is not Step.SIGNED_IN:
         observer("mfa")
         _wait_for_mfa(page, site, t, on_mfa or (lambda: None))
     log.info("sign-in: signed in")

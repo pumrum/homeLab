@@ -15,6 +15,22 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
   each `[[entities]]` block.
 - Fix sign-out failing when the Account button's tooltip covers `Sign out`. It now moves the
   mouse off the button and escalates the click, which also covers `buildium-statements`.
+- Fix every sign-in failing with `no Account menu` since the site moved its sign-in form to a
+  separate sign-in server. The app address it passes through on the way looked like a session
+  left open. The app now counts only once its Account menu shows, and the new form's fields and
+  `Sign in` button are found first. This covers every command in this package.
+- `buildium-gl` can write the run's start time to a dashboard cell once the master is written,
+  shown like `2026-11-13 12:43:40`. It's the time in the run folder's name. Set it with the
+  optional `dashboard_tab` and `master_updated_cell` in `[gl]`.
+- Add `buildium-gl --interactive`, for runs watched on screen: when the site's bot check stops a
+  sign-in, the run waits up to 10 minutes for you to sign in by hand as the entity it names, then
+  carries on. Without it, a bot check fails the run as before.
+- `buildium-gl` now also saves every export to `data\ledgers\<abbreviation>_<method>.csv`,
+  replacing the last run's files, whenever it writes the sheet. Empty exports replace nothing,
+  and each saved file must read back the same as the export. The run folder keeps its own copy,
+  now also named by abbreviation instead of key.
+- A sign-in the site refuses now fails as soon as the sign-in server shows its error. A refusal
+  by its reCAPTCHA says so, instead of `the site did not accept the email and password`.
 - `[statements]` is now only required by `buildium-statements`.
 - The MFA push now names the entity's abbreviation instead of its key.
 - The push notifications' words can now be set in `config.toml`, as optional

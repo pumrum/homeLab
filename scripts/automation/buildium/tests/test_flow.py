@@ -9,6 +9,7 @@ import datetime as dt
 import http.server
 import json
 import threading
+import time
 from decimal import Decimal
 from types import SimpleNamespace
 from urllib.parse import urlsplit
@@ -27,6 +28,7 @@ from buildium_portal.config import Site
 from buildium_portal.gl_fetch import date_forms, export_method, open_report, report_url
 from buildium_portal.gl_parse import EXPECTED_COLUMNS
 from buildium_portal.login import (
+    BotCheckError,
     LoginError,
     SignOutError,
     Step,
@@ -44,6 +46,12 @@ HOME = "/manager/app/home"
 LEDGER = "/manager/app/ledger"
 GL_REPORT = "/manager/app/reports/Financials/GeneralLedger"
 MFA ="/manager/public/authentication/verify"
+# The newer flow: the sign-in address goes through an app page with no menu to a separate
+# sign-in server, and after signing in comes back through another one
+AUTH = "https://auth.example.invalid"
+AUTH_LOGIN = "/authentication/login"
+APP_LOGIN = "/manager/app/login"
+APP_RETURN = "/manager/app/login/redirect"
 SITE = Site(f"{HOST}{LOGIN}")
 CRED = Credential("one@example.invalid", "made-up-password")
 FAST = Timeouts(field=2_000, after_submit=2_000, mfa_settle_s=0.3, mfa=1_500, menu=500,
@@ -90,6 +98,41 @@ __CHALLENGE__
     if (reply.go) location = reply.go;
   }
 </script>"""
+# Mirrors the sign-in server's page: a real form, and the Google button now has the class the
+# old Sign in button had
+AUTH_LOGIN_PAGE = """<h1 class="login__sign-in-text">Sign in</h1>
+__ERROR__
+<form onsubmit="send(); return false">
+  <label class="form__label">Email Address</label>
+  <input id="userName" class="form-element__input" type="text">
+  <label class="form__label">Password</label>
+  <input id="password" class="form-element__input" type="password">
+  <input id="rememberMe" type="checkbox">
+  <button class="btn btn-primary login__button" type="submit">
+    <span class="spinner d-none"></span><span class="button-text">Sign in</span></button>
+</form>
+<form onsubmit="fetch('/google', {method: 'POST'}); return false">
+  <button class="btn login__sign-in-button" type="submit">
+    <span class="login__sign-in-svg-icon"></span><span>Sign in with Google</span></button>
+</form>
+<div class="grecaptcha-badge" style="width:250px;height:60px">
+  <iframe title="reCAPTCHA" src="about:blank" width="250" height="60"></iframe></div>
+__CHALLENGE__
+<script>
+  async function send() {
+    const body = JSON.stringify({
+      email: document.getElementById('userName').value,
+      password: document.getElementById('password').value});
+    const reply = await (await fetch('/api/login', {method: 'POST', body})).json();
+    if (reply.go) location = reply.go;
+  }
+</script>"""
+# After a refused sign-in the server reloads the page with the reason in the address and a box
+FORM_ERROR = """<div class="form-error-alert"><div class="alert alert--error">
+  <span class="alert__label">__TEXT__</span></div></div>"""
+CAPTCHA_FAILED = "Captcha verification failed. Please try again."
+# Long enough that a check of the address alone would see it
+PASSING_THROUGH_MS = 400
 CHALLENGE = """<iframe title="recaptcha challenge expires in two minutes" src="about:blank"
   width="300" height="300"></iframe>"""
 NAV = """<nav>
@@ -199,8 +242,10 @@ class FakeSite:
 
     def __init__(self, signed_in_as=None, mfa=False, mfa_clears=False, reject=False,
                  challenge=False, sign_out_works=True, pdf_for=None, pad_dates=False,
-                 sign_out_cover=""):
+                 sign_out_cover="", auth_server=False, refuse_with=None):
         self.user = signed_in_as
+        self.refuse_with = refuse_with  # the sign-in server's error box text
+        self.auth_server = auth_server
         self.mfa = mfa  # True, or the set of users who get asked
         self.mfa_clears = mfa_clears  # someone opens the emailed link
         self.reject = reject
@@ -216,8 +261,25 @@ class FakeSite:
     def _html(self, route, body):
         route.fulfill(status=200, content_type="text/html", body=f"<!doctype html>{body}")
 
-    def _go(self, route, path):
-        self._html(route, f"<script>location.replace('{HOST}{path}')</script>")
+    def _go(self, route, path, host=HOST):
+        self._html(route, f"<script>location.replace('{host}{path}')</script>")
+
+    def _pass_through(self, route, url):
+        self._html(route, "<p>Loading</p><script>setTimeout(() => location.replace("
+                          f"'{url}'), {PASSING_THROUGH_MS})</script>")
+
+    def _auth(self, route, path):
+        if path == AUTH_LOGIN:
+            refused = "error=" in urlsplit(route.request.url).query
+            error = FORM_ERROR.replace("__TEXT__", self.refuse_with) if refused else ""
+            page = (AUTH_LOGIN_PAGE.replace("__CHALLENGE__", CHALLENGE if self.challenge else "")
+                    .replace("__ERROR__", error))
+            return self._html(route, page)
+        if path == APP_LOGIN:
+            if self.user:
+                return self._go(route, HOME)
+            return self._pass_through(route, f"{AUTH}{AUTH_LOGIN}")
+        return self._pass_through(route, f"{HOST}{HOME}")  # APP_RETURN
 
     def _wants_mfa(self, user):
         return self.mfa is True or (self.mfa and user in self.mfa)
@@ -244,12 +306,18 @@ class FakeSite:
             return route.continue_()
         path = urlsplit(request.url).path
         self.paths.append(path)
+        if self.auth_server and (path in (APP_LOGIN, APP_RETURN)
+                                 or urlsplit(request.url).hostname == "auth.example.invalid"
+                                 and path != "/api/login"):
+            return self._auth(route, path)
         if path == "/api/login":
             return self._api_login(route, json.loads(request.post_data))
         if path == "/sign-out":
             self.user = None
             return self._go(route, LOGIN)
         if path == LOGIN:
+            if self.auth_server:
+                return self._go(route, APP_LOGIN)
             if self.user:
                 return self._go(route, HOME)
             page = LOGIN_PAGE.replace("__CHALLENGE__", CHALLENGE if self.challenge else "")
@@ -259,16 +327,22 @@ class FakeSite:
             return self._html(route, "<h1>Check your email for a link</h1>"
                               + (clears if self.mfa_clears else ""))
         if path.startswith("/manager/app"):
-            return self._go(route, LOGIN) if self.user is None else self._app(route, path)
+            if self.user is None:
+                return self._go(route, APP_LOGIN if self.auth_server else LOGIN)
+            return self._app(route, path)
         return self._html(route, "<h1>Other</h1>")
 
     def _api_login(self, route, fields):
         self.logins.append(fields)
         email = fields["email"]
+        if self.refuse_with:
+            return route.fulfill(status=200, content_type="application/json",
+                                 body=json.dumps({"go": f"{AUTH}{AUTH_LOGIN}?error=refused"}))
         if self.reject or email not in USERS:
             return route.fulfill(status=200, content_type="application/json", body="{}")
         self.user = email
-        go = MFA if self._wants_mfa(email) else HOME
+        home = f"{HOST}{APP_RETURN}" if self.auth_server else HOME
+        go = MFA if self._wants_mfa(email) else home
         return route.fulfill(status=200, content_type="application/json",
                              body=json.dumps({"go": go}))
 
@@ -322,6 +396,103 @@ def test_a_sign_in_sends_each_value_once_and_never_uses_google(open_site):
     assert urlsplit(page.url).path == HOME
     assert site.logins == [{"email": CRED.username, "password": CRED.password}]
     assert "/google" not in site.paths
+
+
+def test_a_sign_in_through_a_sign_in_server_isnt_taken_for_a_session_left_open(open_site):
+    # The app address it passes through, with nobody signed in, once stopped every run
+    site = FakeSite(auth_server=True)
+    page = open_site(site)
+    sign_in(page, SITE, CRED, FAST)
+    assert urlsplit(page.url).path == HOME
+    assert site.logins == [{"email": CRED.username, "password": CRED.password}]
+    assert "/sign-out" not in site.paths
+    assert "/google" not in site.paths
+
+
+def test_a_session_left_open_is_signed_out_first_with_a_sign_in_server(open_site):
+    site = FakeSite(signed_in_as="two@example.invalid", auth_server=True)
+    page = open_site(site)
+    sign_in(page, SITE, CRED, FAST)
+    assert "/sign-out" in site.paths
+    assert site.user == CRED.username
+
+
+def test_sign_out_reaches_the_sign_in_server(open_site):
+    site = FakeSite(auth_server=True)
+    page = open_site(site)
+    sign_in(page, SITE, CRED, FAST)
+    sign_out(page, SITE, FAST)
+    assert site.user is None
+    page.wait_for_url(f"{AUTH}{AUTH_LOGIN}")
+
+
+def test_a_bot_check_refusal_fails_at_once_without_trying_again(open_site):
+    site = FakeSite(auth_server=True, refuse_with=CAPTCHA_FAILED)
+    slow = Timeouts(field=2_000, after_submit=60_000, mfa_settle_s=0.3, mfa=1_500, menu=500,
+                    sign_out=1_500)
+    started = time.monotonic()
+    with pytest.raises(LoginError, match="bot check") as caught:
+        sign_in(open_site(site), SITE, CRED, slow)
+    assert time.monotonic() - started < 20  # not the minute after_submit allows
+    assert len(site.logins) == 1
+    assert CRED.password not in str(caught.value)
+
+
+def _a_person_signs_in(site, page, calls):
+    """What someone at the screen does: sign in by hand, which the site lets through."""
+    def person():
+        calls.append("asked")
+        site.refuse_with = None
+        site.challenge = False
+        site.user = CRED.username
+        page.goto(f"{HOST}{HOME}")
+    return person
+
+
+@pytest.mark.parametrize("site", [
+    FakeSite(auth_server=True, refuse_with=CAPTCHA_FAILED),
+    FakeSite(challenge=True),
+], ids=["refused", "visible challenge"])
+def test_a_bot_check_waits_for_a_person_when_asked_to(open_site, site):
+    page = open_site(site)
+    calls = []
+    sign_in(page, SITE, CRED, FAST, wait_for_person=_a_person_signs_in(site, page, calls))
+    assert urlsplit(page.url).path == HOME
+    assert calls == ["asked"]
+    assert len(site.logins) <= 1  # the run never sends the password again
+
+
+def test_a_bot_check_fails_when_nobody_signs_in(open_site):
+    site = FakeSite(auth_server=True, refuse_with=CAPTCHA_FAILED)
+    calls = []
+    short = Timeouts(field=2_000, after_submit=2_000, mfa_settle_s=0.3, mfa=1_500, menu=500,
+                     sign_out=1_500, person=1_000)
+    with pytest.raises(LoginError, match="nobody signed in by hand"):
+        sign_in(open_site(site), SITE, CRED, short, wait_for_person=lambda: calls.append("asked"))
+    assert calls == ["asked"]
+    assert len(site.logins) == 1
+
+
+def test_without_a_person_a_bot_check_is_its_own_error(open_site):
+    site = FakeSite(auth_server=True, refuse_with=CAPTCHA_FAILED)
+    with pytest.raises(BotCheckError):
+        sign_in(open_site(site), SITE, CRED, FAST)
+
+
+def test_another_sign_in_error_is_reported_without_its_text(open_site):
+    site = FakeSite(auth_server=True, refuse_with="Something made-up went wrong")
+    with pytest.raises(LoginError, match="showed an error") as caught:
+        sign_in(open_site(site), SITE, CRED, FAST)
+    assert "made-up" not in str(caught.value)
+    assert len(site.logins) == 1
+
+
+def test_an_app_that_never_shows_its_menu_isnt_signed_in(open_site):
+    site = FakeSite(auth_server=True)
+    site._pass_through = lambda route, url: site._html(route, "<p>Loading</p>")
+    with pytest.raises(LoginError, match="neither the sign-in form nor the app"):
+        sign_in(open_site(site), SITE, CRED, FAST)
+    assert site.logins == []
 
 
 def test_the_always_there_recaptcha_badge_doesnt_stop_a_sign_in(open_site):
@@ -469,6 +640,8 @@ gl_write_tab = true
 [gl]
 spreadsheet_id = "made-up-spreadsheet-id"
 master_tab = "FakeMasterTab"
+dashboard_tab = "FakeDashTab"
+master_updated_cell = "C3"
 [statements]
 system = "FakeSystem"
 """
@@ -714,6 +887,15 @@ def _gl_files(gl_csv_of):
             for method in ("Cash", "Accrual")}
 
 
+def _ledgers(data):
+    folder = data / "data" / "ledgers"
+    return sorted(p.name for p in folder.iterdir()) if folder.exists() else []
+
+
+# Named by abbreviation, the same in the run folder's downloads and the ledger folder
+LEDGER_FILES = ["ONELLC_Accrual.csv", "ONELLC_Cash.csv", "TWOLLC_Accrual.csv", "TWOLLC_Cash.csv"]
+
+
 def _gl_run(whole_run, site, gl_csv_of, *args, files=None):
     files = _gl_files(gl_csv_of) if files is None else files
     return whole_run.start(site, "--dump", *args, files=files, command=gl_main.main)
@@ -736,6 +918,9 @@ class FakeBook:
             def replace_block(self, start_cell, rows, date_columns=(), trim=False):
                 book.writes[tab] = SimpleNamespace(start_cell=start_cell, rows=rows,
                                                    date_columns=date_columns, trim=trim)
+
+            def write_cell(self, cell, value, pattern=None):
+                book.writes[tab] = SimpleNamespace(cell=cell, value=value, pattern=pattern)
 
         return Tab()
 
@@ -809,9 +994,9 @@ def test_a_dump_saves_every_export_with_a_profile_and_signs_out(whole_run, gl_cs
     site = FakeSite()
     assert _gl_run(whole_run, site, gl_csv_of) == 0
     run_dir = _run_dir(whole_run.data)
-    for key in ("entity1", "entity2"):
+    for key, abbreviation in (("entity1", "ONELLC"), ("entity2", "TWOLLC")):
         for method in ("Cash", "Accrual"):
-            assert (run_dir / "downloads" / f"{key}_{method}.csv").stat().st_size > 0
+            assert (run_dir / "downloads" / f"{abbreviation}_{method}.csv").stat().st_size > 0
             assert "columns: 53" in (run_dir / f"gl_profile_{key}_{method}.txt").read_text(
                 encoding="utf-8")
     for step in ("report", "dates", "export_menu_cash", "export_menu_accrual"):
@@ -829,7 +1014,8 @@ def test_the_log_report_and_profiles_hold_no_private_values(whole_run, gl_csv_of
             *run_dir.glob("gl_profile_*.txt")]
     written = "".join(path.read_text(encoding="utf-8") for path in safe)
     for private in (SITE.login_url, ONE, "ONELLC", "one@example.invalid", "oneCash",
-                    "made-up-spreadsheet-id", "FakeMasterTab", "FakeTabOne", "FAKECODE1"):
+                    "made-up-spreadsheet-id", "FakeMasterTab", "FakeDashTab", "FakeTabOne",
+                    "FAKECODE1"):
         assert private not in written
     assert "entity1 Cash" in written
 
@@ -897,7 +1083,12 @@ def test_a_normal_run_replaces_the_master_after_every_entity_worked(whole_run, g
     code, book = _gl_write_run(whole_run, site, gl_csv_of)
     assert code == 0
     assert site.paths.count("/sign-out") == 2
-    assert set(book.writes) == {"FakeTabTwo", "FakeMasterTab"}  # only entity2 turns its tab on
+    # Only entity2 turns its tab on, and the dashboard gets the master's update time
+    assert set(book.writes) == {"FakeTabTwo", "FakeMasterTab", "FakeDashTab"}
+    stamp = book.writes["FakeDashTab"]
+    run_name = _run_dir(whole_run.data).name
+    assert (stamp.cell, stamp.pattern) == ("C3", "yyyy-mm-dd hh:mm:ss")
+    assert stamp.value.strftime("%Y%m%d_%H%M%S") == run_name  # the run's time, not the write's
 
     two = book.writes["FakeTabTwo"]
     assert (two.start_cell, two.trim) == ("C9", False)
@@ -919,7 +1110,13 @@ def test_a_normal_run_replaces_the_master_after_every_entity_worked(whole_run, g
     assert "wrote 4 rows" in report
     # Raw exports stay, and only a --dump adds page copies and profiles
     run_dir = _run_dir(whole_run.data)
-    assert (run_dir / "downloads" / "entity2_Accrual.csv").exists()
+    assert sorted(p.name for p in (run_dir / "downloads").iterdir()) == LEDGER_FILES
+    # And each one also replaces its file in the ledger folder, byte for byte
+    assert _ledgers(whole_run.data) == LEDGER_FILES
+    for name in LEDGER_FILES:
+        assert ((whole_run.data / "data" / "ledgers" / name).read_bytes()
+                == (run_dir / "downloads" / name).read_bytes())
+    assert "ledger files: data" in report and "(replaced 4 files)" in report
     assert not list(run_dir.glob("gl_profile_*"))
     assert not list(run_dir.glob("dump_*"))
 
@@ -930,6 +1127,7 @@ def test_one_entitys_failed_export_means_nothing_is_written(whole_run, gl_csv_of
     code, book = _gl_write_run(whole_run, FakeSite(), gl_csv_of, files=files)
     assert code == 1
     assert book.writes == {}
+    assert _ledgers(whole_run.data) == []
     assert whole_run.notes[-1] == {"title": "buildium-gl", "message": "FAIL"}
 
 
@@ -969,6 +1167,7 @@ def test_entries_in_two_entities_exports_mean_nothing_is_written(whole_run, gl_c
     code, book = _gl_write_run(whole_run, FakeSite(), gl_csv_of, files=files)
     assert code == 1
     assert book.writes == {}
+    assert _ledgers(whole_run.data) == []
     assert "1 Cash entries are in both exports" in _report(whole_run.data)
 
 
@@ -979,6 +1178,7 @@ def test_one_entity_never_writes(whole_run, gl_csv_of):
     assert [login["email"] for login in site.logins] == ["two@example.invalid"]
     assert book.writes == {}
     assert "not written" in _report(whole_run.data)
+    assert _ledgers(whole_run.data) == []
 
 
 def test_a_dump_never_writes(whole_run, gl_csv_of):
@@ -986,6 +1186,28 @@ def test_a_dump_never_writes(whole_run, gl_csv_of):
     assert code == 0
     assert book.writes == {}
     assert "would write 4 rows" in _report(whole_run.data)
+    assert "would replace 4 files" in _report(whole_run.data)
+    assert _ledgers(whole_run.data) == []
+
+
+def test_a_second_run_replaces_the_ledger_files(whole_run, gl_csv_of):
+    folder = whole_run.data / "data" / "ledgers"
+    folder.mkdir(parents=True)
+    (folder / "ONELLC_Cash.csv").write_bytes(b"last run's" * 1000)
+    code, _ = _gl_write_run(whole_run, FakeSite(), gl_csv_of)
+    assert code == 0
+    assert b"oneCash" in (folder / "ONELLC_Cash.csv").read_bytes()
+    assert b"last run's" not in (folder / "ONELLC_Cash.csv").read_bytes()
+
+
+def test_a_ledger_folder_that_cant_be_written_still_writes_the_sheet(whole_run, gl_csv_of):
+    (whole_run.data / "data").mkdir()
+    (whole_run.data / "data" / "ledgers").write_bytes(b"a file where the folder should be")
+    code, book = _gl_write_run(whole_run, FakeSite(), gl_csv_of)
+    assert code == 1
+    assert "FakeMasterTab" in book.writes
+    assert "FAILED    ledger files" in _report(whole_run.data)
+    assert whole_run.notes[-1] == {"title": "buildium-gl", "message": "FAIL"}
 
 
 def test_a_config_with_no_gl_section_fails_clearly(whole_run, gl_csv_of):

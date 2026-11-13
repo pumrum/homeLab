@@ -24,6 +24,7 @@ out, and cleans both exports. Only once every entity has worked does it write to
 uv run buildium-gl                    # normal run: every entity, then write the sheet
 uv run buildium-gl --entity entity1   # only one entity; writes nothing
 uv run buildium-gl --dump             # every entity, plus page copies and profiles; writes nothing
+uv run buildium-gl --interactive      # watched on screen: a bot check waits for you to sign in
 ```
 
 ### What it writes
@@ -34,6 +35,12 @@ Each tab is a full snapshot, replaced every run.
 | --- | --- | --- |
 | Each entity's tab, from `gl_start_cell`, only when its `gl_write_tab` is `true` | The Cash view: 15 columns, with the rules below | Clears from `gl_start_cell` to the tab's right edge and bottom |
 | The master tab, from `A2` | Every entity, Cash and Accrual: 56 columns | Clears everything below row 1, then deletes spare rows so the tab shrinks with its data |
+| The dashboard's `master_updated_cell`, only when `dashboard_tab` is set | The run's start time, once the master is written | Changes only that cell |
+
+The dashboard cell gets the time in the run folder's name, not the time of the write, so
+`runs\20261113_124340` writes `2026-11-13 12:43:40`. It's a real date and time, shown as
+`yyyy-mm-dd hh:mm:ss`, so the sheet can compare it. A run that doesn't write the master leaves
+it alone, so it always says when the master last changed. The cell must already exist in the tab.
 
 Entity tabs are off by default, because the sheet builds each entity's rows from the master with
 formulas. A run still builds each entity's Cash view and reports its counts. To have a run write
@@ -57,6 +64,22 @@ yours and is never touched.
 This matches paste values, except where a paste would change the value: `007` and numbers over 15
 digits stay text. Sheets marks text that looks like a number or date with a leading `'` in the
 formula bar. The `'` isn't part of the value.
+
+### The ledger folder
+
+A run that writes the sheet first saves every export, exactly as downloaded, to
+`C:\automation\buildium\data\ledgers\<abbreviation>_<method>.csv`, such as `ABCLLC_Cash.csv`.
+Each file replaces the last run's, and the run folder keeps its own copy, named the same. Files this
+run doesn't write, such as a removed entity's or one from before an abbreviation changed, stay
+until you delete them. The abbreviation is masked in `report.txt` and `run.log`, so a file there
+shows as `***_Cash.csv`.
+
+The files are saved only when every entity worked and every check passed, the same as the sheet.
+`--dump` and `--entity` never save them. Before replacing anything, a run checks that no export
+is empty, and every export has already passed the cleaning checks above. Each file is written
+beside its target first, so a failure while writing replaces none. After each replace, the file
+is read back and must match the export byte for byte. A failure here is `FAIL`, but the sheet is
+still written.
 
 ### How rows are cleaned
 
@@ -100,9 +123,11 @@ a deliberate exception to the usual rule of carrying on with the next item.
 | Sign-out fails, even after the last entity | The run stops and writes nothing. `FAIL` |
 | Two entities' exports share an entry | Writes nothing. `FAIL`. All entities share one browser, so one may be another's data |
 | The same `Id` and `PostingId` appear twice in an export | Kept, and counted in `report.txt` |
+| A ledger file can't be saved, such as one open in Excel | `report.txt` names it, and the sheet is still written. `FAIL`. A file already replaced stays replaced |
 | A tab is gone by the time the run writes | Writes nothing to any tab. `FAIL` |
 | The sheet is shared as Viewer, not Editor | It opens, so the check passes, and the run fails when it writes. `FAIL` |
 | One tab's write fails | The other tabs are still written, and `report.txt` names the one that failed. `FAIL` |
+| The dashboard's write fails | The master is already written, so it keeps the new rows with the old time. `FAIL` |
 | The master's write fails partway | It holds new rows above old ones, with nothing cleared yet, until the next good run. `FAIL` |
 
 ### What each run folder holds
@@ -111,20 +136,22 @@ a deliberate exception to the usual rule of carrying on with the next item.
 | --- | --- | --- |
 | `report.txt`, `run.log` | Results, with each export's size and time, and row counts | Yes |
 | `gl_profile_<key>_<method>.txt` | `--dump` only: the export's structure, with values reduced to shapes such as `-9,999.99` | Yes |
-| `downloads\<key>_<method>.csv` | The raw export, kept for good | No, it holds real data |
+| `downloads\<abbreviation>_<method>.csv` | The raw export, kept for good | No, it holds real data |
 | `dump_<key>_<step>_page.txt`, `.png`, `.html` | `--dump` only: the page at each step | No, it holds real names and addresses |
 
 ### Set it up
 
 Share the spreadsheet with the service account as an Editor. In
 `C:\automation\buildium\config.toml`, add the `[gl]` section from `config.example.toml`, and the
-`gl_` values to each `[[entities]]` block. To test, point `spreadsheet_id` at a copy of the sheet
+`gl_` values to each `[[entities]]` block. For the dashboard time, also add `dashboard_tab`
+and `master_updated_cell`. To test, point `spreadsheet_id` at a copy of the sheet
 with the same tab names.
 
 Exporting, cleaning, and writing the master have run on the real site and the real sheet, both
 by hand and started by the agent on the robot. So have turning on an entity's `gl_write_tab`, and
-the sheet check stopping a run on a deleted spreadsheet before it signed in. **Not yet run:** a
-write failing partway, which can't be forced safely.
+the sheet check stopping a run on a deleted spreadsheet before it signed in, saving to the
+ledger folder, and the dashboard time, by hand on the test workstation. **Not yet run:** a write
+failing partway, which can't be forced safely.
 
 ## buildium-statements
 
@@ -177,10 +204,12 @@ folder. See `config.example.toml`.
 
 | Page | What happens |
 | --- | --- |
-| Already signed in | Signs that session out first, because it may be another entity's |
+| Already signed in, with the app's Account menu showing | Signs that session out first, because it may be another entity's |
 | Sign-in form | Fills in the email and password once from `buildium/<key>`, then clicks `Sign in` |
 | The form stays gone with no app yet | Treated as MFA. Sends the push and waits up to 5 minutes |
-| The app | Signed in |
+| The site's bot check refuses the sign-in or shows a challenge | Fails at once. With `buildium-gl --interactive`, waits up to 10 minutes for you to sign in by hand |
+| The app, with its Account menu showing | Signed in |
+| An app address with no Account menu yet | On the way to or from the sign-in server, so it keeps waiting |
 
 **MFA works in an unattended run.** The site emails a link. When the push arrives, open the email
 and the link, and the job's browser moves on by itself. If that's not done in time, the run ends
@@ -195,6 +224,30 @@ Sign-in, MFA, sign-out, the statement menus, and saving have all run on the real
 unattended. MFA timing out hasn't, and there's no plan to force it, so expect a possible fix if
 it ever happens. The code doesn't know the MFA page's structure, so anything that isn't the form
 or the app counts as MFA.
+
+In November 2026 the site moved the sign-in form to a separate sign-in server, with new field
+names. On the way there, the browser passes through an app address with nobody signed in, which
+used to look like a session left open and failed every run with `no Account menu`. Now the app
+counts only once its Account menu shows.
+
+The first real run with this found the form and sent the email and password once, and the sign-in
+server refused them with `Captcha verification failed`. Its reCAPTCHA scores each sign-in without
+showing a challenge, and it judged the job's browser to be automated. The run now stops at once
+with `the site's bot check (reCAPTCHA) refused the sign-in`, instead of waiting 30 seconds and
+blaming the password. Bot checks are never worked around, so a run can't sign in while the site
+refuses it. A run by hand the next day signed in with no MFA, exported both methods, and signed
+out, so the refusal doesn't happen every time. After the job browser's history was cleared,
+a run by hand had no refusal, and the site asked for MFA for each entity, which went through.
+**Not yet run:** a scheduled run since the change.
+
+**`buildium-gl --interactive` is for testing while you watch.** When the bot check stops a
+sign-in, `run.log` and the console say which entity to sign in as, by key, such as
+`sign in by hand as entity1`. Sign in as that entity in the job's Edge window, finish MFA if
+asked, and the run carries on once the app's Account menu shows. It types and clicks nothing for
+you, and never sends the password a second time. If nobody signs in within 10 minutes, the run
+fails. Signing in as the wrong entity is caught only by the check for entries shared between
+entities, so watch the key. Never put `--interactive` in a job: nobody is at a locked robot's
+screen, and the wait would run into the agent's time limit. **Not yet run:** on the real site.
 
 The Account button's tooltip was seen covering `Sign out` when one sign-out timed out. Sign-out
 now moves the mouse to the item first, then uses `click_until`, and `run.log` says which way the

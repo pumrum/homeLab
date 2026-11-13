@@ -12,6 +12,7 @@ from automation_common.sheets import (
     SheetError,
     _api_error,
     block_requests,
+    cell_request,
     load_service_account,
     open_worksheet,
     replace_requests,
@@ -165,6 +166,49 @@ def test_only_a_formula_cell_is_written_as_a_formula():
         {"userEnteredValue": {"formulaValue": "=1+1"}},
         {"userEnteredValue": {"stringValue": "=1+1"}},
     ]
+
+
+def test_a_date_and_time_is_a_number_of_days_to_the_second():
+    at = dt.datetime(2026, 3, 15, 18, 0, 0, 999_999,
+                     tzinfo=dt.timezone(dt.timedelta(hours=-5)))  # shown as this clock reads
+    cells = _block(rows=[[at]])[0][0][0]["updateCells"]["rows"][0]["values"]
+    assert cells == [{"userEnteredValue": {"numberValue": 46096.75}}]
+
+
+def test_one_cell_is_written_with_its_format_and_nothing_else():
+    request = cell_request(7, "C4", dt.datetime(2026, 11, 13, 12, 43, 40), "yyyy-mm-dd hh:mm:ss")
+    update = request["updateCells"]
+    assert update["range"] == {"sheetId": 7, "startRowIndex": 3, "endRowIndex": 4,
+                               "startColumnIndex": 2, "endColumnIndex": 3}
+    [[cell]] = [row["values"] for row in update["rows"]]
+    assert cell["userEnteredValue"]["numberValue"] == pytest.approx(
+        46339 + (12 * 3600 + 43 * 60 + 40) / 86_400)
+    assert cell["userEnteredFormat"] == {"numberFormat": {"type": "DATE_TIME",
+                                                          "pattern": "yyyy-mm-dd hh:mm:ss"}}
+    assert update["fields"] == "userEnteredValue,userEnteredFormat.numberFormat"
+
+
+def test_one_cell_with_no_pattern_keeps_its_format():
+    update = cell_request(7, "A1", "x")["updateCells"]
+    assert update["fields"] == "userEnteredValue"
+    assert update["rows"] == [{"values": [{"userEnteredValue": {"stringValue": "x"}}]}]
+
+
+def test_one_cell_refuses_a_bad_cell():
+    with pytest.raises(SheetError, match="not a cell"):
+        cell_request(7, "nope", "x")
+
+
+def test_write_cell_sends_one_request_and_never_grows_the_tab():
+    book = _FakeSpreadsheet()
+    ws = _worksheet(book, row_count=10)
+    ws.write_cell("B2", "x")
+    assert len(book.bodies) == 1
+    with pytest.raises(SheetError, match="outside the tab"):
+        ws.write_cell("B11", "x")
+    with pytest.raises(SheetError, match="outside the tab"):
+        ws.write_cell("AA1", "x")
+    assert len(book.bodies) == 1
 
 
 def test_block_date_columns_change_only_the_number_format_of_written_rows():

@@ -1,11 +1,17 @@
 """buildium-gl: export each entity's general ledger, clean it, and replace it in the sheet.
 
-    uv run buildium-gl                       normal run: every entity, then write the sheet
+    uv run buildium-gl                       normal run: every entity, then save each export
+                                             to data/ledgers and write the sheet
     uv run buildium-gl --entity KEY          only that entity, for testing; writes nothing
     uv run buildium-gl --dump                every entity, and also save page structure and a
                                              profile of each export; writes nothing
+    uv run buildium-gl --interactive         for a run watched on screen: if the site's bot
+                                             check stops a sign-in, wait up to 10 minutes for
+                                             you to sign in by hand, then carry on. Never for
+                                             a job. Can be added to the others
 
-The sheet needs every entity, so the first failure stops the run and nothing is written.
+The sheet needs every entity, so the first failure stops the run, and nothing is saved to
+data/ledgers or written to the sheet.
 """
 
 import argparse
@@ -27,6 +33,7 @@ from automation_common.sheets import open_worksheet
 from buildium_portal import PROCESS
 from buildium_portal.config import NOTIFICATIONS, Entity, GlConfig, load_gl_config
 from buildium_portal.gl_fetch import METHODS, export_method, open_report
+from buildium_portal.gl_files import LEDGER_FOLDER, ledger_name, save_ledgers
 from buildium_portal.gl_parse import (
     CASH_VIEW_COLUMNS,
     MASTER_COLUMNS,
@@ -38,7 +45,7 @@ from buildium_portal.gl_parse import (
 )
 from buildium_portal.gl_profile import profile
 from buildium_portal.gl_rules import CashView, cash_view
-from buildium_portal.gl_sheet import OpenWorksheet, check_sheet, sheet_stage
+from buildium_portal.gl_sheet import OpenWorksheet, check_sheet, sheet_stage, stamp_stage
 from buildium_portal.login import SignOutError
 from buildium_portal.session import open_browser, signed_in_page
 from buildium_portal.stages import chosen_entities, dump_observer, final_event, why
@@ -51,6 +58,7 @@ log = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class EntityResult:
     key: str
+    exports: dict[str, bytes]
     ledgers: dict[str, Ledger]
     view: CashView
 
@@ -62,6 +70,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
                     help="also save page structure and a profile of each export; write nothing")
     ap.add_argument("--entity", metavar="KEY",
                     help="only this entity's key from the config; write nothing")
+    ap.add_argument("--interactive", action="store_true",
+                    help="if the bot check stops a sign-in, wait for you to sign in by hand")
     return ap.parse_args(argv)
 
 
@@ -76,6 +86,8 @@ def load_stage(run: Run, data_dir: Path) -> GlConfig | None:
     run.masker.add(cfg.site.login_url)
     run.masker.add(cfg.gl.spreadsheet_id)
     run.masker.add(cfg.gl.master_tab)
+    if cfg.gl.dashboard is not None:
+        run.masker.add(cfg.gl.dashboard.tab)
     for entity in cfg.entities:
         run.masker.add(entity.abbreviation)
         run.masker.add(entity.statement_name)
@@ -97,7 +109,7 @@ def _ignore(_: str) -> None:
 def _export_one(run: Run, page: Page, entity: Entity, method: str,
                 observer: Callable[[str], None], dump: bool) -> bytes:
     # Saved straight to the run folder, and kept: it's what any later question gets checked with
-    dest = run.run_dir / "downloads" / f"{entity.key}_{method}.csv"
+    dest = run.run_dir / "downloads" / ledger_name(entity.abbreviation, method)
     started = time.monotonic()
     export_method(page, method, dest, observer)
     seconds = time.monotonic() - started
@@ -128,12 +140,14 @@ def export_stage(run: Run, page: Page, cfg: GlConfig, entity: Entity, today: dt.
 
 
 def process_entity(run: Run, ctx: BrowserContext, cfg: GlConfig, entity: Entity,
-                   today: dt.date, dump: bool) -> dict[str, bytes] | None:
+                   today: dt.date, dump: bool,
+                   interactive: bool = False) -> dict[str, bytes] | None:
     """Sign in, export, and sign out. None if that failed. Only a failed sign-out raises."""
     observer = dump_observer(run, ctx, entity) if dump else _ignore
     reached = False
     try:
-        with signed_in_page(run, ctx, cfg.site, entity, observer=observer) as page:
+        with signed_in_page(run, ctx, cfg.site, entity, observer=observer,
+                            interactive=interactive) as page:
             reached = True
             run.summary.record("login", entity.key, Status.OK)
             return export_stage(run, page, cfg, entity, today, observer, dump)
@@ -175,11 +189,11 @@ def transform_stage(run: Run, cfg: GlConfig, entity: Entity,
         run.summary.record("cash view", entity.key, Status.FAILED, "the rules removed every row")
         return None
     run.summary.record("cash view", entity.key, Status.OK, _view_detail(view))
-    return EntityResult(entity.key, ledgers, view)
+    return EntityResult(entity.key, exports, ledgers, view)
 
 
 def browser_stage(run: Run, cfg: GlConfig, entities: tuple[Entity, ...], today: dt.date,
-                  data_dir: Path, dump: bool) -> list[EntityResult]:
+                  data_dir: Path, dump: bool, interactive: bool = False) -> list[EntityResult]:
     """One browser for all entities, one at a time, stopping at the first failure."""
     remaining = list(entities)
     current = "site"
@@ -189,7 +203,7 @@ def browser_stage(run: Run, cfg: GlConfig, entities: tuple[Entity, ...], today: 
             while remaining:
                 entity = remaining.pop(0)
                 current = entity.key
-                exports = process_entity(run, ctx, cfg, entity, today, dump)
+                exports = process_entity(run, ctx, cfg, entity, today, dump, interactive)
                 result = None if exports is None else transform_stage(run, cfg, entity, exports)
                 if result is None:
                     break
@@ -214,16 +228,39 @@ def check_entities_differ(run: Run, results: list[EntityResult]) -> None:
                                    f"{shared} {method} entries are in both exports")
 
 
+def files_stage(run: Run, cfg: GlConfig, results: list[EntityResult], data_dir: Path) -> None:
+    """Replace every export's file in the ledger folder. A failure doesn't stop the sheet.
+
+    Files are named by abbreviation, which is masked, so the report shows a file as ***_Cash.csv.
+    """
+    abbreviations = {entity.key: entity.abbreviation for entity in cfg.entities}
+    files = {ledger_name(abbreviations[result.key], method): result.exports[method]
+             for result in results for method in METHODS}
+    try:
+        save_ledgers(files, data_dir / LEDGER_FOLDER)
+    except Exception as e:  # noqa: BLE001 - recorded, and the sheet is still written
+        run.summary.record("ledger files", str(LEDGER_FOLDER), Status.FAILED, why(e))
+    else:
+        run.summary.record("ledger files", str(LEDGER_FOLDER), Status.OK,
+                           f"replaced {len(files)} files")
+
+
 def write_stage(run: Run, cfg: GlConfig, results: list[EntityResult], write: bool,
-                open_ws: OpenWorksheet) -> None:
+                open_ws: OpenWorksheet, data_dir: Path) -> None:
     views = {result.key: sheet_rows(result.view.rows, CASH_VIEW_COLUMNS) for result in results}
     master = [row for result in results for method in METHODS
               for row in sheet_rows(result.ledgers[method].rows, MASTER_COLUMNS)]
     if run.summary.exit_code != 0:
-        log.error("something failed, so nothing is written to the sheet")
+        log.error("something failed, so nothing is saved to the ledger folder or the sheet")
     elif write:
-        sheet_stage(run, cfg.gl, views, master, open_ws)
+        files_stage(run, cfg, results, data_dir)
+        master_written = sheet_stage(run, cfg.gl, views, master, open_ws)
+        if master_written and cfg.gl.dashboard is not None:
+            stamp_stage(run, cfg.gl.spreadsheet_id, cfg.gl.dashboard, run.summary.started_at,
+                        open_ws)
     else:
+        run.summary.record("ledger files", str(LEDGER_FOLDER), Status.UNCHANGED,
+                           f"not saved; would replace {len(results) * len(METHODS)} files")
         run.summary.record("sheet", "all tabs", Status.UNCHANGED,
                            f"not written; would write {len(master)} rows to the master")
 
@@ -241,7 +278,7 @@ def main(argv: list[str] | None = None, *, notifier: Notifier = send_notificatio
             write = not (args.dump or args.entity)
             if entities and (not write or check_sheet(run, cfg.gl, open_ws)):
                 results = browser_stage(run, cfg, entities, today or dt.date.today(), data_dir,
-                                        args.dump)
+                                        args.dump, args.interactive)
                 check_entities_differ(run, results)
-                write_stage(run, cfg, results, write, open_ws)
+                write_stage(run, cfg, results, write, open_ws, data_dir)
     return run.exit_code

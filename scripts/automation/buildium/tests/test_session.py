@@ -5,6 +5,7 @@ import pytest
 from automation_common.run import Run, Status
 from buildium_portal import session
 from buildium_portal.config import Entity, Site
+from buildium_portal.gl_main import parse_args as gl_parse_args
 from buildium_portal.login import LoginError
 from buildium_portal.main import final_event, parse_args
 
@@ -42,6 +43,11 @@ def test_a_job_run_with_no_arguments_never_waits_for_a_person():
     assert not args.capture
     assert not args.dump  # the agent runs bare commands, so --capture can't start from a job
     assert args.entity is None
+
+
+def test_buildium_gl_waits_for_a_person_only_when_asked():
+    assert not gl_parse_args([]).interactive  # a job never waits at a bot check
+    assert gl_parse_args(["--interactive"]).interactive
 
 
 def test_the_final_event_names_mfa_only_when_it_stopped_a_sign_in(run):
