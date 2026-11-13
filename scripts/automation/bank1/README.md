@@ -94,8 +94,8 @@ site's menus. That could come later if links turn out to expire often.
 
 | Situation | Result |
 | --- | --- |
-| The site asks to verify the device | Chooses **Confirm using our mobile app**, then **Next**. A push says `Approve the sign-in on your phone`, then it waits 5 minutes |
-| The verification page has no **Confirm using our mobile app** option, or no **Next** after it | The run stops. No push is sent and no account is tried. `FAIL` |
+| The site asks to verify the device | Chooses **Get a notification**, then **Next**. A push says `Approve the sign-in on your phone`, then it waits 5 minutes |
+| The verification page has no **Get a notification** option, or no **Next** after it | The run stops. No push is sent and no account is tried. `FAIL` |
 | Verification isn't approved in time | The whole run stops. No account is tried and no file is touched. `FAIL: verification timed out` |
 | Rejected username or password | The run stops after 45 seconds. Never retried, so it can't lock the login. `FAIL` |
 | CAPTCHA challenge showing | The run stops right away. Never worked around. `FAIL` |
@@ -184,7 +184,7 @@ only, or downloaded only. It never shows a tab name, a spreadsheet ID, or a tran
 | --- | --- |
 | The profile is still signed in | Goes straight on, typing nothing |
 | Sign-in form | Fills in the username and password once from `bank1/login`, then clicks Sign in. The fields may sit in an iframe or in shadow roots, so each is a list of candidates |
-| Verification words on screen, twice in a row, with the form gone | Treated as device verification. If the page asks how to confirm, clicks **Confirm using our mobile app**, never **Sign into our mobile app**, then **Next**, which has the site send its push. Then sends a notification and waits up to 5 minutes for the dashboard |
+| Verification words on screen, twice in a row, with the form gone | Treated as device verification. If the page asks how to confirm, clicks **Get a notification**, never **Open our mobile app**, then **Next**, which has the site send its push. Then sends a notification and waits up to 5 minutes for the dashboard |
 | The dashboard (`dashboard` in its address) | Signed in. Waits for it to finish loading before opening any statements link |
 
 The sign-in page often mentions the bank's mobile app, so the verification words count only
@@ -215,10 +215,13 @@ words come from that test.
 - `--dump` on one account of each kind
 - On the robot, unattended through the agent: a full run with a new profile, verifying the
   device by clicking **Confirm using our mobile app** and **Next**, sending the push, and
-  going on once it was approved
+  going on once it was approved. The site has since renamed that option **Get a notification**,
+  and **Sign into our mobile app** became **Open our mobile app**. The run looks for the new
+  words first and still knows the old ones
 
 **Not yet run:**
 
+- Choosing **Get a notification** on the real site, and whether **Next** still follows it
 - Looking back a year when the newest year has no statement. The year filter's selectors come
   from the outline, but it has never been clicked
 - Verification timing out

@@ -5,6 +5,10 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
 
 ## Unreleased
 
+- Fix sign-in when the site asks to verify the device: it renamed the push option from
+  **Confirm using our mobile app** to **Get a notification**, and moved its list of options. The
+  run looks for the new words first, then the old ones, and never chooses **Open our mobile
+  app**. This affects both commands.
 - Add `bank1-activity`, to replace the old account-recon process: it signs in the same way, then
   for each account with an `activity_url` downloads its activity as a CSV from its
   `activity_start` to today. It checks the header for the account's kind, that there's at least

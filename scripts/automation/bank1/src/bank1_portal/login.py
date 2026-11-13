@@ -49,10 +49,16 @@ BOT_CHECK = [
 VERIFY_TEXT = ["confirm your identity", "verify your identity", "we don't recognize",
                "we don’t recognize", "let's make sure it's you", "let’s make sure it’s you",
                "get a code", "mobile app"]
-# The verification chooser's push option. Never the "Sign into our mobile app" one
+# The verification chooser's push option: "Get a notification", which was "Confirm using our
+# mobile app" before. Never "Open our mobile app", which was "Sign into our mobile app".
 # On the real page, each option is a list item in mds-list's shadow root. The text is in a
-# label, and the clickable link beside it holds only an arrow icon, named by its aria-label
+# label, and the clickable link beside it holds only an arrow icon, named by its aria-label.
+# Only the push option's aria-label mentions a push notification
 PUSH_OPTION = [
+    "#listContainer a[aria-label^='Get a notification' i]",
+    "a[aria-label^='Get a notification' i]",
+    "li:has(label:text-is('Get a notification')) a",
+    "a[aria-label*='push notification' i]",
     "#optionsList a[aria-label^='Confirm using our mobile app' i]",
     "a[aria-label^='Confirm using our mobile app' i]",
     "li:has(label:text-is('Confirm using our mobile app')) a",
@@ -199,11 +205,11 @@ def _choose_push(page: Page, t: Timeouts, observer: Observer) -> None:
     if option is None:
         text = visible_text(page).lower()
         if any(words in text for words in CHOOSER_TEXT):
-            raise LoginError("the verification page has no 'Confirm using our mobile app' option")
+            raise LoginError("the verification page has no 'Get a notification' push option")
         log.info("sign-in: no verification chooser; the site sent the push itself")
         return
     log.info("sign-in: choosing the push to the phone app (%s)", selector)
-    _click_away(page, option, "Confirm using our mobile app", t)
+    _click_away(page, option, "the push option", t)
     observer("next")
     button, selector = find_first(_scopes(page), NEXT_BUTTON, t.choice)
     if button is None:
