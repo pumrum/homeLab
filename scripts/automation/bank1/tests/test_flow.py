@@ -1055,7 +1055,7 @@ def test_an_activity_run_downloads_each_range_saves_it_and_writes_the_sheet(acti
     assert _activity_text(activity_run.data, CARD) == CARD_CSV
     spreadsheet_id, cell, rows, width = activity_run.book.writes["Made-up checking tab"]
     assert (spreadsheet_id, cell, width) == ("made-up-spreadsheet-id", "A5", 7)
-    assert [row[1] for row in rows] == ["07/02/2026", "11/10/2026"]
+    assert [row[1] for row in rows] == [dt.date(2026, 7, 2), dt.date(2026, 11, 10)]
     assert list(activity_run.book.writes) == ["Made-up checking tab"]  # the card: no sheet
     assert site.logins == [{"username": USER, "password": PASSWORD}]
     assert site.signed_in is False

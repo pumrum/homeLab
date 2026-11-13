@@ -3,6 +3,7 @@ reported for each account."""
 
 import datetime as dt
 import json
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -68,6 +69,7 @@ class FakeBook:
                 if book.fail:
                     raise SheetError("Google Sheets error 500 writing to the sheet")
                 book.writes.append((spreadsheet_id, tab, start_cell, rows, width))
+                book.date_columns = date_columns
         return Tab()
 
 
@@ -140,7 +142,7 @@ def test_naming_an_account_without_an_activity_url_fails(run):
     assert "activity_url" in _item(run).detail and run.summary.exit_code == 1
 
 
-def test_a_good_download_is_saved_then_written_oldest_first_as_text(run, tmp_path, site):
+def test_a_good_download_is_saved_then_written_oldest_first_as_pasted(run, tmp_path, site):
     book = FakeBook()
     activity_stage(run, None, _account("entity1_checking"), tmp_path, TODAY, False, book.open)
     assert ("fill", "07/01/2026", "11/11/2026") in site.steps
@@ -149,10 +151,11 @@ def test_a_good_download_is_saved_then_written_oldest_first_as_text(run, tmp_pat
     assert saved.read_text(encoding="utf-8") == CSV
     [(spreadsheet_id, tab, cell, rows, width)] = book.writes
     assert (spreadsheet_id, tab, cell, width) == ("made-up-id", "Tab entity1_checking", "B5", 7)
-    assert rows == [["CREDIT", "07/01/2026", "EXAMPLE DEPOSIT", "500.00", "ACH_CREDIT",
-                     "112.50", ""],
-                    ["DEBIT", "11/10/2026", "EXAMPLE VENDOR", "-12.50", "ACH_DEBIT",
-                     "100.00", ""]]
+    assert rows == [["CREDIT", dt.date(2026, 7, 1), "EXAMPLE DEPOSIT", Decimal("500.00"),
+                     "ACH_CREDIT", Decimal("112.50"), ""],
+                    ["DEBIT", dt.date(2026, 11, 10), "EXAMPLE VENDOR", Decimal("-12.50"),
+                     "ACH_DEBIT", Decimal("100.00"), ""]]
+    assert book.date_columns == {1: "mm/dd/yyyy"}
     item = _item(run)
     assert item.status is Status.OK
     assert item.detail == "2 row(s) 07/01/2026 to 11/10/2026; saved and written to recon"
@@ -165,7 +168,7 @@ def test_every_run_replaces_the_block_and_its_file_from_the_same_run(run, tmp_pa
     site.csv = CSV.replace("DEBIT,11/10/2026", "DEBIT,11/11/2026")
     activity_stage(run, None, account, tmp_path, TODAY, False, book.open)
     assert "11/11/2026" in _text(_saved(tmp_path, "entity1_checking"))
-    assert len(book.writes) == 2 and book.writes[1][3][-1][1] == "11/11/2026"
+    assert len(book.writes) == 2 and book.writes[1][3][-1][1] == dt.date(2026, 11, 11)
 
 
 def test_an_account_without_a_sheet_is_only_saved(run, tmp_path, site):

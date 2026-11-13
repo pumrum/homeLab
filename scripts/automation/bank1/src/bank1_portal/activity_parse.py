@@ -5,8 +5,7 @@ header against the columns expected for the account's kind, so a change on the s
 loudly instead of shifting every column in the sheet. It checks every row's dates fall in the
 range asked for, then reverses the rows so the oldest comes first, as the sheets expect.
 
-Every value stays text, exactly as exported: the sheet gets it as literal text, the way the
-old process pasted it.
+Every value stays text, exactly as exported. activity_sheet.py decides how each goes in the sheet.
 """
 
 import csv

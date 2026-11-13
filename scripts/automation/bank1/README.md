@@ -133,9 +133,13 @@ checks the CSV, saves it, and writes it to the account's tab. Then it signs out.
   `<abbreviation>_<suffix>_<yyyymmdd-HHmmss>_Activity.csv`, like
   `ABC1_1234_20261113-143342_Activity.csv`. Older files are kept, so the folder grows by one file
   per account each run. Nothing clears it.
-- **Oldest first, no header, as text.** The bank exports the newest first, so the rows are
-  reversed. Every column is written, and every value goes in as literal text, exactly as
-  exported, as the old process pasted it.
+- **Oldest first, no header, as a paste of values.** The bank exports the newest first, so the
+  rows are reversed. Every column is written, and each value goes in as pasting the values by
+  hand would store it, but only where that can't change it. Plain numbers, like amounts,
+  balances, and check numbers, become numbers. `MM/DD/YYYY` dates become dates, shown the same
+  way. Anything else stays text exactly as exported, such as `007`, which a paste would turn
+  into `7`, or a description starting with `=`, which a paste would run as a formula. Cells keep
+  their other formatting. The rules are in `activity_sheet.py`.
 - **An account without `activity_sheet`** is downloaded, checked, and saved, but written nowhere.
 - **Investment accounts** have no `activity_url` yet: whether the site has an activity download
   for them isn't known.
@@ -233,8 +237,8 @@ words come from that test.
 
 - Which date the site's range filters cards by. The check accepts either, and every card row so
   far has passed
-- A sheet write. Whether the old process's writes landed as text is also unknown:
-  `=ISTEXT()` on an amount it wrote shows it
+- A sheet write with numbers and dates written as values. The first write, as literal text,
+  showed every number and date with a leading `'`
 - Verification timing out, and a link that no longer leads to the form
 
 ## Set up each machine

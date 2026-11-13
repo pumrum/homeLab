@@ -10,8 +10,9 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
   `activity_start` to today. It checks the header for the account's kind, that there's at least
   one row, and that every row is in the range. Then it saves a new CSV in `data\activity\`,
   named `<abbreviation>_<suffix>_<yyyymmdd-HHmmss>_Activity.csv` from the run's start time, and
-  writes the rows, oldest first, with no header, as text, to its `activity_sheet`. Each run clears the account's block from its start cell down, across only
-  the CSV's columns. A file that fails its checks replaces nothing. `--dump` fills in one form
+  writes the rows, oldest first, with no header, to its `activity_sheet`, as a paste of values
+  would store them: plain numbers and `MM/DD/YYYY` dates as values, anything else as text. Each
+  run clears the account's block from its start cell down, across only the CSV's columns. A file that fails its checks replaces nothing. `--dump` fills in one form
   of each kind without downloading, and `--download-only` keeps the CSV in the run folder.
   Config gains `[sheets.<name>]`, the `activity_` account keys, and `abbreviation`.
 - `bank1-statements` and `bank1-activity` share their run plumbing in `cli.py`. Reading a
