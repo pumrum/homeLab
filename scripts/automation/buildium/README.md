@@ -207,7 +207,9 @@ server refused them with `Captcha verification failed`. Its reCAPTCHA scores eac
 showing a challenge, and it judged the job's browser to be automated. The run now stops at once
 with `the site's bot check (reCAPTCHA) refused the sign-in`, instead of waiting 30 seconds and
 blaming the password. Bot checks are never worked around, so a run can't sign in while the site
-refuses it. **Not yet run:** a sign-in the server accepts, and MFA through the sign-in server.
+refuses it. A run by hand the next day signed in with no MFA, exported both methods, and signed
+out, so the refusal doesn't happen every time. **Not yet run:** MFA through the sign-in server,
+and a scheduled run since the change.
 
 The Account button's tooltip was seen covering `Sign out` when one sign-out timed out. Sign-out
 now moves the mouse to the item first, then uses `click_until`, and `run.log` says which way the
