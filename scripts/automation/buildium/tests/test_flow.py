@@ -28,6 +28,7 @@ from buildium_portal.config import Site
 from buildium_portal.gl_fetch import date_forms, export_method, open_report, report_url
 from buildium_portal.gl_parse import EXPECTED_COLUMNS
 from buildium_portal.login import (
+    BotCheckError,
     LoginError,
     SignOutError,
     Step,
@@ -435,6 +436,47 @@ def test_a_bot_check_refusal_fails_at_once_without_trying_again(open_site):
     assert time.monotonic() - started < 20  # not the minute after_submit allows
     assert len(site.logins) == 1
     assert CRED.password not in str(caught.value)
+
+
+def _a_person_signs_in(site, page, calls):
+    """What someone at the screen does: sign in by hand, which the site lets through."""
+    def person():
+        calls.append("asked")
+        site.refuse_with = None
+        site.challenge = False
+        site.user = CRED.username
+        page.goto(f"{HOST}{HOME}")
+    return person
+
+
+@pytest.mark.parametrize("site", [
+    FakeSite(auth_server=True, refuse_with=CAPTCHA_FAILED),
+    FakeSite(challenge=True),
+], ids=["refused", "visible challenge"])
+def test_a_bot_check_waits_for_a_person_when_asked_to(open_site, site):
+    page = open_site(site)
+    calls = []
+    sign_in(page, SITE, CRED, FAST, wait_for_person=_a_person_signs_in(site, page, calls))
+    assert urlsplit(page.url).path == HOME
+    assert calls == ["asked"]
+    assert len(site.logins) <= 1  # the run never sends the password again
+
+
+def test_a_bot_check_fails_when_nobody_signs_in(open_site):
+    site = FakeSite(auth_server=True, refuse_with=CAPTCHA_FAILED)
+    calls = []
+    short = Timeouts(field=2_000, after_submit=2_000, mfa_settle_s=0.3, mfa=1_500, menu=500,
+                     sign_out=1_500, person=1_000)
+    with pytest.raises(LoginError, match="nobody signed in by hand"):
+        sign_in(open_site(site), SITE, CRED, short, wait_for_person=lambda: calls.append("asked"))
+    assert calls == ["asked"]
+    assert len(site.logins) == 1
+
+
+def test_without_a_person_a_bot_check_is_its_own_error(open_site):
+    site = FakeSite(auth_server=True, refuse_with=CAPTCHA_FAILED)
+    with pytest.raises(BotCheckError):
+        sign_in(open_site(site), SITE, CRED, FAST)
 
 
 def test_another_sign_in_error_is_reported_without_its_text(open_site):

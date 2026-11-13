@@ -11,8 +11,9 @@ its Account menu shows, never from the address alone.
 The MFA page's structure isn't known, so it's anything that isn't the sign-in form or the
 app once the page has settled.
 
-The page loads reCAPTCHA all the time, with a badge, so only a visible challenge counts as
-a person-check. It's never worked around.
+The page loads reCAPTCHA all the time, with a badge, so only a visible challenge or the sign-in
+server's refusal counts as a person-check. It's never worked around: a run stops, or with
+`wait_for_person` it waits for a person at the screen to sign in by hand.
 """
 
 import logging
@@ -71,6 +72,10 @@ class LoginError(Exception):
     """Sign-in didn't finish. The message never holds the address's query or a secret."""
 
 
+class BotCheckError(LoginError):
+    """The site's bot check showed a challenge or refused the sign-in."""
+
+
 class SignOutError(Exception):
     """Sign-out didn't finish, so whoever signs in next can't be trusted to be alone."""
 
@@ -91,10 +96,12 @@ class Timeouts:
     mfa: int = 300_000  # someone opening the emailed link; leave room in the job's time limit
     menu: int = 3_000  # a menu opening after a click
     sign_out: int = 20_000  # leaving the app after Sign out
+    person: int = 600_000  # someone at the screen signing in by hand after a bot check
 
 
 Observer = Callable[[str], None]
 OnMfa = Callable[[], None]
+OnPersonNeeded = Callable[[], None]
 
 
 def _ignore(_: str) -> None:
@@ -127,7 +134,7 @@ def _in_app(page: Page, site: Site) -> bool:
 def _check_bot_wall(page: Page) -> None:
     found, selector = find_first([page], BOT_CHECK, 0)
     if found is not None:
-        raise LoginError(f"the site is showing a CAPTCHA or bot check ({selector})")
+        raise BotCheckError(f"the site is showing a CAPTCHA or bot check ({selector})")
 
 
 def sign_out(page: Page, site: Site, timeouts: Timeouts | None = None,
@@ -212,8 +219,8 @@ def _check_form_error(page: Page) -> None:
     except PwError:
         text = ""
     if "captcha" in text.casefold():
-        raise LoginError("the site's bot check (reCAPTCHA) refused the sign-in, so it stopped "
-                         "without trying again")
+        raise BotCheckError("the site's bot check (reCAPTCHA) refused the sign-in, so it "
+                            "stopped without trying again")
     raise LoginError("the site showed an error after the email and password were sent")
 
 
@@ -267,21 +274,46 @@ def _wait_for_mfa(page: Page, site: Site, t: Timeouts, on_mfa: OnMfa) -> None:
         page.wait_for_timeout(POLL_MS)
 
 
+def _wait_for_person(page: Page, site: Site, t: Timeouts, why: BotCheckError,
+                     on_person_needed: OnPersonNeeded) -> None:
+    """Wait for someone at the screen to sign in by hand. Nothing is typed or clicked here."""
+    minutes = t.person // 60_000
+    log.warning("sign-in: %s; waiting up to %d minutes for a person to sign in by hand",
+                why, minutes)
+    on_person_needed()
+    deadline = time.monotonic() + t.person / 1000
+    while not _in_app(page, site):
+        if time.monotonic() > deadline:
+            raise LoginError(f"{why}, and nobody signed in by hand within {minutes} minutes")
+        page.wait_for_timeout(POLL_MS)
+
+
 def sign_in(page: Page, site: Site, credential: Credential, timeouts: Timeouts | None = None,
-            on_mfa: OnMfa | None = None, observer: Observer = _ignore) -> None:
+            on_mfa: OnMfa | None = None, observer: Observer = _ignore,
+            wait_for_person: OnPersonNeeded | None = None) -> None:
     """Sign out anyone still there, then sign this credential in, or raise.
 
     The email and password are sent at most once, so a wrong password can't lock the
-    account by repeating. Never retried by this function or its callers.
+    account by repeating. Never retried by this function or its callers. A bot check raises
+    BotCheckError, unless `wait_for_person` is given: then it's called, and the run waits for
+    someone at the screen to sign in by hand. That's for runs watched on screen, never a job.
     """
     t = timeouts or Timeouts()
     _to_a_clean_login_form(page, site, t)
-    _check_bot_wall(page)
-    observer("login")  # before typing, so a saved copy holds nothing typed
-    _required(page, EMAIL_FIELD, "email field", t).fill(credential.username)
-    _required(page, PASSWORD_FIELD, "password field", t).fill(credential.password)
-    _required(page, SIGN_IN_BUTTON, "Sign in button", t).click()
-    if _wait_after_submit(page, site, t) is not Step.SIGNED_IN:
+    try:
+        _check_bot_wall(page)
+        observer("login")  # before typing, so a saved copy holds nothing typed
+        _required(page, EMAIL_FIELD, "email field", t).fill(credential.username)
+        _required(page, PASSWORD_FIELD, "password field", t).fill(credential.password)
+        _required(page, SIGN_IN_BUTTON, "Sign in button", t).click()
+        step = _wait_after_submit(page, site, t)
+    except BotCheckError as e:
+        if wait_for_person is None:
+            raise
+        _wait_for_person(page, site, t, e, wait_for_person)
+        log.info("sign-in: signed in by hand")
+        return
+    if step is not Step.SIGNED_IN:
         observer("mfa")
         _wait_for_mfa(page, site, t, on_mfa or (lambda: None))
     log.info("sign-in: signed in")

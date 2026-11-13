@@ -60,8 +60,12 @@ def _ignore(_: str) -> None:
 @contextmanager
 def signed_in_page(run: Run, ctx: BrowserContext, site: Site, entity: Entity,
                    observer: Observer = _ignore,
-                   get_cred: GetCredential = get_credential) -> Iterator[Page]:
-    """Yield a page signed in as `entity`, or raise. Any failure saves what's on screen."""
+                   get_cred: GetCredential = get_credential,
+                   interactive: bool = False) -> Iterator[Page]:
+    """Yield a page signed in as `entity`, or raise. Any failure saves what's on screen.
+
+    With `interactive`, a bot check waits for a person at the screen to sign in by hand.
+    """
     name = credential_name(entity)
     credential = get_cred(name, run.masker)
     if credential is None:
@@ -72,9 +76,15 @@ def signed_in_page(run: Run, ctx: BrowserContext, site: Site, entity: Entity,
         # Only what's needed to act on it. Sending a notification never raises
         run.notify("mfa_needed", key=entity.key, abbreviation=entity.abbreviation)
 
+    def person_needed() -> None:
+        # The key is neutral, so it can be shown. The person must sign in as this entity
+        log.warning("sign-in: sign in by hand as %s in the job's browser; the run continues "
+                    "when the app loads", entity.key)
+
     page = first_page(ctx)
     try:
-        sign_in(page, site, credential, on_mfa=on_mfa, observer=observer)
+        sign_in(page, site, credential, on_mfa=on_mfa, observer=observer,
+                wait_for_person=person_needed if interactive else None)
     except Exception:
         save_page_evidence(page, run.run_dir, run.next_failure_prefix())
         raise

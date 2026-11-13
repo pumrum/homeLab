@@ -24,6 +24,7 @@ out, and cleans both exports. Only once every entity has worked does it write to
 uv run buildium-gl                    # normal run: every entity, then write the sheet
 uv run buildium-gl --entity entity1   # only one entity; writes nothing
 uv run buildium-gl --dump             # every entity, plus page copies and profiles; writes nothing
+uv run buildium-gl --interactive      # watched on screen: a bot check waits for you to sign in
 ```
 
 ### What it writes
@@ -197,6 +198,7 @@ folder. See `config.example.toml`.
 | Already signed in, with the app's Account menu showing | Signs that session out first, because it may be another entity's |
 | Sign-in form | Fills in the email and password once from `buildium/<key>`, then clicks `Sign in` |
 | The form stays gone with no app yet | Treated as MFA. Sends the push and waits up to 5 minutes |
+| The site's bot check refuses the sign-in or shows a challenge | Fails at once. With `buildium-gl --interactive`, waits up to 10 minutes for you to sign in by hand |
 | The app, with its Account menu showing | Signed in |
 | An app address with no Account menu yet | On the way to or from the sign-in server, so it keeps waiting |
 
@@ -227,6 +229,15 @@ blaming the password. Bot checks are never worked around, so a run can't sign in
 refuses it. A run by hand the next day signed in with no MFA, exported both methods, and signed
 out, so the refusal doesn't happen every time. **Not yet run:** MFA through the sign-in server,
 and a scheduled run since the change.
+
+**`buildium-gl --interactive` is for testing while you watch.** When the bot check stops a
+sign-in, `run.log` and the console say which entity to sign in as, by key, such as
+`sign in by hand as entity1`. Sign in as that entity in the job's Edge window, finish MFA if
+asked, and the run carries on once the app's Account menu shows. It types and clicks nothing for
+you, and never sends the password a second time. If nobody signs in within 10 minutes, the run
+fails. Signing in as the wrong entity is caught only by the check for entries shared between
+entities, so watch the key. Never put `--interactive` in a job: nobody is at a locked robot's
+screen, and the wait would run into the agent's time limit. **Not yet run:** on the real site.
 
 The Account button's tooltip was seen covering `Sign out` when one sign-out timed out. Sign-out
 now moves the mouse to the item first, then uses `click_until`, and `run.log` says which way the

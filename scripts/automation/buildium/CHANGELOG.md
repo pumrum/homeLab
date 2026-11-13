@@ -19,6 +19,9 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
   separate sign-in server. The app address it passes through on the way looked like a session
   left open. The app now counts only once its Account menu shows, and the new form's fields and
   `Sign in` button are found first. This covers every command in this package.
+- Add `buildium-gl --interactive`, for runs watched on screen: when the site's bot check stops a
+  sign-in, the run waits up to 10 minutes for you to sign in by hand as the entity it names, then
+  carries on. Without it, a bot check fails the run as before.
 - `buildium-gl` now also saves every export to `data\ledgers\<abbreviation>_<method>.csv`,
   replacing the last run's files, whenever it writes the sheet. Empty exports replace nothing,
   and each saved file must read back the same as the export. The run folder keeps its own copy.

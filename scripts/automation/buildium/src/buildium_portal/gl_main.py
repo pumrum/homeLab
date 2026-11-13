@@ -5,6 +5,10 @@
     uv run buildium-gl --entity KEY          only that entity, for testing; writes nothing
     uv run buildium-gl --dump                every entity, and also save page structure and a
                                              profile of each export; writes nothing
+    uv run buildium-gl --interactive         for a run watched on screen: if the site's bot
+                                             check stops a sign-in, wait up to 10 minutes for
+                                             you to sign in by hand, then carry on. Never for
+                                             a job. Can be added to the others
 
 The sheet needs every entity, so the first failure stops the run, and nothing is saved to
 data/ledgers or written to the sheet.
@@ -66,6 +70,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
                     help="also save page structure and a profile of each export; write nothing")
     ap.add_argument("--entity", metavar="KEY",
                     help="only this entity's key from the config; write nothing")
+    ap.add_argument("--interactive", action="store_true",
+                    help="if the bot check stops a sign-in, wait for you to sign in by hand")
     return ap.parse_args(argv)
 
 
@@ -132,12 +138,14 @@ def export_stage(run: Run, page: Page, cfg: GlConfig, entity: Entity, today: dt.
 
 
 def process_entity(run: Run, ctx: BrowserContext, cfg: GlConfig, entity: Entity,
-                   today: dt.date, dump: bool) -> dict[str, bytes] | None:
+                   today: dt.date, dump: bool,
+                   interactive: bool = False) -> dict[str, bytes] | None:
     """Sign in, export, and sign out. None if that failed. Only a failed sign-out raises."""
     observer = dump_observer(run, ctx, entity) if dump else _ignore
     reached = False
     try:
-        with signed_in_page(run, ctx, cfg.site, entity, observer=observer) as page:
+        with signed_in_page(run, ctx, cfg.site, entity, observer=observer,
+                            interactive=interactive) as page:
             reached = True
             run.summary.record("login", entity.key, Status.OK)
             return export_stage(run, page, cfg, entity, today, observer, dump)
@@ -183,7 +191,7 @@ def transform_stage(run: Run, cfg: GlConfig, entity: Entity,
 
 
 def browser_stage(run: Run, cfg: GlConfig, entities: tuple[Entity, ...], today: dt.date,
-                  data_dir: Path, dump: bool) -> list[EntityResult]:
+                  data_dir: Path, dump: bool, interactive: bool = False) -> list[EntityResult]:
     """One browser for all entities, one at a time, stopping at the first failure."""
     remaining = list(entities)
     current = "site"
@@ -193,7 +201,7 @@ def browser_stage(run: Run, cfg: GlConfig, entities: tuple[Entity, ...], today: 
             while remaining:
                 entity = remaining.pop(0)
                 current = entity.key
-                exports = process_entity(run, ctx, cfg, entity, today, dump)
+                exports = process_entity(run, ctx, cfg, entity, today, dump, interactive)
                 result = None if exports is None else transform_stage(run, cfg, entity, exports)
                 if result is None:
                     break
@@ -265,7 +273,7 @@ def main(argv: list[str] | None = None, *, notifier: Notifier = send_notificatio
             write = not (args.dump or args.entity)
             if entities and (not write or check_sheet(run, cfg.gl, open_ws)):
                 results = browser_stage(run, cfg, entities, today or dt.date.today(), data_dir,
-                                        args.dump)
+                                        args.dump, args.interactive)
                 check_entities_differ(run, results)
                 write_stage(run, cfg, results, write, open_ws, data_dir)
     return run.exit_code
