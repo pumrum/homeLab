@@ -1,11 +1,13 @@
 """buildium-gl: export each entity's general ledger, clean it, and replace it in the sheet.
 
-    uv run buildium-gl                       normal run: every entity, then write the sheet
+    uv run buildium-gl                       normal run: every entity, then save each export
+                                             to data/ledgers and write the sheet
     uv run buildium-gl --entity KEY          only that entity, for testing; writes nothing
     uv run buildium-gl --dump                every entity, and also save page structure and a
                                              profile of each export; writes nothing
 
-The sheet needs every entity, so the first failure stops the run and nothing is written.
+The sheet needs every entity, so the first failure stops the run, and nothing is saved to
+data/ledgers or written to the sheet.
 """
 
 import argparse
@@ -27,6 +29,7 @@ from automation_common.sheets import open_worksheet
 from buildium_portal import PROCESS
 from buildium_portal.config import NOTIFICATIONS, Entity, GlConfig, load_gl_config
 from buildium_portal.gl_fetch import METHODS, export_method, open_report
+from buildium_portal.gl_files import LEDGER_FOLDER, ledger_name, save_ledgers
 from buildium_portal.gl_parse import (
     CASH_VIEW_COLUMNS,
     MASTER_COLUMNS,
@@ -51,6 +54,7 @@ log = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class EntityResult:
     key: str
+    exports: dict[str, bytes]
     ledgers: dict[str, Ledger]
     view: CashView
 
@@ -175,7 +179,7 @@ def transform_stage(run: Run, cfg: GlConfig, entity: Entity,
         run.summary.record("cash view", entity.key, Status.FAILED, "the rules removed every row")
         return None
     run.summary.record("cash view", entity.key, Status.OK, _view_detail(view))
-    return EntityResult(entity.key, ledgers, view)
+    return EntityResult(entity.key, exports, ledgers, view)
 
 
 def browser_stage(run: Run, cfg: GlConfig, entities: tuple[Entity, ...], today: dt.date,
@@ -214,16 +218,32 @@ def check_entities_differ(run: Run, results: list[EntityResult]) -> None:
                                    f"{shared} {method} entries are in both exports")
 
 
+def files_stage(run: Run, results: list[EntityResult], data_dir: Path) -> None:
+    """Replace every export's file in the ledger folder. A failure doesn't stop the sheet."""
+    files = {ledger_name(result.key, method): result.exports[method]
+             for result in results for method in METHODS}
+    try:
+        save_ledgers(files, data_dir / LEDGER_FOLDER)
+    except Exception as e:  # noqa: BLE001 - recorded, and the sheet is still written
+        run.summary.record("ledger files", str(LEDGER_FOLDER), Status.FAILED, why(e))
+    else:
+        run.summary.record("ledger files", str(LEDGER_FOLDER), Status.OK,
+                           f"replaced {len(files)} files")
+
+
 def write_stage(run: Run, cfg: GlConfig, results: list[EntityResult], write: bool,
-                open_ws: OpenWorksheet) -> None:
+                open_ws: OpenWorksheet, data_dir: Path) -> None:
     views = {result.key: sheet_rows(result.view.rows, CASH_VIEW_COLUMNS) for result in results}
     master = [row for result in results for method in METHODS
               for row in sheet_rows(result.ledgers[method].rows, MASTER_COLUMNS)]
     if run.summary.exit_code != 0:
-        log.error("something failed, so nothing is written to the sheet")
+        log.error("something failed, so nothing is saved to the ledger folder or the sheet")
     elif write:
+        files_stage(run, results, data_dir)
         sheet_stage(run, cfg.gl, views, master, open_ws)
     else:
+        run.summary.record("ledger files", str(LEDGER_FOLDER), Status.UNCHANGED,
+                           f"not saved; would replace {len(results) * len(METHODS)} files")
         run.summary.record("sheet", "all tabs", Status.UNCHANGED,
                            f"not written; would write {len(master)} rows to the master")
 
@@ -243,5 +263,5 @@ def main(argv: list[str] | None = None, *, notifier: Notifier = send_notificatio
                 results = browser_stage(run, cfg, entities, today or dt.date.today(), data_dir,
                                         args.dump)
                 check_entities_differ(run, results)
-                write_stage(run, cfg, results, write, open_ws)
+                write_stage(run, cfg, results, write, open_ws, data_dir)
     return run.exit_code

@@ -58,6 +58,20 @@ This matches paste values, except where a paste would change the value: `007` an
 digits stay text. Sheets marks text that looks like a number or date with a leading `'` in the
 formula bar. The `'` isn't part of the value.
 
+### The ledger folder
+
+A run that writes the sheet first saves every export, exactly as downloaded, to
+`C:\automation\buildium\data\ledgers\<key>_<method>.csv`, such as `entity1_Cash.csv`. Each
+file replaces the last run's, and the run folder keeps its own copy. Files this run doesn't
+write, such as a removed entity's, stay until you delete them.
+
+The files are saved only when every entity worked and every check passed, the same as the sheet.
+`--dump` and `--entity` never save them. Before replacing anything, a run checks that no export
+is empty, and every export has already passed the cleaning checks above. Each file is written
+beside its target first, so a failure while writing replaces none. After each replace, the file
+is read back and must match the export byte for byte. A failure here is `FAIL`, but the sheet is
+still written.
+
 ### How rows are cleaned
 
 Both methods:
@@ -100,6 +114,7 @@ a deliberate exception to the usual rule of carrying on with the next item.
 | Sign-out fails, even after the last entity | The run stops and writes nothing. `FAIL` |
 | Two entities' exports share an entry | Writes nothing. `FAIL`. All entities share one browser, so one may be another's data |
 | The same `Id` and `PostingId` appear twice in an export | Kept, and counted in `report.txt` |
+| A ledger file can't be saved, such as one open in Excel | `report.txt` names it, and the sheet is still written. `FAIL`. A file already replaced stays replaced |
 | A tab is gone by the time the run writes | Writes nothing to any tab. `FAIL` |
 | The sheet is shared as Viewer, not Editor | It opens, so the check passes, and the run fails when it writes. `FAIL` |
 | One tab's write fails | The other tabs are still written, and `report.txt` names the one that failed. `FAIL` |
@@ -123,8 +138,8 @@ with the same tab names.
 
 Exporting, cleaning, and writing the master have run on the real site and the real sheet, both
 by hand and started by the agent on the robot. So have turning on an entity's `gl_write_tab`, and
-the sheet check stopping a run on a deleted spreadsheet before it signed in. **Not yet run:** a
-write failing partway, which can't be forced safely.
+the sheet check stopping a run on a deleted spreadsheet before it signed in. **Not yet run:**
+saving to the ledger folder, and a write failing partway, which can't be forced safely.
 
 ## buildium-statements
 

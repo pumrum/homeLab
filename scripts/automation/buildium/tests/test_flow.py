@@ -843,6 +843,15 @@ def _gl_files(gl_csv_of):
             for method in ("Cash", "Accrual")}
 
 
+def _ledgers(data):
+    folder = data / "data" / "ledgers"
+    return sorted(p.name for p in folder.iterdir()) if folder.exists() else []
+
+
+LEDGER_FILES = ["entity1_Accrual.csv", "entity1_Cash.csv", "entity2_Accrual.csv",
+                "entity2_Cash.csv"]
+
+
 def _gl_run(whole_run, site, gl_csv_of, *args, files=None):
     files = _gl_files(gl_csv_of) if files is None else files
     return whole_run.start(site, "--dump", *args, files=files, command=gl_main.main)
@@ -1049,6 +1058,12 @@ def test_a_normal_run_replaces_the_master_after_every_entity_worked(whole_run, g
     # Raw exports stay, and only a --dump adds page copies and profiles
     run_dir = _run_dir(whole_run.data)
     assert (run_dir / "downloads" / "entity2_Accrual.csv").exists()
+    # And each one also replaces its file in the ledger folder, byte for byte
+    assert _ledgers(whole_run.data) == LEDGER_FILES
+    for name in LEDGER_FILES:
+        assert ((whole_run.data / "data" / "ledgers" / name).read_bytes()
+                == (run_dir / "downloads" / name).read_bytes())
+    assert "ledger files: data" in report and "(replaced 4 files)" in report
     assert not list(run_dir.glob("gl_profile_*"))
     assert not list(run_dir.glob("dump_*"))
 
@@ -1059,6 +1074,7 @@ def test_one_entitys_failed_export_means_nothing_is_written(whole_run, gl_csv_of
     code, book = _gl_write_run(whole_run, FakeSite(), gl_csv_of, files=files)
     assert code == 1
     assert book.writes == {}
+    assert _ledgers(whole_run.data) == []
     assert whole_run.notes[-1] == {"title": "buildium-gl", "message": "FAIL"}
 
 
@@ -1098,6 +1114,7 @@ def test_entries_in_two_entities_exports_mean_nothing_is_written(whole_run, gl_c
     code, book = _gl_write_run(whole_run, FakeSite(), gl_csv_of, files=files)
     assert code == 1
     assert book.writes == {}
+    assert _ledgers(whole_run.data) == []
     assert "1 Cash entries are in both exports" in _report(whole_run.data)
 
 
@@ -1108,6 +1125,7 @@ def test_one_entity_never_writes(whole_run, gl_csv_of):
     assert [login["email"] for login in site.logins] == ["two@example.invalid"]
     assert book.writes == {}
     assert "not written" in _report(whole_run.data)
+    assert _ledgers(whole_run.data) == []
 
 
 def test_a_dump_never_writes(whole_run, gl_csv_of):
@@ -1115,6 +1133,28 @@ def test_a_dump_never_writes(whole_run, gl_csv_of):
     assert code == 0
     assert book.writes == {}
     assert "would write 4 rows" in _report(whole_run.data)
+    assert "would replace 4 files" in _report(whole_run.data)
+    assert _ledgers(whole_run.data) == []
+
+
+def test_a_second_run_replaces_the_ledger_files(whole_run, gl_csv_of):
+    folder = whole_run.data / "data" / "ledgers"
+    folder.mkdir(parents=True)
+    (folder / "entity1_Cash.csv").write_bytes(b"last run's" * 1000)
+    code, _ = _gl_write_run(whole_run, FakeSite(), gl_csv_of)
+    assert code == 0
+    assert b"oneCash" in (folder / "entity1_Cash.csv").read_bytes()
+    assert b"last run's" not in (folder / "entity1_Cash.csv").read_bytes()
+
+
+def test_a_ledger_folder_that_cant_be_written_still_writes_the_sheet(whole_run, gl_csv_of):
+    (whole_run.data / "data").mkdir()
+    (whole_run.data / "data" / "ledgers").write_bytes(b"a file where the folder should be")
+    code, book = _gl_write_run(whole_run, FakeSite(), gl_csv_of)
+    assert code == 1
+    assert "FakeMasterTab" in book.writes
+    assert "FAILED    ledger files" in _report(whole_run.data)
+    assert whole_run.notes[-1] == {"title": "buildium-gl", "message": "FAIL"}
 
 
 def test_a_config_with_no_gl_section_fails_clearly(whole_run, gl_csv_of):
