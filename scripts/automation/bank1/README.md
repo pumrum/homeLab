@@ -225,13 +225,14 @@ words come from that test.
   remembered device, each form opened by its address and checked against its Account drop-down,
   **Choose a date range** chosen, both dates typed and read back, the File type showing a CSV,
   and one sign-out
+- A full run on the test workstation with no sheets: six checking accounts and one card, each
+  downloaded, its header and every row's date checked, and saved under its timestamped name. The
+  checking and card headers in `COLUMNS` both matched the real exports
 
 **Not yet run:**
 
-- A download. The checking header comes from the smoke test. The card header is a guess:
-  `Transaction Date, Post Date, Description, Category, Type, Amount, Memo`. The first card
-  download will name any difference
-- Which date the site's range filters cards by
+- Which date the site's range filters cards by. The check accepts either, and every card row so
+  far has passed
 - A sheet write. Whether the old process's writes landed as text is also unknown:
   `=ISTEXT()` on an amount it wrote shows it
 - Verification timing out, and a link that no longer leads to the form
