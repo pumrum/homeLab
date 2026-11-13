@@ -61,9 +61,11 @@ formula bar. The `'` isn't part of the value.
 ### The ledger folder
 
 A run that writes the sheet first saves every export, exactly as downloaded, to
-`C:\automation\buildium\data\ledgers\<key>_<method>.csv`, such as `entity1_Cash.csv`. Each
-file replaces the last run's, and the run folder keeps its own copy. Files this run doesn't
-write, such as a removed entity's, stay until you delete them.
+`C:\automation\buildium\data\ledgers\<abbreviation>_<method>.csv`, such as `ABCLLC_Cash.csv`.
+Each file replaces the last run's, and the run folder keeps its own copy, named by key. Files this
+run doesn't write, such as a removed entity's or one from before an abbreviation changed, stay
+until you delete them. The abbreviation is masked in `report.txt` and `run.log`, so a file there
+shows as `***_Cash.csv`.
 
 The files are saved only when every entity worked and every check passed, the same as the sheet.
 `--dump` and `--entity` never save them. Before replacing anything, a run checks that no export

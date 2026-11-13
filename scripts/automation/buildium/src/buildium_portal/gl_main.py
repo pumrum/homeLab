@@ -218,9 +218,13 @@ def check_entities_differ(run: Run, results: list[EntityResult]) -> None:
                                    f"{shared} {method} entries are in both exports")
 
 
-def files_stage(run: Run, results: list[EntityResult], data_dir: Path) -> None:
-    """Replace every export's file in the ledger folder. A failure doesn't stop the sheet."""
-    files = {ledger_name(result.key, method): result.exports[method]
+def files_stage(run: Run, cfg: GlConfig, results: list[EntityResult], data_dir: Path) -> None:
+    """Replace every export's file in the ledger folder. A failure doesn't stop the sheet.
+
+    Files are named by abbreviation, which is masked, so the report shows a file as ***_Cash.csv.
+    """
+    abbreviations = {entity.key: entity.abbreviation for entity in cfg.entities}
+    files = {ledger_name(abbreviations[result.key], method): result.exports[method]
              for result in results for method in METHODS}
     try:
         save_ledgers(files, data_dir / LEDGER_FOLDER)
@@ -239,7 +243,7 @@ def write_stage(run: Run, cfg: GlConfig, results: list[EntityResult], write: boo
     if run.summary.exit_code != 0:
         log.error("something failed, so nothing is saved to the ledger folder or the sheet")
     elif write:
-        files_stage(run, results, data_dir)
+        files_stage(run, cfg, results, data_dir)
         sheet_stage(run, cfg.gl, views, master, open_ws)
     else:
         run.summary.record("ledger files", str(LEDGER_FOLDER), Status.UNCHANGED,

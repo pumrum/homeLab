@@ -848,8 +848,9 @@ def _ledgers(data):
     return sorted(p.name for p in folder.iterdir()) if folder.exists() else []
 
 
-LEDGER_FILES = ["entity1_Accrual.csv", "entity1_Cash.csv", "entity2_Accrual.csv",
-                "entity2_Cash.csv"]
+# Each download's name in the run folder, and its name in the ledger folder
+LEDGER_FILES = {"entity1_Accrual.csv": "ONELLC_Accrual.csv", "entity1_Cash.csv": "ONELLC_Cash.csv",
+                "entity2_Accrual.csv": "TWOLLC_Accrual.csv", "entity2_Cash.csv": "TWOLLC_Cash.csv"}
 
 
 def _gl_run(whole_run, site, gl_csv_of, *args, files=None):
@@ -1058,11 +1059,11 @@ def test_a_normal_run_replaces_the_master_after_every_entity_worked(whole_run, g
     # Raw exports stay, and only a --dump adds page copies and profiles
     run_dir = _run_dir(whole_run.data)
     assert (run_dir / "downloads" / "entity2_Accrual.csv").exists()
-    # And each one also replaces its file in the ledger folder, byte for byte
-    assert _ledgers(whole_run.data) == LEDGER_FILES
-    for name in LEDGER_FILES:
-        assert ((whole_run.data / "data" / "ledgers" / name).read_bytes()
-                == (run_dir / "downloads" / name).read_bytes())
+    # And each one also replaces its file in the ledger folder, named by abbreviation
+    assert _ledgers(whole_run.data) == sorted(LEDGER_FILES.values())
+    for download, saved in LEDGER_FILES.items():
+        assert ((whole_run.data / "data" / "ledgers" / saved).read_bytes()
+                == (run_dir / "downloads" / download).read_bytes())
     assert "ledger files: data" in report and "(replaced 4 files)" in report
     assert not list(run_dir.glob("gl_profile_*"))
     assert not list(run_dir.glob("dump_*"))
@@ -1140,11 +1141,11 @@ def test_a_dump_never_writes(whole_run, gl_csv_of):
 def test_a_second_run_replaces_the_ledger_files(whole_run, gl_csv_of):
     folder = whole_run.data / "data" / "ledgers"
     folder.mkdir(parents=True)
-    (folder / "entity1_Cash.csv").write_bytes(b"last run's" * 1000)
+    (folder / "ONELLC_Cash.csv").write_bytes(b"last run's" * 1000)
     code, _ = _gl_write_run(whole_run, FakeSite(), gl_csv_of)
     assert code == 0
-    assert b"oneCash" in (folder / "entity1_Cash.csv").read_bytes()
-    assert b"last run's" not in (folder / "entity1_Cash.csv").read_bytes()
+    assert b"oneCash" in (folder / "ONELLC_Cash.csv").read_bytes()
+    assert b"last run's" not in (folder / "ONELLC_Cash.csv").read_bytes()
 
 
 def test_a_ledger_folder_that_cant_be_written_still_writes_the_sheet(whole_run, gl_csv_of):

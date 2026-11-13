@@ -17,8 +17,9 @@ class SaveError(Exception):
     """A ledger file couldn't be saved or didn't read back the same. The message says which."""
 
 
-def ledger_name(key: str, method: str) -> str:
-    return f"{key}_{method}.csv"
+def ledger_name(abbreviation: str, method: str) -> str:
+    """The config checks that abbreviations are safe in a file name and differ, ignoring case."""
+    return f"{abbreviation}_{method}.csv"
 
 
 def _temporary(target: Path) -> Path:
