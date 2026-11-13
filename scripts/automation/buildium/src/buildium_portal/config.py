@@ -81,6 +81,14 @@ class GlEntity:
 
 
 @dataclass(frozen=True)
+class Dashboard:
+    """The cell that shows when the master was last replaced."""
+
+    tab: str
+    updated_cell: str
+
+
+@dataclass(frozen=True)
 class UnitFix:
     """For one entity: this lease's rows dated before `before` get this unit number."""
 
@@ -96,6 +104,7 @@ class Gl:
     master_tab: str
     entities: Mapping[str, GlEntity]
     unit_fixes: tuple[UnitFix, ...]
+    dashboard: Dashboard | None = None  # optional: where the master's update time goes
 
 
 @dataclass(frozen=True)
@@ -224,9 +233,24 @@ def _unit_fixes(table: Mapping[str, Any], key: str, where: str) -> list[UnitFix]
             for number, item in enumerate(value, start=1)]
 
 
+def _dashboard(gl: Mapping[str, Any]) -> Dashboard | None:
+    keys = ("dashboard_tab", "master_updated_cell")
+    present = [key in gl for key in keys]
+    if not any(present):
+        return None
+    if not all(present):
+        raise ConfigError('[gl]: "dashboard_tab" and "master_updated_cell" go together')
+    cell = _text(gl, "master_updated_cell", "[gl]")
+    # The value is private, so the message never repeats it
+    if not _CELL.match(cell):
+        raise ConfigError('[gl]: "master_updated_cell" must be a cell like B5')
+    return Dashboard(_text(gl, "dashboard_tab", "[gl]"), cell)
+
+
 def _parse_gl(doc: Mapping[str, Any], entities: tuple[Entity, ...]) -> Gl:
     gl = _table(doc, "gl")
-    reject_unknown_keys(gl, {"spreadsheet_id", "master_tab"}, "[gl]")
+    reject_unknown_keys(gl, {"spreadsheet_id", "master_tab", "dashboard_tab",
+                             "master_updated_cell"}, "[gl]")
     targets: dict[str, GlEntity] = {}
     fixes: list[UnitFix] = []
     tables = require_tables(doc, "entities")
@@ -238,7 +262,8 @@ def _parse_gl(doc: Mapping[str, Any], entities: tuple[Entity, ...]) -> Gl:
     tabs = [target.tab for target in targets.values()] + [master_tab]
     if len(set(tabs)) != len(tabs):
         raise ConfigError("[gl]: every entity and the master need their own tab")
-    return Gl(_text(gl, "spreadsheet_id", "[gl]"), master_tab, targets, tuple(fixes))
+    return Gl(_text(gl, "spreadsheet_id", "[gl]"), master_tab, targets, tuple(fixes),
+              _dashboard(gl))
 
 
 def parse_gl_config(doc: Mapping[str, Any]) -> GlConfig:

@@ -6,9 +6,9 @@ import pytest
 
 from automation_common.run import Run
 from automation_common.sheets import SheetError
-from buildium_portal.config import Gl, GlEntity
+from buildium_portal.config import Dashboard, Gl, GlEntity
 from buildium_portal.gl_parse import CASH_VIEW_COLUMNS, MASTER_COLUMNS
-from buildium_portal.gl_sheet import check_sheet, sheet_stage
+from buildium_portal.gl_sheet import check_sheet, sheet_stage, stamp_stage, tabs_to_write
 
 GL = Gl("made-up-id", "FakeMaster",
         {"entity1": GlEntity("entity1", "CODE1", "FakeOne", "B5", write_tab=True),
@@ -37,6 +37,11 @@ class FakeBook:
                     raise SheetError("Google Sheets error 500 writing to the sheet")
                 book.writes.append((tab, start_cell, rows, date_columns, trim))
 
+            def write_cell(self, cell, value, pattern=None):
+                if tab == book.bad_tab:
+                    raise SheetError("Google Sheets error 500 writing to the sheet")
+                book.writes.append((tab, cell, value, pattern))
+
         return Tab()
 
 
@@ -44,6 +49,37 @@ class FakeBook:
 def run(tmp_path):
     with Run.start("buildium", tmp_path, notifier=lambda note, masker: True) as started:
         yield started
+
+
+def test_the_sheet_check_opens_the_dashboard_too():
+    with_dashboard = Gl("made-up-id", "FakeMaster", ONE_ON.entities, (),
+                        Dashboard("FakeDash", "C3"))
+    assert tabs_to_write(with_dashboard)[-1] == ("dashboard", "FakeDash")
+    assert "dashboard" not in dict(tabs_to_write(ONE_ON))
+
+
+STARTED = dt.datetime(2026, 11, 13, 12, 43, 40, tzinfo=dt.timezone(dt.timedelta(hours=-5)))
+
+
+def test_the_dashboard_gets_the_runs_start_time(run):
+    book = FakeBook()
+    stamp_stage(run, "made-up-id", Dashboard("FakeDash", "C3"), STARTED, book.open)
+    assert book.writes == [("FakeDash", "C3", STARTED, "yyyy-mm-dd hh:mm:ss")]
+    assert "OK        sheet: dashboard  (master updated 2026-11-13 12:43:40)" in (
+        run.summary.report_text())
+
+
+def test_a_failed_dashboard_write_is_reported(run):
+    stamp_stage(run, "made-up-id", Dashboard("FakeDash", "C3"), STARTED,
+                FakeBook(bad_tab="FakeDash").open)
+    assert run.summary.exit_code == 1
+    assert "the master was written, but not its update time" in run.summary.report_text()
+
+
+def test_the_sheet_stage_says_whether_the_master_was_written(run):
+    assert sheet_stage(run, GL, VIEWS, MASTER, FakeBook().open) is True
+    assert sheet_stage(run, GL, VIEWS, MASTER, FakeBook(bad_tab="FakeMaster").open) is False
+    assert sheet_stage(run, GL, VIEWS, MASTER, FakeBook(missing_tab="FakeOne").open) is False
 
 
 def test_each_tab_gets_its_rows_and_only_the_master_trims(run):

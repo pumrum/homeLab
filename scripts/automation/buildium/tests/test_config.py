@@ -109,6 +109,25 @@ def test_a_valid_gl_section_loads():
         "entity1", "77", dt.date(2030, 1, 31), "Upper")
 
 
+def test_the_dashboard_is_optional_and_its_two_keys_go_together():
+    assert parse_gl_config(_gl_changed(lambda d: None)).gl.dashboard is None
+    doc = _gl_changed(lambda d: d["gl"].update(dashboard_tab="FakeDash",
+                                                master_updated_cell="C3"))
+    dashboard = parse_gl_config(doc).gl.dashboard
+    assert (dashboard.tab, dashboard.updated_cell) == ("FakeDash", "C3")
+
+
+@pytest.mark.parametrize(("values", "message"), [
+    ({"dashboard_tab": "FakeDash"}, "go together"),
+    ({"master_updated_cell": "C3"}, "go together"),
+    ({"dashboard_tab": "FakeDash", "master_updated_cell": "c3"}, "a cell like B5"),
+    ({"dashboard_tab": "<tab>", "master_updated_cell": "C3"}, "placeholder"),
+])
+def test_a_bad_dashboard_fails_clearly(values, message):
+    with pytest.raises(ConfigError, match=message):
+        parse_gl_config(_gl_changed(lambda d: d["gl"].update(values)))
+
+
 def test_unit_fixes_are_optional():
     doc = _gl_changed(lambda d: d["entities"][0].pop("gl_unit_fixes"))
     assert parse_gl_config(doc).gl.unit_fixes == ()

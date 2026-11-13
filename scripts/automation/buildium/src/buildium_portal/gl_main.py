@@ -45,7 +45,7 @@ from buildium_portal.gl_parse import (
 )
 from buildium_portal.gl_profile import profile
 from buildium_portal.gl_rules import CashView, cash_view
-from buildium_portal.gl_sheet import OpenWorksheet, check_sheet, sheet_stage
+from buildium_portal.gl_sheet import OpenWorksheet, check_sheet, sheet_stage, stamp_stage
 from buildium_portal.login import SignOutError
 from buildium_portal.session import open_browser, signed_in_page
 from buildium_portal.stages import chosen_entities, dump_observer, final_event, why
@@ -86,6 +86,8 @@ def load_stage(run: Run, data_dir: Path) -> GlConfig | None:
     run.masker.add(cfg.site.login_url)
     run.masker.add(cfg.gl.spreadsheet_id)
     run.masker.add(cfg.gl.master_tab)
+    if cfg.gl.dashboard is not None:
+        run.masker.add(cfg.gl.dashboard.tab)
     for entity in cfg.entities:
         run.masker.add(entity.abbreviation)
         run.masker.add(entity.statement_name)
@@ -252,7 +254,10 @@ def write_stage(run: Run, cfg: GlConfig, results: list[EntityResult], write: boo
         log.error("something failed, so nothing is saved to the ledger folder or the sheet")
     elif write:
         files_stage(run, cfg, results, data_dir)
-        sheet_stage(run, cfg.gl, views, master, open_ws)
+        master_written = sheet_stage(run, cfg.gl, views, master, open_ws)
+        if master_written and cfg.gl.dashboard is not None:
+            stamp_stage(run, cfg.gl.spreadsheet_id, cfg.gl.dashboard, run.summary.started_at,
+                        open_ws)
     else:
         run.summary.record("ledger files", str(LEDGER_FOLDER), Status.UNCHANGED,
                            f"not saved; would replace {len(results) * len(METHODS)} files")

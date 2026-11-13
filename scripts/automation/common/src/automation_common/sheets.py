@@ -1,5 +1,5 @@
-"""Google Sheets with a service account: read a worksheet, append rows, or
-replace one column or a whole block from a given cell down.
+"""Google Sheets with a service account: read a worksheet, append rows, replace one column or
+a whole block from a given cell down, or write one cell.
 
 The service account key is the encrypted secret file
 `automation/google-service-account` (see secrets.py; import it with
@@ -28,6 +28,7 @@ SERVICE_ACCOUNT_SECRET = "automation/google-service-account"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]  # sheets only, no Drive
 BLOCK_CHUNK_ROWS = 2_000  # rows in one write, so a big block stays a reasonable request
 _SHEETS_DAY_ZERO = dt.date(1899, 12, 30)
+_SECONDS_PER_DAY = 86_400
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,8 @@ class Worksheet(Protocol):
     def replace_block(self, start_cell: str, rows: Sequence[Sequence[Cell]],
                       date_columns: Mapping[int, str] | None = None,
                       trim: bool = False) -> None: ...
+
+    def write_cell(self, cell: str, value: Cell, pattern: str | None = None) -> None: ...
 
 
 def replace_requests(
@@ -100,6 +103,12 @@ def _block_cell(value: Cell) -> dict[str, Any]:
         return {"userEnteredValue": {"formulaValue": value.text}}
     if isinstance(value, bool):
         return {"userEnteredValue": {"boolValue": value}}
+    if isinstance(value, dt.datetime):  # before date, which it's a kind of
+        # The time as shown on this machine's clock, to the second
+        local = value.replace(tzinfo=None, microsecond=0)
+        days = (local.date() - _SHEETS_DAY_ZERO).days
+        seconds = local.hour * 3600 + local.minute * 60 + local.second
+        return {"userEnteredValue": {"numberValue": days + seconds / _SECONDS_PER_DAY}}
     if isinstance(value, dt.date):
         return {"userEnteredValue": {"numberValue": (value - _SHEETS_DAY_ZERO).days}}
     if isinstance(value, Decimal):
@@ -173,6 +182,29 @@ def block_requests(
             writes[-1].append({"updateCells": {
                 "range": block_range(end_row, total_rows), "fields": "userEnteredValue"}})
     return writes, new_row_count, total_cols
+
+
+def cell_request(sheet_id: int, cell: str, value: Cell,
+                 pattern: str | None = None) -> dict[str, Any]:
+    """The request that writes one cell, typed like a block's cells. Nothing else changes.
+
+    `pattern` sets how a date or time shows, like yyyy-mm-dd hh:mm:ss. Other formatting stays.
+    """
+    try:
+        row, col = a1_to_rowcol(cell)
+    except IncorrectCellLabel:
+        raise SheetError(f'"{cell}" is not a cell like B5') from None
+    data = _block_cell(value)
+    fields = "userEnteredValue"
+    if pattern is not None:
+        data["userEnteredFormat"] = {"numberFormat": {"type": "DATE_TIME", "pattern": pattern}}
+        fields += ",userEnteredFormat.numberFormat"
+    return {"updateCells": {
+        "range": {"sheetId": sheet_id, "startRowIndex": row - 1, "endRowIndex": row,
+                  "startColumnIndex": col - 1, "endColumnIndex": col},
+        "rows": [{"values": [data]}],
+        "fields": fields,
+    }}
 
 
 def load_service_account(
@@ -258,6 +290,21 @@ class GoogleWorksheet:
             except gspread.exceptions.APIError as e:
                 raise _api_error("writing to", e) from None
         self._row_count, self._col_count = row_count, col_count
+
+    def write_cell(self, cell: str, value: Cell, pattern: str | None = None) -> None:
+        """Write one cell (see cell_request). It's one request, so all or nothing.
+
+        The cell must already exist: this never grows the tab.
+        """
+        request = cell_request(self._ws.id, cell, value, pattern)
+        cell_range = request["updateCells"]["range"]
+        if (cell_range["endRowIndex"] > self._row_count
+                or cell_range["endColumnIndex"] > self._col_count):
+            raise SheetError(f"{cell} is outside the tab")
+        try:
+            self._ws.spreadsheet.batch_update({"requests": [request]})
+        except gspread.exceptions.APIError as e:
+            raise _api_error("writing to", e) from None
 
 
 def _api_error(action: str, e: gspread.exceptions.APIError) -> SheetError:

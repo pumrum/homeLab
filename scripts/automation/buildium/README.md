@@ -35,6 +35,12 @@ Each tab is a full snapshot, replaced every run.
 | --- | --- | --- |
 | Each entity's tab, from `gl_start_cell`, only when its `gl_write_tab` is `true` | The Cash view: 15 columns, with the rules below | Clears from `gl_start_cell` to the tab's right edge and bottom |
 | The master tab, from `A2` | Every entity, Cash and Accrual: 56 columns | Clears everything below row 1, then deletes spare rows so the tab shrinks with its data |
+| The dashboard's `master_updated_cell`, only when `dashboard_tab` is set | The run's start time, once the master is written | Changes only that cell |
+
+The dashboard cell gets the time in the run folder's name, not the time of the write, so
+`runs\20261113_124340` writes `2026-11-13 12:43:40`. It's a real date and time, shown as
+`yyyy-mm-dd hh:mm:ss`, so the sheet can compare it. A run that doesn't write the master leaves
+it alone, so it always says when the master last changed. The cell must already exist in the tab.
 
 Entity tabs are off by default, because the sheet builds each entity's rows from the master with
 formulas. A run still builds each entity's Cash view and reports its counts. To have a run write
@@ -121,6 +127,7 @@ a deliberate exception to the usual rule of carrying on with the next item.
 | A tab is gone by the time the run writes | Writes nothing to any tab. `FAIL` |
 | The sheet is shared as Viewer, not Editor | It opens, so the check passes, and the run fails when it writes. `FAIL` |
 | One tab's write fails | The other tabs are still written, and `report.txt` names the one that failed. `FAIL` |
+| The dashboard's write fails | The master is already written, so it keeps the new rows with the old time. `FAIL` |
 | The master's write fails partway | It holds new rows above old ones, with nothing cleared yet, until the next good run. `FAIL` |
 
 ### What each run folder holds
@@ -136,13 +143,15 @@ a deliberate exception to the usual rule of carrying on with the next item.
 
 Share the spreadsheet with the service account as an Editor. In
 `C:\automation\buildium\config.toml`, add the `[gl]` section from `config.example.toml`, and the
-`gl_` values to each `[[entities]]` block. To test, point `spreadsheet_id` at a copy of the sheet
+`gl_` values to each `[[entities]]` block. For the dashboard time, also add `dashboard_tab`
+and `master_updated_cell`. To test, point `spreadsheet_id` at a copy of the sheet
 with the same tab names.
 
 Exporting, cleaning, and writing the master have run on the real site and the real sheet, both
 by hand and started by the agent on the robot. So have turning on an entity's `gl_write_tab`, and
 the sheet check stopping a run on a deleted spreadsheet before it signed in. **Not yet run:**
-saving to the ledger folder, and a write failing partway, which can't be forced safely.
+saving to the ledger folder, the dashboard time, and a write failing partway, which can't be
+forced safely.
 
 ## buildium-statements
 

@@ -640,6 +640,8 @@ gl_write_tab = true
 [gl]
 spreadsheet_id = "made-up-spreadsheet-id"
 master_tab = "FakeMasterTab"
+dashboard_tab = "FakeDashTab"
+master_updated_cell = "C3"
 [statements]
 system = "FakeSystem"
 """
@@ -917,6 +919,9 @@ class FakeBook:
                 book.writes[tab] = SimpleNamespace(start_cell=start_cell, rows=rows,
                                                    date_columns=date_columns, trim=trim)
 
+            def write_cell(self, cell, value, pattern=None):
+                book.writes[tab] = SimpleNamespace(cell=cell, value=value, pattern=pattern)
+
         return Tab()
 
 
@@ -1009,7 +1014,8 @@ def test_the_log_report_and_profiles_hold_no_private_values(whole_run, gl_csv_of
             *run_dir.glob("gl_profile_*.txt")]
     written = "".join(path.read_text(encoding="utf-8") for path in safe)
     for private in (SITE.login_url, ONE, "ONELLC", "one@example.invalid", "oneCash",
-                    "made-up-spreadsheet-id", "FakeMasterTab", "FakeTabOne", "FAKECODE1"):
+                    "made-up-spreadsheet-id", "FakeMasterTab", "FakeDashTab", "FakeTabOne",
+                    "FAKECODE1"):
         assert private not in written
     assert "entity1 Cash" in written
 
@@ -1077,7 +1083,12 @@ def test_a_normal_run_replaces_the_master_after_every_entity_worked(whole_run, g
     code, book = _gl_write_run(whole_run, site, gl_csv_of)
     assert code == 0
     assert site.paths.count("/sign-out") == 2
-    assert set(book.writes) == {"FakeTabTwo", "FakeMasterTab"}  # only entity2 turns its tab on
+    # Only entity2 turns its tab on, and the dashboard gets the master's update time
+    assert set(book.writes) == {"FakeTabTwo", "FakeMasterTab", "FakeDashTab"}
+    stamp = book.writes["FakeDashTab"]
+    run_name = _run_dir(whole_run.data).name
+    assert (stamp.cell, stamp.pattern) == ("C3", "yyyy-mm-dd hh:mm:ss")
+    assert stamp.value.strftime("%Y%m%d_%H%M%S") == run_name  # the run's time, not the write's
 
     two = book.writes["FakeTabTwo"]
     assert (two.start_cell, two.trim) == ("C9", False)

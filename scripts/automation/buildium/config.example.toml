@@ -40,6 +40,10 @@ system = "<system name>"                         # in every saved file's name
 [gl]
 spreadsheet_id = "<spreadsheet ID>"
 master_tab = "<tab holding every entity's ledger, with headers in row 1>"
+# Optional, together: after the master is replaced, this cell gets the run's start time, the
+# time in the run folder's name, shown like 2026-11-13 12:43:40.
+# dashboard_tab = "<tab in the same spreadsheet>"
+# master_updated_cell = "<cell, like B5>"
 
 # Optional: the push notifications' words. Leave a block or line out to keep what's shown
 # here. Any of these can go in {braces}: {command}, {process}, {run_id}, {ok}, {unchanged},

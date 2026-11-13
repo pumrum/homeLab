@@ -19,6 +19,9 @@ Versions follow [Semantic Versioning](https://semver.org/). The robot runs
   separate sign-in server. The app address it passes through on the way looked like a session
   left open. The app now counts only once its Account menu shows, and the new form's fields and
   `Sign in` button are found first. This covers every command in this package.
+- `buildium-gl` can write the run's start time to a dashboard cell once the master is written,
+  shown like `2026-11-13 12:43:40`. It's the time in the run folder's name. Set it with the
+  optional `dashboard_tab` and `master_updated_cell` in `[gl]`.
 - Add `buildium-gl --interactive`, for runs watched on screen: when the site's bot check stops a
   sign-in, the run waits up to 10 minutes for you to sign in by hand as the entity it names, then
   carries on. Without it, a bot check fails the run as before.
