@@ -1132,8 +1132,8 @@ def test_an_activity_run_downloads_each_range_saves_it_and_writes_the_sheet(acti
     assert site.signed_in is False
     assert activity_run.notes == [{"title": "bank1-activity", "message": "PASS"}]
     written = _written(activity_run.data)
-    for private in ("made-up-spreadsheet-id", "Made-up checking tab", "/web/activity/",
-                    "EXAMPLE"):
+    for private in ("made-up-spreadsheet-id", "Made-up checking tab", "Made-up dashboard",
+                    "/web/activity/", "EXAMPLE"):
         assert private not in written
 
 
