@@ -28,8 +28,9 @@ uv run python tools\env_check.py           # Edge, policies, Credential Manager,
 uv run python tools\env_check.py --lock    # same, with Windows locked
 ```
 
-The full `uv run pytest` takes 15 minutes or more, because the flow tests drive real Edge. Run
-all of it only:
+The full `uv run pytest` takes about 7 minutes, because the flow tests drive real Edge. It runs
+the tests in parallel, one worker per core up to 4; `uv run pytest -n 0` runs them one at a time,
+which takes about 15 minutes but is easier to follow when debugging. Run all of it only:
 
 - before opening a PR, or pushing to one for review
 - after rebasing on `main` or merging it in

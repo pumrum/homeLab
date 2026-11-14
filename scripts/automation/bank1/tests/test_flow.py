@@ -15,6 +15,7 @@ import http.server
 import json
 import os
 import threading
+from dataclasses import replace
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
@@ -42,8 +43,11 @@ USER = "fake-user"
 PASSWORD = "made-up-password"
 CRED = Credential(USER, PASSWORD)
 HEADED = bool(os.environ.get("AUTOMATION_TEST_HEADED"))
-FAST = Timeouts(field=2_000, after_submit=3_000, choice=1_500, verify=2_000, dashboard=1_000,
+# verify is roomy: an approval ends the wait as soon as it lands, and a busy machine
+# can take a while to show it. Tests that expect the timeout use NO_APPROVAL
+FAST = Timeouts(field=2_000, after_submit=3_000, choice=1_500, verify=10_000, dashboard=1_000,
                 sign_out=1_500, poll=100)
+NO_APPROVAL = replace(FAST, verify=1_500)
 
 # id: (kind, page name, suffix, row controls, years newest first as
 #      (year, rows as (date cell, type cell, file on the PDF server)))
@@ -296,7 +300,8 @@ class PdfServer:
 
         self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.base = f"http://127.0.0.1:{self._server.server_port}"
-        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+        # A short poll, so shutdown() at the end of each test doesn't wait up to half a second
+        threading.Thread(target=self._server.serve_forever, args=(0.05,), daemon=True).start()
 
     def close(self):
         self._server.shutdown()
@@ -533,6 +538,9 @@ def open_site(needs_edge, pdf_server):
             site.use(pdf_server, {})
             ctx.route("**/*", site.handle)
             ctx.set_default_timeout(3_000)
+            # Page loads get longer: a just-started Edge is slow to load its first page
+            # when other tests are starting theirs. No test expects a load to time out
+            ctx.set_default_navigation_timeout(15_000)
             return ctx.new_page()
         yield opened
         edge.close()
@@ -606,8 +614,17 @@ def test_no_next_button_after_the_push_option_fails_without_waiting(open_site):
 
 def test_verification_without_a_chooser_just_waits(open_site):
     asked = []
-    page = open_site(FakeBank(verify=True, approve=True, chooser=None))
-    sign_in(page, SITE, CRED, FAST, on_verify=lambda: asked.append(1))
+    site = FakeBank(verify=True, chooser=None)
+    page = open_site(site)
+
+    def approve():
+        # Someone gets the push and approves it. Only after the run notices the page,
+        # so the test doesn't depend on how fast it does
+        asked.append(1)
+        site.signed_in = True
+        page.evaluate(f"setTimeout(() => location = '{DASHBOARD}', 200)")
+
+    sign_in(page, SITE, CRED, FAST, on_verify=approve)
     assert asked == [1]
     assert urlsplit(page.url).path == DASHBOARD
 
@@ -624,7 +641,7 @@ def test_a_chooser_without_the_push_option_fails_without_choosing(open_site):
 def test_verification_times_out_after_notifying(open_site):
     asked = []
     with pytest.raises(VerificationTimeout, match="verification timed out"):
-        sign_in(open_site(FakeBank(verify=True)), SITE, CRED, FAST,
+        sign_in(open_site(FakeBank(verify=True)), SITE, CRED, NO_APPROVAL,
                 on_verify=lambda: asked.append(1))
     assert asked == [1]
 
@@ -679,6 +696,9 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch, pdf_of, letter_pdf)
                 accept_downloads=True)
             ctx.route("**/*", site.handle)
             ctx.set_default_timeout(3_000)
+            # Page loads get longer: a just-started Edge is slow to load its first page
+            # when other tests are starting theirs. No test expects a load to time out
+            ctx.set_default_navigation_timeout(15_000)
             return ctx
         return launch_edge
 
@@ -695,12 +715,13 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch, pdf_of, letter_pdf)
         "/inv1-sep-single-letter.pdf": letter,
     }
 
-    def start(site, *args, files=None, inline=False):
+    def start(site, *args, files=None, inline=False, timeouts=FAST):
         site.use(pdf_server, good if files is None else good | files)
         pdf_server.inline = inline
         monkeypatch.setattr(session, "launch_edge", launch(site))
         monkeypatch.setattr(capture_module, "launch_edge", launch(site))
-        monkeypatch.setattr(login_module, "Timeouts", lambda: FAST)
+        monkeypatch.setattr(login_module, "Timeouts", lambda: timeouts)
+        monkeypatch.setattr(statements_fetch, "POLL_MS", 100)
         monkeypatch.setattr(statements_fetch, "PAGE_TIMEOUT_MS", 2_000)
         monkeypatch.setattr(statements_fetch, "STEP_TIMEOUT_MS", 700)
         monkeypatch.setattr(statements_fetch, "DOWNLOAD_TIMEOUT_MS", 1_500)
@@ -860,7 +881,7 @@ def test_a_verification_timeout_stops_everything_and_keeps_the_evidence(whole_ru
     target.parent.mkdir(parents=True)
     target.write_bytes(b"the good file from last month's run")
     site = FakeBank(verify=True)
-    assert whole_run.start(site) == 1
+    assert whole_run.start(site, timeouts=NO_APPROVAL) == 1
     assert target.read_bytes() == b"the good file from last month's run"
     assert _saved(whole_run.data) == [FILES[CHK][0]]
     assert not any(p.startswith("/web/statements/") for p in site.paths)
@@ -1040,10 +1061,14 @@ def activity_run(whole_run, monkeypatch):
                 accept_downloads=True)
             ctx.route("**/*", site.handle)
             ctx.set_default_timeout(3_000)
+            # Page loads get longer: a just-started Edge is slow to load its first page
+            # when other tests are starting theirs. No test expects a load to time out
+            ctx.set_default_navigation_timeout(15_000)
             return ctx
 
         monkeypatch.setattr(session, "launch_edge", launch_edge)
         monkeypatch.setattr(login_module, "Timeouts", lambda: FAST)
+        monkeypatch.setattr(activity_fetch, "POLL_MS", 100)
         monkeypatch.setattr(activity_fetch, "PAGE_TIMEOUT_MS", 2_000)
         monkeypatch.setattr(activity_fetch, "STEP_TIMEOUT_MS", 1_500)
         monkeypatch.setattr(activity_fetch, "DOWNLOAD_TIMEOUT_MS", 2_000)

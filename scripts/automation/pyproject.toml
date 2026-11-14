@@ -10,6 +10,7 @@ dependencies = ["automation-agent", "automation-common", "bank1-portal", "buildi
 dev = [
     "pytest>=8.3",
     "pytest-timeout>=2.3",
+    "pytest-xdist>=3.6",
     "ruff>=0.9",
 ]
 
@@ -30,7 +31,10 @@ invoices-sync = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["agent/tests", "bank1/tests", "buildium/tests", "common/tests", "fidelity/tests", "innago/tests", "invoices/tests"]
-addopts = "--import-mode=importlib"
+# Tests run in parallel, one per core up to 4: the browser tests mostly wait on Edge.
+# More workers was faster but made Edge slow enough to fail tests. `-n 0` runs them one
+# at a time, which is easier to follow when debugging
+addopts = "--import-mode=importlib -n auto --maxprocesses 4"
 # A hung test fails with a stack trace, instead of holding up CI for hours
 timeout = 120
 timeout_method = "thread"

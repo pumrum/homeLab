@@ -10,6 +10,7 @@ import http.server
 import json
 import threading
 import time
+from dataclasses import replace
 from decimal import Decimal
 from types import SimpleNamespace
 from urllib.parse import urlsplit
@@ -54,8 +55,12 @@ APP_LOGIN = "/manager/app/login"
 APP_RETURN = "/manager/app/login/redirect"
 SITE = Site(f"{HOST}{LOGIN}")
 CRED = Credential("one@example.invalid", "made-up-password")
-FAST = Timeouts(field=2_000, after_submit=2_000, mfa_settle_s=0.3, mfa=1_500, menu=500,
+# field and after_submit are roomy: each wait ends as soon as the page shows up, and a busy
+# machine can take a while to show it. Tests that wait one out use NO_FORM or REJECTED
+FAST = Timeouts(field=5_000, after_submit=10_000, mfa_settle_s=0.3, mfa=1_500, menu=500,
                 sign_out=1_500)
+NO_FORM = replace(FAST, field=2_000)
+REJECTED = replace(FAST, after_submit=2_000)
 TODAY = dt.date(2026, 11, 5)
 ONE = "FakeEntity One, LLC"
 TWO = "FakeEntity Two, LLC"
@@ -230,7 +235,8 @@ class PdfServer:
 
         self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.base = f"http://127.0.0.1:{self._server.server_port}"
-        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+        # A short poll, so shutdown() at the end of each test doesn't wait up to half a second
+        threading.Thread(target=self._server.serve_forever, args=(0.05,), daemon=True).start()
 
     def close(self):
         self._server.shutdown()
@@ -381,6 +387,9 @@ def open_site(needs_edge, pdf_server):
             site.use(pdf_server, pdfs or {})
             ctx.route("**/*", site.handle)
             ctx.set_default_timeout(3_000)
+            # Page loads get longer: a just-started Edge is slow to load its first page
+            # when other tests are starting theirs. No test expects a load to time out
+            ctx.set_default_navigation_timeout(15_000)
             return ctx.new_page()
         yield opened
         edge.close()
@@ -425,8 +434,7 @@ def test_sign_out_reaches_the_sign_in_server(open_site):
 
 def test_a_bot_check_refusal_fails_at_once_without_trying_again(open_site):
     site = FakeSite(auth_server=True, refuse_with=CAPTCHA_FAILED)
-    slow = Timeouts(field=2_000, after_submit=60_000, mfa_settle_s=0.3, mfa=1_500, menu=500,
-                    sign_out=1_500)
+    slow = replace(FAST, after_submit=60_000)
     started = time.monotonic()
     with pytest.raises(LoginError, match="bot check") as caught:
         sign_in(open_site(site), SITE, CRED, slow)
@@ -462,8 +470,7 @@ def test_a_bot_check_waits_for_a_person_when_asked_to(open_site, site):
 def test_a_bot_check_fails_when_nobody_signs_in(open_site):
     site = FakeSite(auth_server=True, refuse_with=CAPTCHA_FAILED)
     calls = []
-    short = Timeouts(field=2_000, after_submit=2_000, mfa_settle_s=0.3, mfa=1_500, menu=500,
-                     sign_out=1_500, person=1_000)
+    short = replace(REJECTED, person=1_000)
     with pytest.raises(LoginError, match="nobody signed in by hand"):
         sign_in(open_site(site), SITE, CRED, short, wait_for_person=lambda: calls.append("asked"))
     assert calls == ["asked"]
@@ -488,7 +495,7 @@ def test_an_app_that_never_shows_its_menu_isnt_signed_in(open_site):
     site = FakeSite(auth_server=True)
     site._pass_through = lambda route, url: site._html(route, "<p>Loading</p>")
     with pytest.raises(LoginError, match="neither the sign-in form nor the app"):
-        sign_in(open_site(site), SITE, CRED, FAST)
+        sign_in(open_site(site), SITE, CRED, NO_FORM)
     assert site.logins == []
 
 
@@ -509,7 +516,7 @@ def test_a_visible_challenge_fails_without_sending_anything(open_site):
 def test_a_rejected_password_is_sent_only_once_and_stays_out_of_the_message(open_site):
     site = FakeSite(reject=True)
     with pytest.raises(LoginError, match="did not accept") as caught:
-        sign_in(open_site(site), SITE, CRED, FAST)
+        sign_in(open_site(site), SITE, CRED, REJECTED)
     assert len(site.logins) == 1
     assert CRED.password not in str(caught.value)
 
@@ -657,6 +664,9 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch, pdf_of):
                 user_data_dir=str(profile), channel="msedge", headless=True, accept_downloads=True)
             ctx.route("**/*", site.handle)
             ctx.set_default_timeout(3_000)
+            # Page loads get longer: a just-started Edge is slow to load its first page
+            # when other tests are starting theirs. No test expects a load to time out
+            ctx.set_default_navigation_timeout(15_000)
             return ctx
         return launch_edge
 
@@ -667,7 +677,8 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch, pdf_of):
         site.use(pdf_server, pdfs if files is None else files)
         monkeypatch.setattr(session, "launch_edge", launch(site))
         monkeypatch.setattr(capture_module, "launch_edge", launch(site))
-        monkeypatch.setattr(login_module, "Timeouts", lambda: FAST)
+        monkeypatch.setattr(login_module, "Timeouts",
+                            lambda: REJECTED if site.reject else FAST)
         monkeypatch.setattr(statements_fetch, "PAGE_TIMEOUT_MS", 2_000)
         monkeypatch.setattr(statements_fetch, "DOWNLOAD_TIMEOUT_MS", 1_500)
         monkeypatch.setattr(gl_fetch, "PAGE_TIMEOUT_MS", 2_000)

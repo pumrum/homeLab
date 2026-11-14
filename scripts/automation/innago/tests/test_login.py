@@ -216,7 +216,8 @@ class PdfServer:
 
         self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.base = f"http://127.0.0.1:{self._server.server_port}"
-        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+        # A short poll, so shutdown() at the end of each test doesn't wait up to half a second
+        threading.Thread(target=self._server.serve_forever, args=(0.05,), daemon=True).start()
 
     def close(self):
         self._server.shutdown()
@@ -536,15 +537,18 @@ def test_a_short_list_is_filtered_to_this_month_by_due_date(open_site, pdf_of):
     assert page.evaluate("window.filtersApplied") is True  # only with every value right
 
 
-def test_a_list_still_short_after_filtering_reports_what_it_has(open_site, pdf_of):
-    # The wrong month for the fake site, so its filter doesn't bring the other row back
+def test_a_list_still_short_after_filtering_reports_what_it_has(open_site, pdf_of, monkeypatch):
+    # The wrong month for the fake site, so its filter doesn't bring the other row back.
+    # The list never fills, so the run waits out the whole settle time: keep it short
+    monkeypatch.setattr(invoices_fetch, "SETTLE_TIMEOUT_MS", 2_000)
     _, _, source = _opened_list(open_site, [pdf_of(), pdf_of()], filtered_out=True)
     assert source.open(today=dt.date(2026, 10, 5)) == 1
 
 
 def test_a_download_never_runs_until_the_heading_shows_the_invoice(
         open_site, pdf_server, pdf_of, tmp_path, monkeypatch):
-    monkeypatch.setattr(invoices_fetch, "PAGE_TIMEOUT_MS", 1_000)
+    # Short, since the wrong heading waits it out, but long enough for the page itself to load
+    monkeypatch.setattr(invoices_fetch, "PAGE_TIMEOUT_MS", 3_000)
     _, _, source = _opened_list(open_site, [pdf_of(), pdf_of()], heading="a different invoice")
     source.open()
     with pytest.raises(AssertionError):
@@ -622,6 +626,9 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch):
             ctx.route("**/*", site.handle)
             ctx.add_cookies([SESSION_COOKIE | {"url": pdf_server.base}])
             ctx.set_default_timeout(3_000)
+            # Page loads get longer: a just-started Edge is slow to load its first page
+            # when other tests are starting theirs. No test expects a load to time out
+            ctx.set_default_navigation_timeout(15_000)
             return ctx
         return launch_edge
 
