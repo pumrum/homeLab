@@ -128,6 +128,14 @@ checks the CSV, saves it, and writes it to the account's tab. Then it signs out.
   `start_cell` down, across exactly as many columns as the CSV has, then writes the rows there.
   Columns beside the block are never touched. Nothing is appended or compared, so running again
   the same day, or from another machine, just repeats the overwrite.
+- **A workbook can show when it was refreshed,** as buildium's dashboard does. Give its
+  `[sheets.<name>]` block an `updated_tab` and `updated_cell`. Once every account this run
+  writes to that workbook has written, the cell gets the run's start time, the time in the run
+  folder's name, so `runs\20261113_143342` writes `2026-11-13 14:33:42`. It's a real date and
+  time, shown as `yyyy-mm-dd hh:mm:ss`, so the sheet can compare it. If any of those accounts
+  failed, the cell keeps its older time, so it always says when the whole workbook was last
+  refreshed. `--dump` and `--download-only` never change it. The cell must already exist in the
+  tab.
 - **Every run saves a new CSV** per account in `C:\automation\bank1\data\activity\`, named as the
   old process named them, with the run's start time:
   `<abbreviation>_<suffix>_<yyyymmdd-HHmmss>_Activity.csv`, like
@@ -171,7 +179,8 @@ never changes it. The selectors are in `activity_fetch.py`.
 | The File type shows something other than a CSV | That account fails before Download. `FAIL` |
 | Download sends nothing within 60 seconds | That account fails. `FAIL` |
 | The CSV's columns changed, it's empty, or a row is out of range | Not saved or written. That account fails, and the file stays in `downloads\`. `FAIL` |
-| The sheet write fails | The CSV is still saved. That account fails. `FAIL` |
+| The sheet write fails | The CSV is still saved. That account fails, and its workbook's update time stays as it was. `FAIL` |
+| A workbook's update time can't be written | Its rows are already written, so it keeps the new rows with the old time. `FAIL` |
 | `activity_start` is after today | That account fails before its page opens. `FAIL` |
 | Sign-in, verification, or credential problems | As for `bank1-statements`: nothing is tried, and no file or sheet is touched |
 
@@ -238,6 +247,7 @@ words come from that test.
 - A full run on the test workstation writing to test copies of the three workbooks: each
   account's block replaced from its start cell across only its columns, numbers and dates stored
   as values with no leading `'`, and the sheets' own formulas still working
+- Each test workbook's update cell getting the run's start time on the test workstation
 
 **Not yet run:**
 

@@ -127,6 +127,10 @@ suffix = "<last four digits>"
 # email as an Editor. On the test workstation, point these at test copies, never the live ones
 [sheets.recon]
 spreadsheet_id = "<spreadsheet id, from its address>"
+# Optional, together: once every account writing to this workbook has written, this cell gets
+# the run's start time, the time in the run folder's name, shown like 2026-11-13 14:33:42.
+# updated_tab = "<tab in this workbook>"
+# updated_cell = "<cell, like B2>"
 
 # Optional: the push notifications' words. Leave a block or line out to keep what's shown
 # here. Any of these can go in {braces}: {command}, {process}, {run_id}, {ok}, {unchanged},

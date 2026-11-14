@@ -127,7 +127,9 @@ def test_activity_settings_load_with_and_without_a_sheet():
     destination = cfg.accounts[0].activity.destination
     assert (destination.sheet, destination.spreadsheet_id, destination.tab,
             destination.start_cell) == ("recon", "made-up-spreadsheet-id", "Recon 1", "A5")
-    assert cfg.sheets == {"recon": "made-up-spreadsheet-id"}
+    workbook = cfg.sheets["recon"]
+    assert (workbook.name, workbook.spreadsheet_id) == ("recon", "made-up-spreadsheet-id")
+    assert workbook.updated_tab is None and workbook.updated_cell is None
 
 
 def test_activity_reprs_never_show_private_values():
@@ -189,3 +191,21 @@ def test_the_example_shows_activity_for_some_accounts_and_its_workbooks():
     with_activity = [a for a in example["accounts"] if "activity_url" in a]
     assert {a["kind"] for a in with_activity} == {"checking", "card"}
     assert any("activity_sheet" not in a for a in with_activity)
+
+
+def test_a_workbook_can_have_an_update_cell():
+    sheets = {"recon": SHEETS["recon"] | {"updated_tab": "Dashboard", "updated_cell": "B2"}}
+    workbook = parse_config(doc() | {"sheets": sheets}).sheets["recon"]
+    assert (workbook.updated_tab, workbook.updated_cell) == ("Dashboard", "B2")
+    assert "Dashboard" not in repr(workbook) and "made-up" not in repr(workbook)
+
+
+@pytest.mark.parametrize(("extra", "message"), [
+    ({"updated_tab": "Dashboard"}, "go together"),
+    ({"updated_cell": "B2"}, "go together"),
+    ({"updated_tab": "Dashboard", "updated_cell": "b2"}, "a cell like"),
+    ({"updated_tab": "<tab>", "updated_cell": "B2"}, "placeholder"),
+])
+def test_a_bad_update_cell_fails_clearly(extra, message):
+    with pytest.raises(ConfigError, match=message):
+        parse_config(doc() | {"sheets": {"recon": SHEETS["recon"] | extra}})

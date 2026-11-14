@@ -59,6 +59,19 @@ class Site:
 
 
 @dataclass(frozen=True)
+class Workbook:
+    """A Google Sheet that activity goes to, named once under [sheets]."""
+
+    name: str  # neutral, so it can be logged
+    spreadsheet_id: str
+    updated_tab: str | None = None  # optional: where the run's start time goes, once every
+    updated_cell: str | None = None  # account writing to this workbook has written
+
+    def __repr__(self) -> str:  # never show the private values, even in a traceback
+        return f"Workbook({self.name!r})"
+
+
+@dataclass(frozen=True)
 class Destination:
     """Where an account's activity goes: a tab of a workbook named in [sheets], from a cell."""
 
@@ -102,7 +115,7 @@ class Config:
     site: Site
     accounts: tuple[Account, ...]
     notifications: Mapping[str, Template] = field(default_factory=lambda: NOTIFICATIONS)
-    sheets: Mapping[str, str] = field(default_factory=dict)  # workbook name: spreadsheet ID
+    sheets: Mapping[str, Workbook] = field(default_factory=dict)  # by name
 
 
 def _text(table: Mapping[str, Any], key: str, where: str) -> str:
@@ -129,7 +142,26 @@ def _date(table: Mapping[str, Any], key: str, where: str) -> dt.date:
         raise ConfigError(f'{where}: "{key}" must be a date like "2025-07-01"') from None
 
 
-def _sheets(doc: Mapping[str, Any]) -> dict[str, str]:
+def _cell(table: Mapping[str, Any], key: str, where: str) -> str:
+    cell = _text(table, key, where)
+    if not _CELL.match(cell):
+        raise ConfigError(f'{where}: "{key}" must be a cell like "A5"')
+    return cell
+
+
+def _workbook(name: str, table: Mapping[str, Any], where: str) -> Workbook:
+    reject_unknown_keys(table, {"spreadsheet_id", "updated_tab", "updated_cell"}, where)
+    spreadsheet_id = _text(table, "spreadsheet_id", where)
+    present = ["updated_tab" in table, "updated_cell" in table]
+    if not any(present):
+        return Workbook(name, spreadsheet_id)
+    if not all(present):
+        raise ConfigError(f'{where}: "updated_tab" and "updated_cell" go together')
+    return Workbook(name, spreadsheet_id, _text(table, "updated_tab", where),
+                    _cell(table, "updated_cell", where))
+
+
+def _sheets(doc: Mapping[str, Any]) -> dict[str, Workbook]:
     """[sheets.<name>] blocks: each workbook once, with its private spreadsheet ID."""
     sheets = doc.get("sheets", {})
     if not isinstance(sheets, dict):
@@ -141,12 +173,11 @@ def _sheets(doc: Mapping[str, Any]) -> dict[str, str]:
             raise ConfigError(f"{where}: the name can only use lowercase letters, digits, or _")
         if not isinstance(table, dict):
             raise ConfigError(f"{where} must be a table")
-        reject_unknown_keys(table, {"spreadsheet_id"}, where)
-        found[name] = _text(table, "spreadsheet_id", where)
+        found[name] = _workbook(name, table, where)
     return found
 
 
-def _destination(table: Any, sheets: Mapping[str, str], where: str) -> Destination:
+def _destination(table: Any, sheets: Mapping[str, Workbook], where: str) -> Destination:
     where = f"{where} activity_sheet"
     if not isinstance(table, dict):
         raise ConfigError(f"{where} must be a table")
@@ -154,13 +185,11 @@ def _destination(table: Any, sheets: Mapping[str, str], where: str) -> Destinati
     sheet = _text(table, "sheet", where)
     if sheet not in sheets:
         raise ConfigError(f'{where}: "sheet" must name a [sheets.<name>] block')
-    cell = _text(table, "start_cell", where)
-    if not _CELL.match(cell):
-        raise ConfigError(f'{where}: "start_cell" must be a cell like "A5"')
-    return Destination(sheet, sheets[sheet], _text(table, "tab", where), cell)
+    cell = _cell(table, "start_cell", where)
+    return Destination(sheet, sheets[sheet].spreadsheet_id, _text(table, "tab", where), cell)
 
 
-def _activity(table: Mapping[str, Any], sheets: Mapping[str, str],
+def _activity(table: Mapping[str, Any], sheets: Mapping[str, Workbook],
               where: str) -> Activity | None:
     if "activity_url" not in table:
         for key in ("activity_start", "activity_sheet", "abbreviation"):
@@ -177,7 +206,8 @@ def _activity(table: Mapping[str, Any], sheets: Mapping[str, str],
                     destination, abbreviation)
 
 
-def _account(table: Mapping[str, Any], number: int, sheets: Mapping[str, str]) -> Account:
+def _account(table: Mapping[str, Any], number: int,
+             sheets: Mapping[str, Workbook]) -> Account:
     where = f"[[accounts]] number {number}"
     reject_unknown_keys(table, _ACCOUNT_KEYS, where)
     label = _text(table, "label", where)

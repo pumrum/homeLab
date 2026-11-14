@@ -6,7 +6,13 @@ from decimal import Decimal
 
 import pytest
 
-from bank1_portal.activity_sheet import DATE_PATTERN, sheet_block, sheet_cell
+from bank1_portal.activity_sheet import (
+    DATE_PATTERN,
+    sheet_block,
+    sheet_cell,
+    workbooks_to_stamp,
+)
+from bank1_portal.config import parse_config
 
 
 @pytest.mark.parametrize(("value", "stored"), [
@@ -51,3 +57,41 @@ def test_a_card_block_formats_both_date_columns():
     _, date_columns = sheet_block([["11/09/2026", "11/10/2026", "EXAMPLE STORE", "Shopping",
                                     "Sale", "-20.00", ""]])
     assert date_columns == {0: DATE_PATTERN, 1: DATE_PATTERN}
+
+
+def _stamp_cfg():
+    def account(n, label, sheet=None):
+        entry = {"label": label, "kind": "checking", "suffix": f"111{n}",
+                 "statements_url": f"https://bank.example.invalid/s/{n}",
+                 "activity_url": f"https://bank.example.invalid/a/{n}",
+                 "activity_start": "2026-07-01", "abbreviation": f"A{n}"}
+        if sheet:
+            entry["activity_sheet"] = {"sheet": sheet, "tab": f"T{n}", "start_cell": "A5"}
+        return entry
+    stamped = {"updated_tab": "Dashboard", "updated_cell": "B2"}
+    return parse_config({
+        "site": {"login_url": "https://bank.example.invalid/logon", "name_in_files": "FakeBank"},
+        "sheets": {"one": {"spreadsheet_id": "id-1"} | stamped,
+                   "two": {"spreadsheet_id": "id-2"} | stamped,
+                   "plain": {"spreadsheet_id": "id-3"},
+                   "unused": {"spreadsheet_id": "id-4"} | stamped},
+        "accounts": [account(1, "a1", "one"), account(2, "a2", "one"), account(3, "a3", "two"),
+                     account(4, "a4", "plain"), account(5, "a5")]})
+
+
+def _decisions(ok, labels=None):
+    cfg = _stamp_cfg()
+    accounts = [a for a in cfg.accounts if labels is None or a.label in labels]
+    found = workbooks_to_stamp(cfg.sheets, accounts, ok)
+    return {workbook.name: stamp for workbook, stamp in found}
+
+
+def test_a_workbook_is_stamped_only_when_every_account_writing_to_it_did():
+    assert _decisions({"a1", "a2", "a3", "a4", "a5"}) == {"one": True, "two": True}
+    assert _decisions({"a1", "a3"}) == {"one": False, "two": True}
+    assert _decisions(set()) == {"one": False, "two": False}
+
+
+def test_only_the_accounts_in_this_run_count():
+    assert _decisions({"a1"}, labels={"a1"}) == {"one": True}
+    assert _decisions({"a5"}, labels={"a5"}) == {}

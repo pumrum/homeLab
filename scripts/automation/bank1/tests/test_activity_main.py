@@ -22,7 +22,7 @@ CREDIT,07/01/2026,EXAMPLE DEPOSIT,500.00,ACH_CREDIT,112.50,
 """
 
 
-def _cfg():
+def _cfg(recon=None):
     accounts = []
     for n, (label, kind, activity) in enumerate([
             ("entity1_checking", "checking", "sheet"),
@@ -41,7 +41,7 @@ def _cfg():
         accounts.append(account)
     return parse_config({"site": {"login_url": "https://bank.example.invalid/logon",
                                   "name_in_files": "FakeBank"},
-                         "sheets": {"recon": {"spreadsheet_id": "made-up-id"}},
+                         "sheets": {"recon": {"spreadsheet_id": "made-up-id"} | (recon or {})},
                          "accounts": accounts})
 
 
@@ -56,9 +56,11 @@ def run(tmp_path):
 
 
 class FakeBook:
-    def __init__(self, fail=False):
+    def __init__(self, fail=False, stamp_fails=False):
         self.writes = []
+        self.stamps = []
         self.fail = fail
+        self.stamp_fails = stamp_fails
 
     def open(self, spreadsheet_id, tab, masker):
         book = self
@@ -70,6 +72,11 @@ class FakeBook:
                     raise SheetError("Google Sheets error 500 writing to the sheet")
                 book.writes.append((spreadsheet_id, tab, start_cell, rows, width))
                 book.date_columns = date_columns
+
+            def write_cell(self, cell, value, pattern=None):
+                if book.stamp_fails:
+                    raise SheetError("Google Sheets error 500 writing to the sheet")
+                book.stamps.append((spreadsheet_id, tab, cell, value, pattern))
         return Tab()
 
 
@@ -231,3 +238,43 @@ def test_the_report_never_shows_a_tab_name_or_spreadsheet_id(run, tmp_path, site
                    FakeBook(fail=True).open)
     shown = json.dumps([item.detail for item in run.summary.items])
     assert "Tab " not in shown and "made-up-id" not in shown
+
+
+# ---------------------------------------------- the workbooks' update time
+
+def _stamped_cfg():
+    return _cfg({"updated_tab": "Dash", "updated_cell": "B2"})
+
+
+def _record(run, label, status):
+    run.summary.record("activity", label, status, "")
+
+
+def test_a_workbook_gets_the_runs_start_time_once_its_accounts_all_wrote(run):
+    cfg, book = _stamped_cfg(), FakeBook()
+    for label in ("entity1_checking", "personal_card_1"):
+        _record(run, label, Status.OK)
+    activity_main.stamp_stage(run, cfg, cfg.accounts, book.open)
+    assert book.stamps == [("made-up-id", "Dash", "B2", run.summary.started_at,
+                            "yyyy-mm-dd hh:mm:ss")]
+    assert _item(run).status is Status.OK
+    assert _item(run).detail == f"updated {run.summary.started_at:%Y-%m-%d %H:%M:%S}"
+
+
+def test_one_failed_account_leaves_its_workbooks_time_alone(run):
+    cfg, book = _stamped_cfg(), FakeBook()
+    _record(run, "entity1_checking", Status.OK)
+    _record(run, "personal_card_1", Status.FAILED)
+    activity_main.stamp_stage(run, cfg, cfg.accounts, book.open)
+    assert book.stamps == []
+    assert _item(run).status is Status.UNCHANGED and "failed" in _item(run).detail
+
+
+def test_a_failed_stamp_fails_the_run_but_keeps_the_rows(run):
+    cfg, book = _stamped_cfg(), FakeBook(stamp_fails=True)
+    for label in ("entity1_checking", "personal_card_1"):
+        _record(run, label, Status.OK)
+    activity_main.stamp_stage(run, cfg, cfg.accounts, book.open)
+    assert _item(run).status is Status.FAILED
+    assert _item(run).detail.startswith("the rows were written, but not the update time")
+    assert "Dash" not in _item(run).detail and "made-up-id" not in _item(run).detail
