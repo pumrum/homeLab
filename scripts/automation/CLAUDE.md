@@ -227,12 +227,23 @@ Use these from `automation_common` instead of writing your own:
   synthetic fixtures only (e.g. a made-up HTML page mirroring the real
   structure). No test touches the network or a real site.
 - Don't run anything against real sites unless asked.
-- The full suite takes 15 minutes or more. Run all of it only when `README.md`'s "Set up and
-  test" says to; while iterating, run only the tests for the code you changed.
-- In CI, a PR or a merge to `main` only runs the unit tests if it changes a non-doc file
-  in this tree or `.github/workflows/checks.yml`. Anything else skips them, while
-  `pre-commit` always runs. `Checks` doesn't run on a pushed branch until it has a PR, so
-  run the tests locally before relying on it.
+- The full suite takes about 7 minutes. Before a PR, run the tests `README.md`'s "Set up
+  and test" says to: each changed automation's own, or all of them for a change to `common/`
+  or the workspace. While iterating, run only the tests for the code you changed.
+- Tests run in parallel, so a busy machine can be slow to load a page. In a test:
+  - Keep waits roomy: each ends as soon as what it waits for shows up. The flow tests'
+    `FAST` timeouts and `ROOMY_MS` are roomy. A test that waits one out on purpose (a wrong
+    password, a sign-out that fails, a file that never arrives) shortens just that one: a
+    `replace(FAST, ...)` copy with `SHORT`'s value, like `REJECTED`, or `waits_out=` naming
+    the fetch module's wait in a whole run. Otherwise it takes the full roomy time.
+  - A fake site must not race the run. Something that should happen only after the run has
+    noticed a page, like approving a push, starts from the run's callback, not from a timer
+    that starts when the page loads.
+- In CI, a PR or a merge to `main` runs the tests of each automation it changes. A change to
+  `common/`, `pyproject.toml`, `uv.lock`, `.github/workflows/checks.yml`, or a folder with no
+  `tests` runs them all; docs and `tools/` alone run none. `pre-commit` always runs.
+  `Checks` doesn't run on a pushed branch until it has a PR, so run the tests locally before
+  relying on it.
 
 ## Versions, branches, and releases
 

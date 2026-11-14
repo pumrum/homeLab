@@ -117,7 +117,8 @@ class Site:
 
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.base = f"http://127.0.0.1:{self.server.server_port}"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        # A short poll, so shutdown() at the end of each test doesn't wait up to half a second
+        threading.Thread(target=self.server.serve_forever, args=(0.05,), daemon=True).start()
 
 
 @pytest.fixture(scope="module")

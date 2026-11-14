@@ -10,6 +10,7 @@ import http.server
 import json
 import threading
 import time
+from dataclasses import replace
 from decimal import Decimal
 from types import SimpleNamespace
 from urllib.parse import urlsplit
@@ -54,8 +55,22 @@ APP_LOGIN = "/manager/app/login"
 APP_RETURN = "/manager/app/login/redirect"
 SITE = Site(f"{HOST}{LOGIN}")
 CRED = Credential("one@example.invalid", "made-up-password")
-FAST = Timeouts(field=2_000, after_submit=2_000, mfa_settle_s=0.3, mfa=1_500, menu=500,
-                sign_out=1_500)
+# Tests run in parallel, so a busy machine can be slow to show a page. FAST's waits are roomy:
+# each ends as soon as what it waits for shows up. A test that waits one out on purpose uses
+# SHORT's value for just that one, so it doesn't take the full roomy time. menu is each try of
+# a click that's retried, so it keeps the real value
+FAST = Timeouts(field=10_000, after_submit=10_000, mfa_settle_s=0.3, mfa=10_000, menu=3_000,
+                sign_out=10_000)
+SHORT = Timeouts(field=2_000, after_submit=2_000, mfa_settle_s=0.3, mfa=1_500, menu=500,
+                 sign_out=1_500)
+NO_FORM = replace(FAST, field=SHORT.field)
+REJECTED = replace(FAST, after_submit=SHORT.after_submit)
+NO_MFA = replace(FAST, mfa=SHORT.mfa)
+NO_SIGN_OUT = replace(FAST, sign_out=SHORT.sign_out)
+# The same for the fetch modules' waits and the browser's actions: roomy, unless a whole run
+# names a wait it runs out in waits_out
+ROOMY_MS = 10_000
+FETCH_WAITS = {"PAGE_TIMEOUT_MS": 2_000, "DOWNLOAD_TIMEOUT_MS": 1_500}
 TODAY = dt.date(2026, 11, 5)
 ONE = "FakeEntity One, LLC"
 TWO = "FakeEntity Two, LLC"
@@ -230,7 +245,8 @@ class PdfServer:
 
         self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.base = f"http://127.0.0.1:{self._server.server_port}"
-        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+        # A short poll, so shutdown() at the end of each test doesn't wait up to half a second
+        threading.Thread(target=self._server.serve_forever, args=(0.05,), daemon=True).start()
 
     def close(self):
         self._server.shutdown()
@@ -380,7 +396,10 @@ def open_site(needs_edge, pdf_server):
             ctx = edge.new_context(accept_downloads=True)
             site.use(pdf_server, pdfs or {})
             ctx.route("**/*", site.handle)
-            ctx.set_default_timeout(3_000)
+            ctx.set_default_timeout(ROOMY_MS)
+            # Page loads get longer: a just-started Edge is slow to load its first page
+            # when other tests are starting theirs. No test expects a load to time out
+            ctx.set_default_navigation_timeout(15_000)
             return ctx.new_page()
         yield opened
         edge.close()
@@ -425,8 +444,7 @@ def test_sign_out_reaches_the_sign_in_server(open_site):
 
 def test_a_bot_check_refusal_fails_at_once_without_trying_again(open_site):
     site = FakeSite(auth_server=True, refuse_with=CAPTCHA_FAILED)
-    slow = Timeouts(field=2_000, after_submit=60_000, mfa_settle_s=0.3, mfa=1_500, menu=500,
-                    sign_out=1_500)
+    slow = replace(FAST, after_submit=60_000)
     started = time.monotonic()
     with pytest.raises(LoginError, match="bot check") as caught:
         sign_in(open_site(site), SITE, CRED, slow)
@@ -462,8 +480,7 @@ def test_a_bot_check_waits_for_a_person_when_asked_to(open_site, site):
 def test_a_bot_check_fails_when_nobody_signs_in(open_site):
     site = FakeSite(auth_server=True, refuse_with=CAPTCHA_FAILED)
     calls = []
-    short = Timeouts(field=2_000, after_submit=2_000, mfa_settle_s=0.3, mfa=1_500, menu=500,
-                     sign_out=1_500, person=1_000)
+    short = replace(REJECTED, person=1_000)
     with pytest.raises(LoginError, match="nobody signed in by hand"):
         sign_in(open_site(site), SITE, CRED, short, wait_for_person=lambda: calls.append("asked"))
     assert calls == ["asked"]
@@ -488,7 +505,7 @@ def test_an_app_that_never_shows_its_menu_isnt_signed_in(open_site):
     site = FakeSite(auth_server=True)
     site._pass_through = lambda route, url: site._html(route, "<p>Loading</p>")
     with pytest.raises(LoginError, match="neither the sign-in form nor the app"):
-        sign_in(open_site(site), SITE, CRED, FAST)
+        sign_in(open_site(site), SITE, CRED, NO_FORM)
     assert site.logins == []
 
 
@@ -509,7 +526,7 @@ def test_a_visible_challenge_fails_without_sending_anything(open_site):
 def test_a_rejected_password_is_sent_only_once_and_stays_out_of_the_message(open_site):
     site = FakeSite(reject=True)
     with pytest.raises(LoginError, match="did not accept") as caught:
-        sign_in(open_site(site), SITE, CRED, FAST)
+        sign_in(open_site(site), SITE, CRED, REJECTED)
     assert len(site.logins) == 1
     assert CRED.password not in str(caught.value)
 
@@ -526,7 +543,7 @@ def test_a_session_left_open_is_signed_out_first(open_site):
 def test_a_session_that_wont_sign_out_is_not_used(open_site):
     site = FakeSite(signed_in_as="two@example.invalid", sign_out_works=False)
     with pytest.raises(SignOutError):
-        sign_in(open_site(site), SITE, CRED, FAST)
+        sign_in(open_site(site), SITE, CRED, NO_SIGN_OUT)
     assert site.logins == []
 
 
@@ -549,7 +566,7 @@ def test_mfa_notifies_once_and_continues_when_the_link_is_opened(open_site):
 def test_mfa_times_out_after_notifying(open_site):
     calls = []
     with pytest.raises(LoginError, match="MFA was not completed"):
-        sign_in(open_site(FakeSite(mfa=True)), SITE, CRED, FAST,
+        sign_in(open_site(FakeSite(mfa=True)), SITE, CRED, NO_MFA,
                 on_mfa=lambda: calls.append("notified"))
     assert calls == ["notified"]
 
@@ -574,7 +591,8 @@ def test_sign_out_works_with_something_on_top_of_it(open_site, cover):
     site = FakeSite(sign_out_cover=cover)
     page = open_site(site)
     sign_in(page, SITE, CRED, FAST)
-    sign_out(page, SITE, FAST)
+    # A click on the cover waits out sign_out before the next way of clicking
+    sign_out(page, SITE, NO_SIGN_OUT)
     assert site.user is None
     assert classify(page.url, SITE.login_url) is Step.LOGIN
 
@@ -584,7 +602,7 @@ def test_sign_out_that_stays_in_the_app_fails(open_site):
     page = open_site(site)
     sign_in(page, SITE, CRED, FAST)
     with pytest.raises(SignOutError, match="still in the app"):
-        sign_out(page, SITE, FAST)
+        sign_out(page, SITE, NO_SIGN_OUT)
 
 
 def test_sign_out_works_from_a_page_outside_the_app(open_site):
@@ -607,7 +625,7 @@ def test_sign_out_with_no_session_has_nothing_to_do(open_site):
 
 def test_the_statement_comes_from_only_the_exact_menu_item(open_site, pdf_server, pdf_of,
                                                            tmp_path, monkeypatch):
-    monkeypatch.setattr(statements_fetch, "PAGE_TIMEOUT_MS", 2_000)
+    monkeypatch.setattr(statements_fetch, "PAGE_TIMEOUT_MS", ROOMY_MS)
     pdf = pdf_of()
     site = FakeSite()
     page = open_site(site, {"/one.pdf": pdf})
@@ -656,22 +674,24 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch, pdf_of):
             ctx = pw.chromium.launch_persistent_context(
                 user_data_dir=str(profile), channel="msedge", headless=True, accept_downloads=True)
             ctx.route("**/*", site.handle)
-            ctx.set_default_timeout(3_000)
+            ctx.set_default_timeout(ROOMY_MS)
+            # Page loads get longer: a just-started Edge is slow to load its first page
+            # when other tests are starting theirs. No test expects a load to time out
+            ctx.set_default_navigation_timeout(15_000)
             return ctx
         return launch_edge
 
     notes = []
     pdfs = {"/one.pdf": pdf_of(owner=ONE), "/two.pdf": pdf_of(owner=TWO)}
 
-    def start(site, *args, files=None, command=main):
+    def start(site, *args, files=None, command=main, timeouts=FAST, waits_out=()):
         site.use(pdf_server, pdfs if files is None else files)
         monkeypatch.setattr(session, "launch_edge", launch(site))
         monkeypatch.setattr(capture_module, "launch_edge", launch(site))
-        monkeypatch.setattr(login_module, "Timeouts", lambda: FAST)
-        monkeypatch.setattr(statements_fetch, "PAGE_TIMEOUT_MS", 2_000)
-        monkeypatch.setattr(statements_fetch, "DOWNLOAD_TIMEOUT_MS", 1_500)
-        monkeypatch.setattr(gl_fetch, "PAGE_TIMEOUT_MS", 2_000)
-        monkeypatch.setattr(gl_fetch, "DOWNLOAD_TIMEOUT_MS", 1_500)
+        monkeypatch.setattr(login_module, "Timeouts", lambda: timeouts)
+        for module in (statements_fetch, gl_fetch):
+            for name, short in FETCH_WAITS.items():
+                monkeypatch.setattr(module, name, short if name in waits_out else ROOMY_MS)
         return command(list(args), notifier=lambda note, masker: notes.append(note) or True,
                        today=TODAY)
 
@@ -743,7 +763,7 @@ def test_a_second_run_overwrites_the_first(whole_run, pdf_of):
 
 def test_mfa_sends_a_push_naming_the_abbreviation_and_saves_a_screenshot(whole_run):
     site = FakeSite(mfa={"one@example.invalid"})
-    assert whole_run.start(site) == 1
+    assert whole_run.start(site, timeouts=NO_MFA) == 1
     assert whole_run.notes[0] == {"title": "buildium-statements",
                                   "message": "ONELLC: MFA link needed"}
     assert whole_run.notes[-1]["message"] == "FAIL: MFA needed"
@@ -763,7 +783,7 @@ message = "Open the link for {key}"
 [notifications.mfa_failed]
 message = "{failed} of {total} failed"
 ''')
-    assert whole_run.start(FakeSite(mfa={"one@example.invalid"})) == 1
+    assert whole_run.start(FakeSite(mfa={"one@example.invalid"}), timeouts=NO_MFA) == 1
     assert whole_run.notes[0] == {"title": "ONELLC needs you",
                                   "message": "Open the link for entity1"}
     assert whole_run.notes[-1]["title"] == "buildium-statements"
@@ -772,13 +792,13 @@ message = "{failed} of {total} failed"
 
 def test_an_mfa_failure_doesnt_stop_the_next_entity(whole_run):
     site = FakeSite(mfa={"one@example.invalid"})
-    assert whole_run.start(site) == 1
+    assert whole_run.start(site, timeouts=NO_MFA) == 1
     assert _saved(whole_run.data) == [TWO_FILE]
     assert "not processed: sign-in failed" in _report(whole_run.data)
 
 
 def test_a_wrong_password_saves_a_screenshot_and_no_trace(whole_run):
-    assert whole_run.start(FakeSite(reject=True)) == 1
+    assert whole_run.start(FakeSite(reject=True), timeouts=REJECTED) == 1
     run_dir = _run_dir(whole_run.data)
     assert (run_dir / "fail_01.png").exists()
     assert (run_dir / "fail_02.png").exists()  # each entity's own
@@ -810,7 +830,8 @@ def test_a_bad_statement_doesnt_replace_a_good_one(whole_run, pdf_of):
 
 
 def test_a_pdf_that_never_arrives_saves_a_screenshot_and_continues(whole_run, pdf_of):
-    assert whole_run.start(FakeSite(), files={"/two.pdf": pdf_of(owner=TWO)}) == 1
+    assert whole_run.start(FakeSite(), files={"/two.pdf": pdf_of(owner=TWO)},
+                           waits_out={"DOWNLOAD_TIMEOUT_MS"}) == 1
     assert _saved(whole_run.data) == [TWO_FILE]
     assert (_run_dir(whole_run.data) / "fail_01.png").exists()
     assert "no PDF arrived" in _report(whole_run.data)
@@ -819,7 +840,7 @@ def test_a_pdf_that_never_arrives_saves_a_screenshot_and_continues(whole_run, pd
 def test_a_failed_sign_out_stops_the_rest_and_saves_a_screenshot(whole_run):
     # It can't tell who's still signed in, so nothing more is done in this browser
     site = FakeSite(sign_out_works=False)
-    assert whole_run.start(site) == 1
+    assert whole_run.start(site, timeouts=NO_SIGN_OUT) == 1
     assert _saved(whole_run.data) == [ONE_FILE]
     assert len(site.logins) == 1
     report = _report(whole_run.data)
@@ -897,9 +918,9 @@ def _ledgers(data):
 LEDGER_FILES = ["ONELLC_Accrual.csv", "ONELLC_Cash.csv", "TWOLLC_Accrual.csv", "TWOLLC_Cash.csv"]
 
 
-def _gl_run(whole_run, site, gl_csv_of, *args, files=None):
+def _gl_run(whole_run, site, gl_csv_of, *args, files=None, **options):
     files = _gl_files(gl_csv_of) if files is None else files
-    return whole_run.start(site, "--dump", *args, files=files, command=gl_main.main)
+    return whole_run.start(site, "--dump", *args, files=files, command=gl_main.main, **options)
 
 
 class FakeBook:
@@ -926,14 +947,14 @@ class FakeBook:
         return Tab()
 
 
-def _gl_write_run(whole_run, site, gl_csv_of, *args, files=None, book=None):
+def _gl_write_run(whole_run, site, gl_csv_of, *args, files=None, book=None, **options):
     book = book or FakeBook()
     files = _gl_files(gl_csv_of) if files is None else files
 
     def command(argv, **options):
         return gl_main.main(argv, open_ws=book.open, **options)
 
-    return whole_run.start(site, *args, files=files, command=command), book
+    return whole_run.start(site, *args, files=files, command=command, **options), book
 
 
 def test_a_sheet_that_wont_open_stops_the_run_before_the_site(whole_run, gl_csv_of):
@@ -964,8 +985,8 @@ def test_date_forms_cover_the_ways_a_box_can_show_a_date():
 
 
 def _gl_page(open_site, gl_csv_of, monkeypatch, site=None):
-    monkeypatch.setattr(gl_fetch, "PAGE_TIMEOUT_MS", 2_000)
-    monkeypatch.setattr(gl_fetch, "DOWNLOAD_TIMEOUT_MS", 1_500)
+    monkeypatch.setattr(gl_fetch, "PAGE_TIMEOUT_MS", ROOMY_MS)
+    monkeypatch.setattr(gl_fetch, "DOWNLOAD_TIMEOUT_MS", ROOMY_MS)
     page = open_site(site or FakeSite(), _gl_files(gl_csv_of))
     sign_in(page, SITE, CRED, FAST)
     return page
@@ -1033,7 +1054,8 @@ def test_a_missing_export_stops_the_run_and_saves_evidence(whole_run, gl_csv_of)
     site = FakeSite()
     files = _gl_files(gl_csv_of)
     del files["/one_Accrual.csv"]
-    assert _gl_run(whole_run, site, gl_csv_of, files=files) == 1
+    assert _gl_run(whole_run, site, gl_csv_of, files=files,
+                   waits_out={"DOWNLOAD_TIMEOUT_MS"}) == 1
     assert len(site.logins) == 1
     assert site.user is None
     report = _report(whole_run.data)
@@ -1047,7 +1069,7 @@ def test_a_missing_export_stops_the_run_and_saves_evidence(whole_run, gl_csv_of)
 
 def test_a_failed_sign_in_stops_the_run(whole_run, gl_csv_of):
     site = FakeSite(reject=True)
-    assert _gl_run(whole_run, site, gl_csv_of) == 1
+    assert _gl_run(whole_run, site, gl_csv_of, timeouts=REJECTED) == 1
     assert len(site.logins) == 1
     report = _report(whole_run.data)
     assert "login: entity1" in report
@@ -1058,7 +1080,7 @@ def test_a_report_that_wont_open_stops_the_run_and_saves_evidence(whole_run, gl_
                                                                   monkeypatch):
     monkeypatch.setattr(gl_fetch, "REPORT_PATH", "/manager/app/moved")
     site = FakeSite()
-    assert _gl_run(whole_run, site, gl_csv_of) == 1
+    assert _gl_run(whole_run, site, gl_csv_of, waits_out={"PAGE_TIMEOUT_MS"}) == 1
     assert len(site.logins) == 1
     assert site.user is None  # still signed out
     run_dir = _run_dir(whole_run.data)
@@ -1068,7 +1090,7 @@ def test_a_report_that_wont_open_stops_the_run_and_saves_evidence(whole_run, gl_
 
 
 def test_mfa_failing_says_so(whole_run, gl_csv_of):
-    assert _gl_run(whole_run, FakeSite(mfa=True), gl_csv_of) == 1
+    assert _gl_run(whole_run, FakeSite(mfa=True), gl_csv_of, timeouts=NO_MFA) == 1
     assert whole_run.notes[0]["message"] == "ONELLC: MFA link needed"
     assert whole_run.notes[-1] == {"title": "buildium-gl", "message": "FAIL: MFA needed"}
 
@@ -1125,7 +1147,8 @@ def test_a_normal_run_replaces_the_master_after_every_entity_worked(whole_run, g
 def test_one_entitys_failed_export_means_nothing_is_written(whole_run, gl_csv_of):
     files = _gl_files(gl_csv_of)
     del files["/two_Accrual.csv"]
-    code, book = _gl_write_run(whole_run, FakeSite(), gl_csv_of, files=files)
+    code, book = _gl_write_run(whole_run, FakeSite(), gl_csv_of, files=files,
+                               waits_out={"DOWNLOAD_TIMEOUT_MS"})
     assert code == 1
     assert book.writes == {}
     assert _ledgers(whole_run.data) == []
@@ -1156,7 +1179,8 @@ def test_a_bad_first_entity_stops_before_the_next_one_signs_in(whole_run, gl_csv
 
 
 def test_a_failed_sign_out_means_nothing_is_written(whole_run, gl_csv_of):
-    code, book = _gl_write_run(whole_run, FakeSite(sign_out_works=False), gl_csv_of)
+    code, book = _gl_write_run(whole_run, FakeSite(sign_out_works=False), gl_csv_of,
+                               timeouts=NO_SIGN_OUT)
     assert code == 1
     assert book.writes == {}
     assert "sign-out: entity1" in _report(whole_run.data)
