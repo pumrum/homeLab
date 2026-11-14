@@ -8,6 +8,7 @@ elsewhere. The classify tests run everywhere.
 import datetime as dt
 import http.server
 import threading
+from dataclasses import replace
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
@@ -30,7 +31,16 @@ ID = "https://identify.example.invalid"
 APP = "https://app.example.invalid"
 SITE = Site(f"{ID}/login", f"{APP}/")
 CRED = Credential("owner@example.invalid", "made-up-password")
-FAST = Timeouts(total_s=8, field=2_000, after_submit=2_000, mfa=1_500, settle=300)
+# Tests run in parallel, so a busy machine can be slow to show a page. FAST's waits are roomy:
+# each ends as soon as what it waits for shows up. A test that waits one out on purpose uses
+# SHORT's value for just that one, so it doesn't take the full roomy time. settle is how long
+# every sign-in watches for a passkey prompt, so it stays short
+FAST = Timeouts(total_s=30, field=10_000, after_submit=10_000, mfa=10_000, settle=300)
+SHORT = Timeouts(total_s=8, field=2_000, after_submit=2_000, mfa=1_500, settle=300)
+NO_FORM = replace(FAST, field=SHORT.field)
+STUCK = replace(FAST, after_submit=SHORT.after_submit)  # a wrong password, or an unknown page
+NO_MFA = replace(FAST, mfa=SHORT.mfa)
+ROOMY_MS = 10_000
 
 
 @pytest.mark.parametrize(("url", "step"), [
@@ -388,14 +398,14 @@ def test_a_wrong_password_is_sent_only_once(open_site):
     site = FakeSite(password_ok=False)
     page = open_site(site)
     with pytest.raises(LoginError, match="password"):
-        sign_in(page, SITE, CRED, FAST)
+        sign_in(page, SITE, CRED, STUCK)
     assert sum("password" in fields for fields in _sent_fields(site)) == 1
 
 
 def test_the_error_message_holds_no_query_or_secret(open_site):
     site = FakeSite(password_ok=False)
     with pytest.raises(LoginError) as caught:
-        sign_in(open_site(site), SITE, CRED, FAST)
+        sign_in(open_site(site), SITE, CRED, STUCK)
     assert "state=" not in str(caught.value)
     assert CRED.password not in str(caught.value)
 
@@ -421,7 +431,7 @@ def test_the_real_passkey_prompt_is_declined_for_good(open_site):
 def test_a_passkey_prompt_with_no_way_to_skip_fails(open_site):
     site = FakeSite(after_password=f"{ID}/u/passkey-stuck?state=c")
     with pytest.raises(LoginError, match="skip the passkey"):
-        sign_in(open_site(site), SITE, CRED, FAST)
+        sign_in(open_site(site), SITE, CRED, NO_FORM)
     assert "/create" not in site.get_paths
 
 
@@ -445,7 +455,7 @@ def test_a_page_mentioning_passkeys_with_no_prompt_still_signs_in(open_site):
 def test_mfa_waits_and_then_times_out(open_site):
     site = FakeSite(after_password=f"{ID}/u/mfa-email-challenge?state=c")
     with pytest.raises(LoginError, match="MFA was not completed"):
-        sign_in(open_site(site), SITE, CRED, FAST)
+        sign_in(open_site(site), SITE, CRED, NO_MFA)
 
 
 def test_mfa_continues_once_someone_finishes_it(open_site):
@@ -472,7 +482,7 @@ def test_a_captcha_fails_without_sending_anything(open_site, monkeypatch):
 def test_an_unknown_page_fails_instead_of_hanging(open_site):
     site = FakeSite(after_password=f"{ID}/u/something-new")
     with pytest.raises(LoginError, match="unknown page"):
-        sign_in(open_site(site), SITE, CRED, FAST)
+        sign_in(open_site(site), SITE, CRED, STUCK)
 
 
 def test_the_observer_sees_each_step(open_site):
@@ -625,7 +635,7 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch):
                 user_data_dir=str(profile), channel="msedge", headless=True, accept_downloads=True)
             ctx.route("**/*", site.handle)
             ctx.add_cookies([SESSION_COOKIE | {"url": pdf_server.base}])
-            ctx.set_default_timeout(3_000)
+            ctx.set_default_timeout(ROOMY_MS)
             # Page loads get longer: a just-started Edge is slow to load its first page
             # when other tests are starting theirs. No test expects a load to time out
             ctx.set_default_navigation_timeout(15_000)
@@ -634,12 +644,12 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch):
 
     notes = []
 
-    def start(site, *args):
+    def start(site, *args, timeouts=FAST):
         site.use(pdf_server)
         monkeypatch.setattr(session, "launch_edge", launch(site))
         monkeypatch.setattr(capture_module, "launch_edge", launch(site))
-        monkeypatch.setattr(login_module, "Timeouts", lambda: FAST)
-        monkeypatch.setattr(invoices_fetch, "PAGE_TIMEOUT_MS", 2_000)
+        monkeypatch.setattr(login_module, "Timeouts", lambda: timeouts)
+        monkeypatch.setattr(invoices_fetch, "PAGE_TIMEOUT_MS", ROOMY_MS)
         return main(list(args), notifier=lambda note, masker: notes.append(note) or True)
 
     monkeypatch.setenv("AUTOMATION_DATA_ROOT", str(tmp_path))
@@ -682,7 +692,7 @@ def test_a_normal_run_saves_and_a_second_run_finds_no_change(whole_run, pdf_of):
 
 def test_mfa_fails_the_run_says_so_and_saves_where_it_stopped(whole_run, pdf_of):
     site = FakeSite(after_password=f"{ID}/u/mfa-email-challenge?state=c", pdfs=_two_units(pdf_of))
-    assert whole_run.start(site) == 1
+    assert whole_run.start(site, timeouts=NO_MFA) == 1
     assert whole_run.notes == [{"title": "innago-invoices", "message": "FAIL: MFA needed"}]
     run_dir = _run_dirs(whole_run.data)[0]
     assert (run_dir / "fail_01.png").exists()
@@ -700,7 +710,7 @@ def test_the_real_passkey_prompt_doesnt_stop_a_run(whole_run, pdf_of):
 
 def test_a_sign_in_stuck_on_an_unknown_page_saves_where_it_stopped(whole_run, pdf_of):
     site = FakeSite(after_password=f"{ID}/u/something-new?state=c", pdfs=_two_units(pdf_of))
-    assert whole_run.start(site) == 1
+    assert whole_run.start(site, timeouts=STUCK) == 1
     assert whole_run.notes[0]["message"] == "FAIL"
     run_dir = _run_dirs(whole_run.data)[0]
     assert "/u/something-new" in (run_dir / "fail_01_page.txt").read_text(encoding="utf-8")
@@ -717,7 +727,7 @@ def test_a_pdf_that_never_arrives_saves_where_it_stopped(whole_run, pdf_of, monk
 
 
 def test_a_wrong_password_saves_evidence_and_no_secret(whole_run, pdf_of):
-    assert whole_run.start(FakeSite(password_ok=False)) == 1
+    assert whole_run.start(FakeSite(password_ok=False), timeouts=STUCK) == 1
     run_dir = _run_dirs(whole_run.data)[0]
     assert (run_dir / "fail_01.png").exists()
     assert (run_dir / "fail_01_page.txt").exists()

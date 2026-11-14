@@ -30,12 +30,17 @@ uv run python tools\env_check.py --lock    # same, with Windows locked
 
 The full `uv run pytest` takes about 7 minutes, because the flow tests drive real Edge. It runs
 the tests in parallel, one worker per core up to 4; `uv run pytest -n 0` runs them one at a time,
-which takes about 15 minutes but is easier to follow when debugging. Run all of it only:
+which takes about 15 minutes but is easier to follow when debugging.
 
-- before opening a PR, or pushing to one for review
-- after rebasing on `main` or merging it in
-- after a change that could break more than the code being worked on, such as one in `common/`,
-  a package's shared sign-in or page code, or the workspace's dependencies
+Each automation depends only on `common`, never on another automation, so its own tests are
+enough for a change inside it. Before opening a PR, pushing to one for review, or after rebasing
+on `main` or merging it in, run:
+
+- the tests of each automation the branch changes, like `uv run pytest buildium/tests`
+- all of them, when the branch changes `common/`, `pyproject.toml`, `uv.lock`, or
+  `.github/workflows/checks.yml`
+
+CI runs the same selection, and skips the tests for a change to docs alone.
 
 While working on a change, run only the tests for the code that changed, plus ruff:
 

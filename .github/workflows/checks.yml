@@ -1,7 +1,8 @@
 # Runs pre-commit on every file, then the automation unit tests. No secrets
 # are used and nothing contacts a real site: tests use synthetic fixtures only.
-# A PR or a merge only runs the tests if it changes automation code or this workflow,
-# because they take minutes. pre-commit always runs.
+# A PR or a merge only runs the tests of the automations it changes, because they take
+# minutes. Each automation depends only on common, so a change to common, the workspace's
+# dependencies, or this workflow runs them all. pre-commit always runs.
 name: Checks
 
 on:
@@ -24,22 +25,46 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: pre-commit (all files)
         run: uvx pre-commit run --all-files --show-diff-on-failure
-      - name: Decide whether the tests need to run
+      - name: Decide which tests need to run
         id: changes
         env:
           # The PR's base, or for a merge, what main was before it
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          tests=true
-          # With nothing to compare against (a push that created main), the tests run
+          # "all", nothing, or the automations' test folders, like "bank1/tests innago/tests"
+          paths=all
+          # With nothing to compare against (a push that created main), they all run
           if [ -n "$BASE" ] && [ "$BASE" != "0000000000000000000000000000000000000000" ]; then
-            # On its own line, so an error here fails the job instead of skipping the tests
-            changed=$(git diff --name-only "$BASE" HEAD)
-            matches=$(echo "$changed" | grep -E '^(scripts/automation/|\.github/workflows/checks\.yml$)' | grep -vE '\.md$' || true)
-            if [ -z "$matches" ]; then tests=false; fi
+            # On its own line, so an error here fails the job instead of skipping the tests.
+            # Three dots: only what this change made, not what main gained since it branched
+            changed=$(git diff --name-only "$BASE...HEAD")
+            paths=""
+            for f in $changed; do
+              case "$f" in
+                .github/workflows/checks.yml) paths=all ;;
+                scripts/automation/*.md) ;;  # docs, at any depth
+                scripts/automation/common/*) paths=all ;;
+                scripts/automation/tools/*) ;;  # tools for people, with no tests
+                scripts/automation/*/*)
+                  member=${f#scripts/automation/}
+                  member=${member%%/*}
+                  if [ ! -d "scripts/automation/$member/tests" ]; then
+                    paths=all  # something new or unknown: test everything
+                  elif [ "$paths" != all ]; then
+                    case " $paths " in
+                      *" $member/tests "*) ;;
+                      *) paths="$paths $member/tests" ;;
+                    esac
+                  fi ;;
+                scripts/automation/*) paths=all ;;  # pyproject.toml, uv.lock, and the like
+              esac
+            done
+            paths=${paths# }
           fi
+          if [ -n "$paths" ]; then tests=true; else tests=false; fi
           echo "tests=$tests" >> "$GITHUB_OUTPUT"
-          echo "Run the tests: $tests"
+          echo "paths=$paths" >> "$GITHUB_OUTPUT"
+          echo "Tests to run: ${paths:-none}"
       - name: Install automation workspace
         if: steps.changes.outputs.tests == 'true'
         working-directory: scripts/automation
@@ -47,4 +72,8 @@ jobs:
       - name: Unit tests
         if: steps.changes.outputs.tests == 'true'
         working-directory: scripts/automation
-        run: uv run pytest
+        env:
+          PATHS: ${{ steps.changes.outputs.paths }}
+        run: |
+          # PATHS is unquoted on purpose: each folder is its own argument
+          if [ "$PATHS" = all ]; then uv run pytest; else uv run pytest $PATHS; fi

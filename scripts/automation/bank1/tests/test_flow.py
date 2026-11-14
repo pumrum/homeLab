@@ -43,11 +43,22 @@ USER = "fake-user"
 PASSWORD = "made-up-password"
 CRED = Credential(USER, PASSWORD)
 HEADED = bool(os.environ.get("AUTOMATION_TEST_HEADED"))
-# verify is roomy: an approval ends the wait as soon as it lands, and a busy machine
-# can take a while to show it. Tests that expect the timeout use NO_APPROVAL
-FAST = Timeouts(field=2_000, after_submit=3_000, choice=1_500, verify=10_000, dashboard=1_000,
-                sign_out=1_500, poll=100)
-NO_APPROVAL = replace(FAST, verify=1_500)
+# Tests run in parallel, so a busy machine can be slow to show a page. FAST's waits are roomy:
+# each ends as soon as what it waits for shows up. A test that waits one out on purpose uses
+# SHORT's value for just that one, so it doesn't take the full roomy time
+FAST = Timeouts(field=10_000, after_submit=10_000, choice=10_000, verify=10_000,
+                dashboard=10_000, sign_out=10_000, poll=100)
+SHORT = Timeouts(field=2_000, after_submit=3_000, choice=1_500, verify=1_500, dashboard=1_000,
+                 sign_out=1_500, poll=100)
+NO_APPROVAL = replace(FAST, verify=SHORT.verify)
+NO_CHOOSER = replace(FAST, choice=SHORT.choice)
+REJECTED = replace(FAST, after_submit=SHORT.after_submit)
+NO_SIGN_OUT = replace(FAST, sign_out=SHORT.sign_out)
+# The same for the fetch modules' waits and the browser's actions: roomy, unless a whole run
+# names a wait it runs out in waits_out
+ROOMY_MS = 10_000
+STATEMENT_WAITS = {"PAGE_TIMEOUT_MS": 2_000, "STEP_TIMEOUT_MS": 700, "DOWNLOAD_TIMEOUT_MS": 1_500}
+ACTIVITY_WAITS = {"PAGE_TIMEOUT_MS": 2_000, "STEP_TIMEOUT_MS": 1_500, "DOWNLOAD_TIMEOUT_MS": 2_000}
 
 # id: (kind, page name, suffix, row controls, years newest first as
 #      (year, rows as (date cell, type cell, file on the PDF server)))
@@ -537,7 +548,7 @@ def open_site(needs_edge, pdf_server):
             ctx = edge.new_context(accept_downloads=True)
             site.use(pdf_server, {})
             ctx.route("**/*", site.handle)
-            ctx.set_default_timeout(3_000)
+            ctx.set_default_timeout(ROOMY_MS)
             # Page loads get longer: a just-started Edge is slow to load its first page
             # when other tests are starting theirs. No test expects a load to time out
             ctx.set_default_navigation_timeout(15_000)
@@ -571,7 +582,7 @@ def test_a_profile_still_signed_in_types_nothing(open_site):
 def test_a_rejected_password_is_sent_once_and_stays_out_of_the_message(open_site):
     site = FakeBank(reject=True)
     with pytest.raises(LoginError, match="did not accept") as e:
-        sign_in(open_site(site), SITE, CRED, FAST)
+        sign_in(open_site(site), SITE, CRED, REJECTED)
     assert len(site.logins) == 1
     assert PASSWORD not in str(e.value)
 
@@ -607,7 +618,7 @@ def test_no_next_button_after_the_push_option_fails_without_waiting(open_site):
     site = FakeBank(verify=True, approve=True, next_button=False)
     asked = []
     with pytest.raises(LoginError, match="no Next button"):
-        sign_in(open_site(site), SITE, CRED, FAST, on_verify=lambda: asked.append(1))
+        sign_in(open_site(site), SITE, CRED, NO_CHOOSER, on_verify=lambda: asked.append(1))
     assert asked == []
     assert (site.pushes, site.app_sign_ins) == (0, 0)
 
@@ -624,7 +635,8 @@ def test_verification_without_a_chooser_just_waits(open_site):
         site.signed_in = True
         page.evaluate(f"setTimeout(() => location = '{DASHBOARD}', 200)")
 
-    sign_in(page, SITE, CRED, FAST, on_verify=approve)
+    # It waits out the chooser, which never shows
+    sign_in(page, SITE, CRED, NO_CHOOSER, on_verify=approve)
     assert asked == [1]
     assert urlsplit(page.url).path == DASHBOARD
 
@@ -633,7 +645,7 @@ def test_a_chooser_without_the_push_option_fails_without_choosing(open_site):
     site = FakeBank(verify=True, approve=True, chooser="other")
     asked = []
     with pytest.raises(LoginError, match="no 'Get a notification' push option"):
-        sign_in(open_site(site), SITE, CRED, FAST, on_verify=lambda: asked.append(1))
+        sign_in(open_site(site), SITE, CRED, NO_CHOOSER, on_verify=lambda: asked.append(1))
     assert asked == []
     assert (site.pushes, site.app_sign_ins) == (0, 0)
 
@@ -695,7 +707,7 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch, pdf_of, letter_pdf)
                 user_data_dir=str(profile), channel="msedge", headless=not HEADED,
                 accept_downloads=True)
             ctx.route("**/*", site.handle)
-            ctx.set_default_timeout(3_000)
+            ctx.set_default_timeout(ROOMY_MS)
             # Page loads get longer: a just-started Edge is slow to load its first page
             # when other tests are starting theirs. No test expects a load to time out
             ctx.set_default_navigation_timeout(15_000)
@@ -715,16 +727,15 @@ def whole_run(needs_edge, pdf_server, tmp_path, monkeypatch, pdf_of, letter_pdf)
         "/inv1-sep-single-letter.pdf": letter,
     }
 
-    def start(site, *args, files=None, inline=False, timeouts=FAST):
+    def start(site, *args, files=None, inline=False, timeouts=FAST, waits_out=()):
         site.use(pdf_server, good if files is None else good | files)
         pdf_server.inline = inline
         monkeypatch.setattr(session, "launch_edge", launch(site))
         monkeypatch.setattr(capture_module, "launch_edge", launch(site))
         monkeypatch.setattr(login_module, "Timeouts", lambda: timeouts)
         monkeypatch.setattr(statements_fetch, "POLL_MS", 100)
-        monkeypatch.setattr(statements_fetch, "PAGE_TIMEOUT_MS", 2_000)
-        monkeypatch.setattr(statements_fetch, "STEP_TIMEOUT_MS", 700)
-        monkeypatch.setattr(statements_fetch, "DOWNLOAD_TIMEOUT_MS", 1_500)
+        for name, short in STATEMENT_WAITS.items():
+            monkeypatch.setattr(statements_fetch, name, short if name in waits_out else ROOMY_MS)
         return main(list(args), notifier=lambda note, masker: notes.append(note) or True)
 
     def credentials(name, user):
@@ -815,7 +826,8 @@ def test_each_kind_downloads_its_own_statements_and_letters(whole_run):
 def test_pdfs_shown_in_the_page_are_saved_even_when_the_list_reloads_to_a_new_year(whole_run):
     # After a PDF shown in the page, the list reloads, back on the newest year, which is empty
     site = FakeBank(new_year=True)
-    assert whole_run.start(site, "--account", INV, inline=True) == 0
+    assert whole_run.start(site, "--account", INV, inline=True,
+                           waits_out={"STEP_TIMEOUT_MS"}) == 0
     assert _saved(whole_run.data) == _files(INV)
     assert site.paths.count("/web/statements/inv1") == 5  # one load, then one per PDF
 
@@ -843,7 +855,8 @@ def test_an_older_letter_is_saved_once_and_the_newest_ones_every_run(whole_run):
 
 
 def test_a_new_year_with_no_statements_yet_looks_back_one_year(whole_run):
-    assert whole_run.start(FakeBank(new_year=True)) == 0
+    # It waits out the newest year's statements, which never show
+    assert whole_run.start(FakeBank(new_year=True), waits_out={"STEP_TIMEOUT_MS"}) == 0
     assert _saved(whole_run.data) == EVERY_FILE
     log = (_run_dir(whole_run.data) / "run.log").read_text(encoding="utf-8")
     assert "none in 2027 yet; viewing 2026" in log
@@ -898,7 +911,7 @@ def test_a_verification_timeout_stops_everything_and_keeps_the_evidence(whole_ru
 
 def test_a_wrong_password_fails_the_run_without_a_trace(whole_run):
     site = FakeBank(reject=True)
-    assert whole_run.start(site) == 1
+    assert whole_run.start(site, timeouts=REJECTED) == 1
     assert len(site.logins) == 1
     assert "did not accept" in _report(whole_run.data)
     assert whole_run.notes[-1]["message"] == "FAIL"
@@ -948,14 +961,14 @@ def test_an_error_page_instead_of_a_pdf_fails_only_that_account(whole_run):
 
 
 def test_a_download_menu_without_the_standard_pdf_fails_clearly(whole_run):
-    assert whole_run.start(FakeBank(no_standard=True)) == 1
+    assert whole_run.start(FakeBank(no_standard=True), waits_out={"STEP_TIMEOUT_MS"}) == 1
     assert "the download menu has no standard PDF choice" in _report(whole_run.data)
     assert _saved(whole_run.data) == _files(CARD, INV)
     assert "/chk1-oct-accessible.pdf" not in whole_run.server.fetches
 
 
 def test_a_failed_sign_out_is_only_a_warning(whole_run):
-    assert whole_run.start(FakeBank(sign_out_works=False)) == 0
+    assert whole_run.start(FakeBank(sign_out_works=False), timeouts=NO_SIGN_OUT) == 0
     log = (_run_dir(whole_run.data) / "run.log").read_text(encoding="utf-8")
     assert "sign-out failed, which doesn't fail the run" in log
     assert whole_run.notes[-1]["message"] == "PASS"
@@ -1051,7 +1064,7 @@ def activity_run(whole_run, monkeypatch):
     (whole_run.data / "config.toml").write_text(ACTIVITY_CONFIG, encoding="utf-8")
     book = ActivityBook()
 
-    def start(site, *args):
+    def start(site, *args, waits_out=()):
         site.activity = {"chk1": CHECKING_CSV, "card1": CARD_CSV} | site.activity
         site.use(whole_run.server, {})
 
@@ -1060,7 +1073,7 @@ def activity_run(whole_run, monkeypatch):
                 user_data_dir=str(profile), channel="msedge", headless=not HEADED,
                 accept_downloads=True)
             ctx.route("**/*", site.handle)
-            ctx.set_default_timeout(3_000)
+            ctx.set_default_timeout(ROOMY_MS)
             # Page loads get longer: a just-started Edge is slow to load its first page
             # when other tests are starting theirs. No test expects a load to time out
             ctx.set_default_navigation_timeout(15_000)
@@ -1069,9 +1082,8 @@ def activity_run(whole_run, monkeypatch):
         monkeypatch.setattr(session, "launch_edge", launch_edge)
         monkeypatch.setattr(login_module, "Timeouts", lambda: FAST)
         monkeypatch.setattr(activity_fetch, "POLL_MS", 100)
-        monkeypatch.setattr(activity_fetch, "PAGE_TIMEOUT_MS", 2_000)
-        monkeypatch.setattr(activity_fetch, "STEP_TIMEOUT_MS", 1_500)
-        monkeypatch.setattr(activity_fetch, "DOWNLOAD_TIMEOUT_MS", 2_000)
+        for name, short in ACTIVITY_WAITS.items():
+            monkeypatch.setattr(activity_fetch, name, short if name in waits_out else ROOMY_MS)
         return activity_module.main(
             list(args), notifier=lambda note, masker: whole_run.notes.append(note) or True,
             today=ACTIVITY_TODAY, open_ws=book.open)
